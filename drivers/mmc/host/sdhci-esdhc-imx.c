@@ -1528,6 +1528,9 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 	if (of_find_property(np, "keep-power-in-suspend", NULL))
 		host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
 
+	if (of_find_property(np, "enable-sdio-wakeup", NULL))
+		host->mmc->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
+
 	mmc_of_parse_voltage(np, &host->ocr_mask);
 
 	if (esdhc_is_usdhc(imx_data)) {
@@ -1747,6 +1750,10 @@ static int sdhci_esdhc_imx_probe(struct platform_device *pdev)
 		goto disable_ahb_clk;
 
 	sdhci_esdhc_imx_hwinit(host);
+
+	if (host->mmc->pm_caps & MMC_PM_KEEP_POWER &&
+		host->mmc->pm_caps & MMC_PM_WAKE_SDIO_IRQ)
+		device_init_wakeup(&pdev->dev, 1);
 
 	err = sdhci_add_host(host);
 	if (err)
