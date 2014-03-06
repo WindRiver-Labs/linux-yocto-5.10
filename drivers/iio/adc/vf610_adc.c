@@ -799,6 +799,7 @@ static int vf610_adc_probe(struct platform_device *pdev)
 	struct iio_dev *indio_dev;
 	int irq;
 	int ret;
+	u32 channels;
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(struct vf610_adc));
 	if (!indio_dev) {
@@ -853,6 +854,11 @@ static int vf610_adc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, indio_dev);
 
 	init_completion(&info->completion);
+
+	ret  = of_property_read_u32(pdev->dev.of_node,
+			"num-channels", &channels);
+	if (ret)
+		channels = ARRAY_SIZE(vf610_adc_iio_channels);
 
 	indio_dev->name = dev_name(&pdev->dev);
 	indio_dev->info = &vf610_adc_iio_info;
