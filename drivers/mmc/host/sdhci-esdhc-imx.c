@@ -276,8 +276,12 @@ static struct esdhc_soc_data usdhc_imx8mm_data = {
 			| ESDHC_FLAG_STATE_LOST_IN_LPMODE,
 };
 
+static struct esdhc_soc_data esdhc_vf610_data = {
+	.flags = ESDHC_FLAG_HS400_ES,
+};
+
 static struct esdhc_soc_data usdhc_sac58r_data = {
-	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12,
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_HS400_ES,
 };
 
 
@@ -331,6 +335,7 @@ static const struct of_device_id imx_esdhc_dt_ids[] = {
 	{ .compatible = "fsl,imx7ulp-usdhc", .data = &usdhc_imx7ulp_data, },
 	{ .compatible = "fsl,imx8qxp-usdhc", .data = &usdhc_imx8qxp_data, },
 	{ .compatible = "fsl,imx8mm-usdhc", .data = &usdhc_imx8mm_data, },
+	{ .compatible = "fsl,vf610-esdhc", .data = &esdhc_vf610_data, },
 	{ .compatible = "fsl,sac58r-usdhc", .data = &usdhc_sac58r_data, },
 	{ /* sentinel */ }
 };
