@@ -34,6 +34,7 @@ snd-soc-fsl-xcvr-objs := fsl_xcvr.o fsl_xcvr_sysfs.o
 
 obj-$(CONFIG_SND_SOC_FSL_AUDMIX) += snd-soc-fsl-audmix.o
 obj-$(CONFIG_SND_SOC_FSL_ASOC_CARD) += snd-soc-fsl-asoc-card.o
+snd-soc-fsl-hdmi-objs := fsl_hdmi.o
 obj-$(CONFIG_SND_SOC_FSL_ASRC) += snd-soc-fsl-asrc.o
 obj-$(CONFIG_SND_SOC_FSL_DSP) += snd-soc-fsl-dsp.o
 obj-$(CONFIG_SND_SOC_FSL_DSP_AUDIOMIX) += snd-soc-fsl-dsp-audiomix.o
@@ -45,6 +46,7 @@ obj-$(CONFIG_SND_SOC_FSL_MICFIL) += snd-soc-fsl-micfil.o
 obj-$(CONFIG_SND_SOC_FSL_UTILS) += snd-soc-fsl-utils.o
 obj-$(CONFIG_SND_SOC_FSL_MQS) += snd-soc-fsl-mqs.o
 obj-$(CONFIG_SND_SOC_FSL_EASRC) += snd-soc-fsl-easrc.o
+obj-$(CONFIG_SND_SOC_FSL_HDMI) += snd-soc-fsl-hdmi.o
 obj-$(CONFIG_SND_SOC_POWERPC_DMA) += snd-soc-fsl-dma.o
 obj-$(CONFIG_SND_SOC_FSL_ESAI_CLIENT) += snd-soc-fsl-esai-client.o
 obj-$(CONFIG_SND_SOC_FSL_XCVR) += snd-soc-fsl-xcvr.o
@@ -66,6 +68,7 @@ obj-$(CONFIG_SND_SOC_IMX_AUDMUX) += snd-soc-imx-audmux.o
 
 obj-$(CONFIG_SND_SOC_IMX_PCM_FIQ) += imx-pcm-fiq.o
 obj-$(CONFIG_SND_SOC_IMX_PCM_DMA) += imx-pcm-dma.o imx-pcm-dma-v2.o
+obj-$(CONFIG_SND_SOC_IMX_HDMI_DMA) += imx-hdmi-dma.o hdmi_pcm.o
 
 # i.MX Machine Support
 snd-soc-eukrea-tlv320-objs := eukrea-tlv320.o
@@ -79,6 +82,7 @@ snd-soc-imx-sii902x-objs := imx-sii902x.o
 snd-soc-imx-spdif-objs := imx-spdif.o
 snd-soc-imx-mc13783-objs := imx-mc13783.o
 snd-soc-imx-audmix-objs := imx-audmix.o
+snd-soc-imx-hdmi-objs := imx-hdmi.o
 snd-soc-imx-si476x-objs := imx-si476x.o
 snd-soc-imx-dsp-objs := imx-dsp.o
 snd-soc-imx-pdm-objs := imx-pdm.o
@@ -100,6 +104,7 @@ obj-$(CONFIG_SND_SOC_IMX_SII902X) += snd-soc-imx-sii902x.o
 obj-$(CONFIG_SND_SOC_IMX_SPDIF) += snd-soc-imx-spdif.o
 obj-$(CONFIG_SND_SOC_IMX_MC13783) += snd-soc-imx-mc13783.o
 obj-$(CONFIG_SND_SOC_IMX_AUDMIX) += snd-soc-imx-audmix.o
+obj-$(CONFIG_SND_SOC_IMX_HDMI) += snd-soc-imx-hdmi.o
 obj-$(CONFIG_SND_SOC_IMX_SI476X) += snd-soc-imx-si476x.o
 obj-$(CONFIG_SND_SOC_IMX_DSP) += snd-soc-imx-dsp.o
 obj-$(CONFIG_SND_SOC_IMX_PDM_MIC) += snd-soc-imx-pdm.o
@@ -109,3 +114,5 @@ obj-$(CONFIG_SND_SOC_IMX_AK4497) += snd-soc-imx-ak4497.o
 obj-$(CONFIG_SND_SOC_IMX_MICFIL) += snd-soc-imx-micfil.o
 obj-$(CONFIG_SND_SOC_IMX_PCM512X) += snd-soc-imx-pcm512x.o
 obj-$(CONFIG_SND_SOC_IMX_XCVR) += snd-soc-imx-xcvr.o
+
+AFLAGS_hdmi_pcm.o := -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=softfp
