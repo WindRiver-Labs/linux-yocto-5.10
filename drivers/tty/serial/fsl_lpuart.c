@@ -266,6 +266,8 @@ struct lpuart_port {
 	unsigned int		dma_tx_nents;
 	wait_queue_head_t	dma_wait;
 	bool			id_allocated;
+	int			hw_flow_control;
+
 };
 
 struct lpuart_soc_data {
@@ -1393,15 +1395,20 @@ static int lpuart32_config_rs485(struct uart_port *port,
 
 static unsigned int lpuart_get_mctrl(struct uart_port *port)
 {
+	struct lpuart_port *sport = container_of(port, struct lpuart_port, port);
 	unsigned int temp = 0;
 	unsigned char reg;
 
-	reg = readb(port->membase + UARTMODEM);
-	if (reg & UARTMODEM_TXCTSE)
-		temp |= TIOCM_CTS;
+	/* on sac58r SoC, some UARTs do not support flow control.
+		UARTMODEM register is not accessible in that case. */
+	if (sport->hw_flow_control) {
+		reg = readb(port->membase + UARTMODEM);
+		if (reg & UARTMODEM_TXCTSE)
+			temp |= TIOCM_CTS;
 
-	if (reg & UARTMODEM_RXRTSE)
-		temp |= TIOCM_RTS;
+		if (reg & UARTMODEM_RXRTSE)
+			temp |= TIOCM_RTS;
+	}
 
 	return temp;
 }
@@ -1428,7 +1435,8 @@ static void lpuart_set_mctrl(struct uart_port *port, unsigned int mctrl)
 				struct lpuart_port, port);
 
 	/* Make sure RXRTSE bit is not set when RS485 is enabled */
-	if (!(sport->port.rs485.flags & SER_RS485_ENABLED)) {
+	if (!(sport->port.rs485.flags & SER_RS485_ENABLED)
+		&& sport->hw_flow_control) {
 		temp = readb(sport->port.membase + UARTMODEM) &
 			~(UARTMODEM_RXRTSE | UARTMODEM_TXCTSE);
 
@@ -1803,7 +1811,12 @@ lpuart_set_termios(struct uart_port *port, struct ktermios *termios,
 	cr3 = readb(sport->port.membase + UARTCR3);
 	cr4 = readb(sport->port.membase + UARTCR4);
 	bdh = readb(sport->port.membase + UARTBDH);
-	modem = readb(sport->port.membase + UARTMODEM);
+
+	if (sport->hw_flow_control)
+		modem = readb(sport->port.membase + UARTMODEM);
+	else
+		modem = 0;
+
 	/*
 	 * only support CS8 and CS7, and for CS7 must enable PE.
 	 * supported mode:
@@ -1927,7 +1940,9 @@ lpuart_set_termios(struct uart_port *port, struct ktermios *termios,
 	writeb(sbr & 0xFF, sport->port.membase + UARTBDL);
 	writeb(cr3, sport->port.membase + UARTCR3);
 	writeb(cr1, sport->port.membase + UARTCR1);
-	writeb(modem, sport->port.membase + UARTMODEM);
+
+	if (sport->hw_flow_control)
+		writeb(modem, sport->port.membase + UARTMODEM);
 
 	/* restore control register */
 	writeb(old_cr2, sport->port.membase + UARTCR2);
@@ -2599,6 +2614,17 @@ static int lpuart_probe(struct platform_device *pdev)
 
 	sport->port.membase += sdata->reg_off;
 	sport->port.mapbase = res->start;
+
+	if (of_get_property(np, "no-hw-flow-control", NULL)) {
+		/* On sac58r SoC, some UARTs do not support HW flow control.
+			UARTMODEM is not accessible in that case.
+			*/
+		sport->hw_flow_control = 0;
+	}
+	else {
+		sport->hw_flow_control = 1;
+	}
+
 	sport->port.dev = &pdev->dev;
 	sport->port.type = PORT_LPUART;
 	sport->devtype = sdata->devtype;
