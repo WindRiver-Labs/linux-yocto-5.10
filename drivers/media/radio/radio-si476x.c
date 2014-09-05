@@ -1498,6 +1498,16 @@ static int si476x_radio_probe(struct platform_device *pdev)
 		goto exit;
 	}
 
+	ctrl = v4l2_ctrl_new_std(&radio->ctrl_handler, &si476x_ctrl_ops,
+				 V4L2_CID_AUDIO_MUTE,
+				 0, 1, 1, 0);
+	rval = radio->ctrl_handler.error;
+	if (ctrl == NULL && rval) {
+		dev_err(&pdev->dev, "Could not initialize V4L2_CID_AUDIO_MUTE control %d\n",
+			rval);
+		goto exit;
+	}
+
 	if (si476x_core_has_diversity(radio->core)) {
 		si476x_ctrls[SI476X_IDX_DIVERSITY_MODE].def =
 			si476x_phase_diversity_mode_to_idx(radio->core->diversity_mode);
