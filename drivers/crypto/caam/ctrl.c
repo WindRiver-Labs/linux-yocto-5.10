@@ -708,8 +708,6 @@ static int caam_probe(struct platform_device *pdev)
 			 BLOCK_OFFSET * DECO_BLOCK_NUMBER
 			 );
 
-	/* Get the IRQ of the controller (for security violations only) */
-	ctrlpriv->secvio_irq = irq_of_parse_and_map(nprop, 0);
 	np = of_find_compatible_node(NULL, NULL, "fsl,qoriq-mc");
 	ctrlpriv->mc_en = !!np;
 	of_node_put(np);

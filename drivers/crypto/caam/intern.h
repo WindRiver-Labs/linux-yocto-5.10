@@ -69,6 +69,7 @@ struct caam_drv_private_jr {
  * Driver-private storage for a single CAAM block instance
  */
 struct caam_drv_private {
+
 	/* Physical-presence section */
 	struct caam_ctrl __iomem *ctrl; /* controller region */
 	struct caam_deco __iomem *deco; /* DECO/CCB views */
@@ -85,7 +86,7 @@ struct caam_drv_private {
 	u8 total_jobrs;		/* Total Job Rings in device */
 	u8 qi_present;		/* Nonzero if QI present in device */
 	u8 mc_en;		/* Nonzero if MC f/w is active */
-	int secvio_irq;		/* Security violation interrupt number */
+	u8 optee_en;            /* Nonzero if OP-TEE f/w is active */
 	int virt_en;		/* Virtualization enabled in CAAM */
 	int era;		/* CAAM Era (internal HW revision) */
 

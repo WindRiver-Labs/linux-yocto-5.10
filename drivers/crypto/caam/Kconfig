@@ -151,6 +151,13 @@ config CRYPTO_DEV_FSL_CAAM_RNG_API
 	  Selecting this will register the SEC4 hardware rng to
 	  the hw_random API for supplying the kernel entropy pool.
 
+config CRYPTO_DEV_FSL_CAAM_SECVIO
+	tristate "CAAM/SNVS Security Violation Handler (EXPERIMENTAL)"
+	help
+	  Enables installation of an interrupt handler with registrable
+          handler functions which can be specified to act on the consequences
+          of a security violation.
+
 endif # CRYPTO_DEV_FSL_CAAM_JR
 
 endif # CRYPTO_DEV_FSL_CAAM
