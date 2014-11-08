@@ -1567,12 +1567,15 @@ spi_imx_prepare_message(struct spi_master *master, struct spi_message *msg)
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(master);
 	int ret;
 
-	ret = pm_runtime_get_sync(spi_imx->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(spi_imx->dev);
-		dev_err(spi_imx->dev, "failed to enable clock\n");
-		return ret;
-	}
+	ret = clk_prepare_enable(spi_imx->clk_per);
+        if (ret)
+                 return ret;
+
+	ret = clk_prepare_enable(spi_imx->clk_ipg);
+         if (ret) {
+                 clk_disable_unprepare(spi_imx->clk_per);
+                 return ret;
+        }
 
 	ret = spi_imx->devtype_data->prepare_message(spi_imx, msg);
 	if (ret) {
@@ -1588,8 +1591,9 @@ spi_imx_unprepare_message(struct spi_master *master, struct spi_message *msg)
 {
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(master);
 
-	pm_runtime_mark_last_busy(spi_imx->dev);
-	pm_runtime_put_autosuspend(spi_imx->dev);
+	clk_disable_unprepare(spi_imx->clk_ipg);
+        clk_disable_unprepare(spi_imx->clk_per);
+
 	return 0;
 }
 
@@ -1750,6 +1754,8 @@ static int spi_imx_probe(struct platform_device *pdev)
 
 	pm_runtime_mark_last_busy(spi_imx->dev);
 	pm_runtime_put_autosuspend(spi_imx->dev);
+	clk_disable_unprepare(spi_imx->clk_ipg);
+	clk_disable_unprepare(spi_imx->clk_per);
 
 	return ret;
 
