@@ -322,7 +322,7 @@ static int fsl_asrc_set_ideal_ratio(struct fsl_asrc_pair *pair,
  * clock rate aligning with the output sample rate; For a use case requiring
  * faster conversion, set use_ideal_rate to have the faster speed.
  */
-static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool use_ideal_rate)
+static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool p2p_in, bool p2p_out)
 {
 	struct fsl_asrc_pair_priv *pair_priv = pair->private;
 	struct asrc_config *config = pair_priv->config;
@@ -437,10 +437,16 @@ static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool use_ideal_rate)
 
 	clk = asrc_priv->asrck_clk[clk_index[OUT]];
 	clk_rate = clk_get_rate(clk);
-	if (ideal && use_ideal_rate)
-		rem[OUT] = do_div(clk_rate, IDEAL_RATIO_RATE);
+	/*
+	* When P2P mode, output rate should align with the out samplerate.
+	* if set too high output rate, there will be lots of Overload.
+	* When M2M mode, output rate should also need to align with the out
+	* samplerate, but M2M must use less time to achieve good performance.
+	*/
+	if (p2p_out)
+                div[OUT] = clk_get_rate(clk) / outrate;
 	else
-		rem[OUT] = do_div(clk_rate, outrate);
+		div[OUT] = clk_get_rate(clk) / IDEAL_RATIO_RATE;
 	div[OUT] = clk_rate;
 
 	/* Output divider has the same limitation as the input one */
@@ -671,22 +677,28 @@ static int fsl_asrc_dai_hw_params(struct snd_pcm_substream *substream,
 		config.output_format  = asrc->asrc_format;
 		config.input_sample_rate  = rate;
 		config.output_sample_rate = asrc->asrc_rate;
+
+		ret = fsl_asrc_config_pair(pair, false, true);
+		if (ret) {
+			dev_err(dai->dev, "fail to config asrc pair\n");
+			return ret;
+		}
 	} else {
 		config.input_format   = asrc->asrc_format;
 		config.output_format  = params_format(params);
 		config.input_sample_rate  = asrc->asrc_rate;
 		config.output_sample_rate = rate;
+
+		ret = fsl_asrc_config_pair(pair, true, false);
+		if (ret) {
+			dev_err(dai->dev, "fail to config asrc pair\n")
+			return ret;
+		}
 	}
 
 	fsl_asrc_select_clk(asrc_priv, pair,
 			    config.input_sample_rate,
 			    config.output_sample_rate);
-
-	ret = fsl_asrc_config_pair(pair, false);
-	if (ret) {
-		dev_err(dai->dev, "fail to config asrc pair\n");
-		return ret;
-	}
 
 	return 0;
 }
