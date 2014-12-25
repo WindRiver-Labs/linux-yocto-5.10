@@ -1916,8 +1916,9 @@ static int ci_udc_start(struct usb_gadget *gadget,
 	ci->driver = driver;
 
 	/* Start otg fsm for B-device */
-	if (ci_otg_is_fsm_mode(ci) && ci->fsm.id) {
-		ci_hdrc_otg_fsm_start(ci);
+	if (ci_otg_is_fsm_mode(ci)) {
+		if (ci->fsm.id)
+			ci_hdrc_otg_fsm_start(ci);
 		return retval;
 	}
 
