@@ -833,6 +833,38 @@ static void lpuart_txint(struct lpuart_port *sport)
 	spin_unlock_irqrestore(&sport->port.lock, flags);
 }
 
+static void lpuart_handle_rx_overrun(struct lpuart_port *sport)
+{
+	unsigned char temp;
+	unsigned char rx;
+
+	/*
+	 * Overrun gets cleared by reading the Data register
+	 * until the event disappears
+	 */
+	temp = readb(sport->port.membase + UARTSR1);
+	while (temp & UARTSR1_OR) {
+		rx = readb(sport->port.membase + UARTDR);
+		temp = readb(sport->port.membase + UARTSR1);
+	}
+
+	/*
+	 * For some reason, we also need to flush the RX FIFO
+	 * to resume normal RX operation on UART
+	 */
+	temp = readb(sport->port.membase + UARTCFIFO);
+	temp |= UARTCFIFO_RXFLUSH;
+	writeb(temp, sport->port.membase + UARTCFIFO);
+
+	/*
+	 * Clear any possible FIFO event resulting from
+	 * RX FIFO flush (e.g. RXUFE)
+	 */
+	temp = readb(sport->port.membase + UARTSFIFO);
+	writeb(temp, sport->port.membase + UARTSFIFO);
+}
+
+
 static void lpuart_rxint(struct lpuart_port *sport)
 {
 	unsigned int flg, ignored = 0, overrun = 0;
@@ -978,6 +1010,11 @@ static irqreturn_t lpuart_int(int irq, void *dev_id)
 	unsigned char sts;
 
 	sts = readb(sport->port.membase + UARTSR1);
+
+	if (sts & UARTSR1_OR) {
+		lpuart_handle_rx_overrun(sport);
+		return IRQ_HANDLED;
+	}
 
 	/* SysRq, using dma, check for linebreak by framing err. */
 	if (sts & UARTSR1_FE && sport->lpuart_dma_rx_use) {
