@@ -454,8 +454,15 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
 				val = readl(host->ioaddr + SDHCI_CAPABILITIES) & 0xFFFF;
 			} else {
 				if (is_sac58r_usdhc(imx_data)) {
-					/* sac58r cap register does not provide speed info */
-					val = SDHCI_SUPPORT_SDR50;
+					/*
+					 * sac58r HOST_CTRL_CAP register
+					 * does not provide speed info .
+					 * sac58r does not support DDR50, but this is needed
+					 * to support DDR50 SD cards. If this is not enabled,
+					 * a lot of TIMEOUT errors get returned when trying to
+					 * access SD card.
+					 */
+					val = SDHCI_SUPPORT_SDR50 | SDHCI_SUPPORT_DDR50;
 				} else {
 					/* imx6q/dl does not have cap_1 register, fake one */
 					val = SDHCI_SUPPORT_DDR50 | SDHCI_SUPPORT_SDR104
@@ -1533,11 +1540,18 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 
 	mmc_of_parse_voltage(np, &host->ocr_mask);
 
-	if (esdhc_is_usdhc(imx_data)) {
-		imx_data->pins_100mhz = pinctrl_lookup_state(imx_data->pinctrl,
+	/* UHS-I support: sac58r does not have pinctrl driver
+	 * however, there's 1.8V support.
+	 * So, ignore the pinctrl lookup.
+	 * FIXME: there must be a better way to handle this!
+	 */
+	if (!is_sac58r_usdhc(imx_data)) {
+		if (esdhc_is_usdhc(imx_data)) {
+			imx_data->pins_100mhz = pinctrl_lookup_state(imx_data->pinctrl,
 						ESDHC_PINCTRL_STATE_100MHZ);
-		imx_data->pins_200mhz = pinctrl_lookup_state(imx_data->pinctrl,
+			imx_data->pins_200mhz = pinctrl_lookup_state(imx_data->pinctrl,
 						ESDHC_PINCTRL_STATE_200MHZ);
+		}
 	}
 
 	/* call to generic mmc_of_parse to support additional capabilities */
