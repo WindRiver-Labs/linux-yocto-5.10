@@ -52,4 +52,4 @@ dtb-$(CONFIG_ARCH_MXC) += imx8qxp-colibri-eval-v3.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8qxp-mek.dtb
 
 dtb-$(CONFIG_ARCH_S32) += s32v234-evb.dtb
-dtb-$(CONFIG_ARCH_VEXPRESS) += s32v234.dtb s32v234-palladium.dtb s32v234-simulator.dtb
+dtb-$(CONFIG_ARCH_VEXPRESS) += s32v234-evb.dtb s32v234-palladium.dtb s32v234-simulator.dtb
