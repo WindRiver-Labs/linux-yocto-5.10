@@ -992,6 +992,8 @@ struct snd_soc_card {
 
 	spinlock_t dpcm_lock;
 
+	int id_hint;
+
 	int (*probe)(struct snd_soc_card *card);
 	int (*late_probe)(struct snd_soc_card *card);
 	int (*remove)(struct snd_soc_card *card);
