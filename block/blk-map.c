@@ -668,6 +668,12 @@ int blk_rq_unmap_user(struct bio *bio)
 }
 EXPORT_SYMBOL(blk_rq_unmap_user);
 
+#ifdef CONFIG_AHCI_IMX
+extern void *sg_io_buffer_hack;
+#else
+#define sg_io_buffer_hack NULL
+#endif
+
 /**
  * blk_rq_map_kern - map kernel data to a request, for passthrough requests
  * @q:		request queue where request should be inserted
@@ -686,6 +692,7 @@ int blk_rq_map_kern(struct request_queue *q, struct request *rq, void *kbuf,
 {
 	int reading = rq_data_dir(rq) == READ;
 	unsigned long addr = (unsigned long) kbuf;
+	int do_copy = 0;
 	struct bio *bio, *orig_bio;
 	int ret;
 
@@ -694,10 +701,18 @@ int blk_rq_map_kern(struct request_queue *q, struct request *rq, void *kbuf,
 	if (!len || !kbuf)
 		return -EINVAL;
 
-	if (!blk_rq_aligned(q, addr, len) || object_is_on_stack(kbuf))
-		bio = bio_copy_kern(q, kbuf, len, gfp_mask, reading);
-	else
-		bio = bio_map_kern(q, kbuf, len, gfp_mask);
+#ifdef CONFIG_AHCI_IMX
+        if (kbuf == sg_io_buffer_hack)
+                do_copy = 0;
+        else
+#endif
+                do_copy = !blk_rq_aligned(q, addr, len)
+                        || object_is_on_stack(kbuf);
+
+        if (do_copy)
+                bio = bio_copy_kern(q, kbuf, len, gfp_mask, reading);
+        else
+                bio = bio_map_kern(q, kbuf, len, gfp_mask);
 
 	if (IS_ERR(bio))
 		return PTR_ERR(bio);
