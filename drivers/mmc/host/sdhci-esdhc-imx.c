@@ -1554,7 +1554,7 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 	 * So, ignore the pinctrl lookup.
 	 * FIXME: there must be a better way to handle this!
 	 */
-	if (!is_sac58r_usdhc(imx_data)) {
+	if (!is_sac58r_usdhc(imx_data) && !is_s32v234_usdhc(imx_data)) {
 		if (esdhc_is_usdhc(imx_data)) {
 			imx_data->pins_100mhz = pinctrl_lookup_state(imx_data->pinctrl,
 						ESDHC_PINCTRL_STATE_100MHZ);
