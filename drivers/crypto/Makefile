@@ -51,3 +51,5 @@ obj-$(CONFIG_CRYPTO_DEV_ARTPEC6) += axis/
 obj-$(CONFIG_CRYPTO_DEV_ZYNQMP_AES) += xilinx/
 obj-y += hisilicon/
 obj-$(CONFIG_CRYPTO_DEV_AMLOGIC_GXL) += amlogic/
+obj-$(CONFIG_CRYPTO_DEV_FSL_CSE3) += cse3.o
+cse3-y := cse3_core.o cse3_hw.o cse3_req.o
