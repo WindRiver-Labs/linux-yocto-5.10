@@ -11,11 +11,10 @@ config HAVE_FB_ATMEL
 	bool
 
 source "drivers/char/agp/Kconfig"
-
 source "drivers/gpu/vga/Kconfig"
-
 source "drivers/gpu/host1x/Kconfig"
 source "drivers/gpu/ipu-v3/Kconfig"
+source "drivers/video/mxc/Kconfig"
 
 source "drivers/gpu/drm/Kconfig"
 
@@ -80,8 +79,6 @@ menuconfig FB
 	  (e.g. an accelerated X server) and that are not frame buffer
 	  device-aware may cause unexpected results. If unsure, say N.
 
-<<<<<<< HEAD
-=======
 config FB_MODE_HELPERS
         bool "Enable Video Mode Handling Helpers"
         depends on FB
