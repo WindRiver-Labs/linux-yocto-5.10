@@ -9,6 +9,7 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/usb/otg.h>
+#include <linux/regulator/consumer.h>
 
 #include "ci_hdrc_imx.h"
 
@@ -159,6 +160,8 @@ struct imx_usbmisc {
 	spinlock_t lock;
 	const struct usbmisc_ops *ops;
 };
+
+static struct regulator *vbus_wakeup_reg;
 
 static inline bool is_imx53_usbmisc(struct imx_usbmisc_data *data);
 
@@ -412,6 +415,11 @@ static int usbmisc_imx6q_set_wakeup
 		wakeup_setting |= imx6q_finalize_wakeup_setting(data);
 		val &= ~MX6_USB_OTG_WAKEUP_BITS;
 		val |= usbmisc_wakeup_setting(data);
+		if (vbus_wakeup_reg) {
+			spin_unlock_irqrestore(&usbmisc->lock, flags);
+			ret = regulator_enable(vbus_wakeup_reg);
+			spin_lock_irqsave(&usbmisc->lock, flags);
+               }
 	} else {
 		if (val & MX6_BM_WAKEUP_INTR)
 			pr_debug("wakeup int at ci_hdrc.%d\n", data->index);
@@ -420,6 +428,8 @@ static int usbmisc_imx6q_set_wakeup
 	}
 	writel(val, usbmisc->base + data->index * 4);
 	spin_unlock_irqrestore(&usbmisc->lock, flags);
+	if (vbus_wakeup_reg && regulator_is_enabled(vbus_wakeup_reg))
+		regulator_disable(vbus_wakeup_reg);
 
 	return ret;
 }
@@ -1221,6 +1231,18 @@ static int usbmisc_imx_probe(struct platform_device *pdev)
 
 	data->ops = (const struct usbmisc_ops *)of_id->data;
 	platform_set_drvdata(pdev, data);
+
+	vbus_wakeup_reg = devm_regulator_get(&pdev->dev, "vbus-wakeup");
+	if (PTR_ERR(vbus_wakeup_reg) == -EPROBE_DEFER)
+		return -EPROBE_DEFER;
+	else if (PTR_ERR(vbus_wakeup_reg) == -ENODEV)
+		/* no vbus regualator is needed */
+		vbus_wakeup_reg = NULL;
+	else if (IS_ERR(vbus_wakeup_reg)) {
+		dev_err(&pdev->dev, "Getting regulator error: %ld\n",
+			PTR_ERR(vbus_wakeup_reg));
+		return PTR_ERR(vbus_wakeup_reg);
+	}
 
 	return 0;
 }
