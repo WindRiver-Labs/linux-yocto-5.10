@@ -133,6 +133,7 @@ enum {
 	LX2160A,
 	MCF5441X,
 	VF610,
+	S32V234,
 };
 
 static const struct fsl_dspi_devtype_data devtype_data[] = {
@@ -189,6 +190,11 @@ static const struct fsl_dspi_devtype_data devtype_data[] = {
 		.trans_mode		= DSPI_DMA_MODE,
 		.max_clock_factor	= 8,
 		.fifo_size		= 16,
+	},
+	[S32V234] = {
+		.trans_mode		= DSPI_XSPI_MODE,
+		.max_clock_factor	= 1,
+		.fifo_size		= 4,
 	},
 };
 
@@ -1072,6 +1078,9 @@ static const struct of_device_id fsl_dspi_dt_ids[] = {
 	}, {
 		.compatible = "fsl,lx2160a-dspi",
 		.data = &devtype_data[LX2160A],
+	}, {
+		.compatible = "fsl,s32v234-dspi",
+		.data = &devtype_data[S32V234],
 	},
 	{ /* sentinel */ }
 };
