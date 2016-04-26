@@ -2,7 +2,7 @@
 //
 // Freescale S/PDIF ALSA SoC Digital Audio Interface (DAI) driver
 //
-// Copyright (C) 2013-2015 Freescale Semiconductor, Inc.
+// Copyright (C) 2013-2016 Freescale Semiconductor, Inc.
 //
 // Based on stmp3xxx_spdif_dai.c
 // Vladimir Barinov <vbarinov@embeddedalley.com>
@@ -763,7 +763,7 @@ static int fsl_spdif_qget(struct snd_kcontrol *kcontrol,
 }
 
 /* Valid bit information */
-static int fsl_spdif_vbit_info(struct snd_kcontrol *kcontrol,
+static int fsl_spdif_rx_vbit_info(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_info *uinfo)
 {
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
@@ -808,6 +808,46 @@ static int fsl_spdif_tx_vbit_get(struct snd_kcontrol *kcontrol,
 
 static int fsl_spdif_tx_vbit_put(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
+	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
+	struct regmap *regmap = spdif_priv->regmap;
+	u32 val = (1 - ucontrol->value.integer.value[0]) << SCR_VAL_OFFSET;
+
+	regmap_update_bits(regmap, REG_SPDIF_SCR, SCR_VAL_MASK, val);
+
+	return 0;
+}
+
+static int fsl_spdif_tx_vbit_info(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+
+	return 0;
+}
+
+static int fsl_spdif_tx_vbit_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
+	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
+	struct regmap *regmap = spdif_priv->regmap;
+	u32 val;
+
+	regmap_read(regmap, REG_SPDIF_SCR, &val);
+	val = (val & SCR_VAL_MASK) >> SCR_VAL_OFFSET;
+	val = 1 - val;
+	ucontrol->value.integer.value[0] = val;
+
+	return 0;
+}
+
+static int fsl_spdif_tx_vbit_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
 	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
@@ -1346,6 +1386,10 @@ static int fsl_spdif_probe(struct platform_device *pdev)
 	spdif_priv->dma_params_rx.maxburst = FSL_SPDIF_RXFIFO_WML;
 	spdif_priv->dma_params_tx.addr = res->start + REG_SPDIF_STL;
 	spdif_priv->dma_params_rx.addr = res->start + REG_SPDIF_SRL;
+
+	/*Clear the val bit for Tx*/
+	regmap_update_bits(spdif_priv->regmap, REG_SPDIF_SCR,
+			SCR_VAL_MASK, 1 << SCR_VAL_OFFSET);
 
 	/* Register with ASoC */
 	dev_set_drvdata(&pdev->dev, spdif_priv);
