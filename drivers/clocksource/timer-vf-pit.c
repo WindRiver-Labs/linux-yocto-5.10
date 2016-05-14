@@ -7,6 +7,7 @@
 #include <linux/interrupt.h>
 #include <linux/clockchips.h>
 #include <linux/clk.h>
+#include <linux/cpuhotplug.h>
 #include <linux/cpu.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
@@ -46,7 +47,7 @@ struct pit_timer {
 	void __iomem *clksrc_base;
 	void __iomem *clkevt_base;
 	int irq;
-	int cpu;
+	unsigned int cpu;
 	struct clk *pit_clk;
 	unsigned long cycle_per_jiffy;
 	struct clock_event_device clockevent_pit;
@@ -63,6 +64,17 @@ static inline struct pit_timer *evt_pit_timer(
 		struct clock_event_device *evt)
 {
 	return container_of(evt, struct pit_timer, clockevent_pit);
+}
+
+static struct pit_timer *cpu_pit_timer(unsigned int cpu)
+{
+	struct pit_timer *pit;
+
+	list_for_each_entry(pit, &pits_list, list)
+		if (pit->cpu == cpu)
+			return pit;
+
+	return NULL;
 }
 
 static inline void pit_timer_enable(struct pit_timer *pit)
@@ -124,13 +136,15 @@ static int pit_set_next_event(unsigned long delta,
 
 static int pit_shutdown(struct clock_event_device *evt)
 {
-	pit_timer_disable();
+	pit_timer_disable(evt_pit_timer(evt));
 	return 0;
 }
 
 static int pit_set_periodic(struct clock_event_device *evt)
 {
-	pit_set_next_event(cycle_per_jiffy, evt);
+	struct pit_timer *pit = evt_pit_timer(evt);
+
+	pit_set_next_event(pit->cycle_per_jiffy, evt);
 	return 0;
 }
 
@@ -158,12 +172,15 @@ static irqreturn_t pit_timer_interrupt(int irq, void *dev_id)
 static int pit_clockevent_init(struct pit_timer *pit,
 					unsigned long rate, int irq)
 {
+	int ret;
+
 	__raw_writel(0, pit->clkevt_base + PITTCTRL);
 
 	pit->clockevent_pit.name = TIMER_NAME;
 	pit->clockevent_pit.features = CLOCK_EVT_FEAT_PERIODIC |
 					    CLOCK_EVT_FEAT_ONESHOT;
-	pit->clockevent_pit.set_mode = pit_set_mode;
+	pit->clockevent_pit.set_state_shutdown = pit_shutdown;
+	pit->clockevent_pit.set_state_periodic = pit_set_periodic;
 	pit->clockevent_pit.set_next_event = pit_set_next_event;
 	pit->clockevent_pit.rating = CONFIG_PIT_CLKEVT_RATE;
 	pit->clockevent_pit.cpumask = cpumask_of(pit->cpu);
@@ -174,10 +191,13 @@ static int pit_clockevent_init(struct pit_timer *pit,
 	pit->pit_timer_irq.handler = pit_timer_interrupt;
 	pit->pit_timer_irq.dev_id = &pit->clockevent_pit;
 
-	BUG_ON(setup_irq(irq, &pit->pit_timer_irq));
+	ret = setup_irq(irq, &pit->pit_timer_irq);
+	if (ret)
+		return ret;
 
-	if (pit->cpu == MASTER_CPU)
-		BUG_ON(irq_set_affinity(irq, cpumask_of(pit->cpu)));
+	ret = irq_force_affinity(irq, cpumask_of(pit->cpu));
+	if (ret)
+		return ret;
 
 	/*
 	 * The value for the LDVAL register trigger is calculated as:
@@ -190,48 +210,31 @@ static int pit_clockevent_init(struct pit_timer *pit,
 	clockevents_config_and_register(&pit->clockevent_pit, rate, 2,
 					0xffffffff);
 
-	if (pit->cpu == MASTER_CPU)
-		__raw_writel(PITTFLG_TIF, pit->clkevt_base + PITTFLG);
+	__raw_writel(PITTFLG_TIF, pit->clkevt_base + PITTFLG);
 
 	return 0;
 }
 
-static int pit_timer_cpu_notify(struct notifier_block *self,
-	unsigned long action, void *hcpu)
+static int pit_timer_starting_cpu(unsigned int cpu)
 {
-	struct pit_timer *pit;
-	int cpu = (long)hcpu;
+	struct pit_timer *pit = cpu_pit_timer(cpu);
 
-	list_for_each_entry(pit, &pits_list, list)
-		if (pit->cpu == cpu)
-			break;
+	if (pit)
+		return pit_clockevent_init(pit, pit->cycle_per_jiffy * (HZ),
+					   pit->irq);
 
-	if (pit == NULL || pit->cpu != cpu)
-		return NOTIFY_OK;
-
-	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_ONLINE:
-		BUG_ON(irq_set_affinity(pit->irq,
-			    cpumask_of(cpu)));
-		__raw_writel(PITTFLG_TIF,
-			     pit[cpu]->clkevt_base + PITTFLG);
-		break;
-	case CPU_STARTING:
-		pit_clockevent_init(pit,
-			    pit->cycle_per_jiffy * (HZ),
-			    pit->irq);
-		break;
-	case CPU_DYING:
-		pit_timer_disable(pit);
-		break;
-	}
-
-	return NOTIFY_OK;
+	return 0;
 }
 
-static struct notifier_block pit_timer_cpu_nb = {
-	.notifier_call = pit_timer_cpu_notify,
-};
+static int pit_timer_dying_cpu(unsigned int cpu)
+{
+	struct pit_timer *pit = cpu_pit_timer(cpu);
+
+	if (pit)
+		pit_timer_disable(pit);
+
+	return 0;
+}
 
 static int __init pit_timer_init(struct device_node *np)
 {
@@ -276,9 +279,12 @@ static int __init pit_timer_init(struct device_node *np)
 	BUG_ON(pit->irq <= 0);
 
 	pit->pit_clk = of_clk_get(np, 0);
-	BUG_ON(IS_ERR(pit->pit_clk));
+	if (IS_ERR(pit->pit_clk))
+		return PTR_ERR(pit->pit_clk);
 
-	BUG_ON(clk_prepare_enable(pit->pit_clk));
+	ret = clk_prepare_enable(pit->pit_clk);
+	if (ret)
+		return ret;
 
 	clk_rate = clk_get_rate(pit->pit_clk);
 	pit->cycle_per_jiffy = clk_rate / (HZ);
@@ -287,14 +293,25 @@ static int __init pit_timer_init(struct device_node *np)
 	__raw_writel(~PITMCR_MDIS, timer_base + PITMCR);
 
 	if (registered == false) {
-		BUG_ON(register_cpu_notifier(&pit_timer_cpu_nb));
+		ret = cpuhp_setup_state_nocalls(CPUHP_AP_VF_PIT_TIMER_STARTING,
+			"AP_VF_PIT_TIMER_STARTING",
+			pit_timer_starting_cpu,
+			pit_timer_dying_cpu);
+		if (ret)
+			return ret;
 		registered = true;
 	}
 
 	if (cpu == MASTER_CPU) {
-		BUG_ON(pit_clocksource_init(pit, clk_rate));
-		pit_clockevent_init(pit, clk_rate, pit->irq);
+		ret = pit_clocksource_init(pit, clk_rate);
+		if (ret)
+			return ret;
+		ret = pit_clockevent_init(pit, clk_rate, pit->irq);
+		if (ret)
+			return ret;
 	}
+
+	return 0;
 }
 TIMER_OF_DECLARE(s32v234, "fsl,s32v234-pit", pit_timer_init);
 TIMER_OF_DECLARE(vf610, "fsl,vf610-pit", pit_timer_init);
