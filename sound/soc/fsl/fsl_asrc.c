@@ -458,6 +458,12 @@ static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool p2p_in, bool p2
 
 	div[OUT] = min_t(u32, 1024, div[OUT]);
 
+	if (div[IN] > 1024)
+		div[IN] = 1024;
+
+	if (div[OUT] > 1024)
+		div[OUT] = 1024;
+
 	/* Set the channel number */
 	channels = config->channel_num;
 
