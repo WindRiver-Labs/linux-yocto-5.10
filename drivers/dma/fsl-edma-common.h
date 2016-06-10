@@ -152,6 +152,17 @@ struct fsl_edma_drvdata {
 					     struct fsl_edma_engine *fsl_edma);
 };
 
+struct fsl_edma_irq {
+	char *name;
+	irqreturn_t (*irqhandler)(int irq, void *data);
+	int irqno;
+};
+
+struct fsl_edma_soc_data {
+	int n_irqs;
+	struct fsl_edma_irq	*irqs;
+};
+
 struct fsl_edma_engine {
 	struct dma_device	dma_dev;
 	void __iomem		*membase;
