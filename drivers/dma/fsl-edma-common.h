@@ -161,6 +161,7 @@ struct fsl_edma_irq {
 struct fsl_edma_soc_data {
 	int n_irqs;
 	struct fsl_edma_irq	*irqs;
+	unsigned int (*mux_channel_mapping)(u32 channel_id);
 };
 
 struct fsl_edma_engine {

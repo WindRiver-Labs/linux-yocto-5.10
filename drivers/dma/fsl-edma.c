@@ -274,6 +274,16 @@ static const struct of_device_id fsl_edma_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
+static unsigned s32v234_mux_channel_mapping(u32 channel_id)
+{
+	return 4 * (channel_id/4) + ((4 - channel_id % 4) - 1);
+}
+
+static unsigned vf610_mux_channel_mapping(u32 channel_id)
+{
+	return channel_id;
+}
+
 static struct fsl_edma_irq s32v234_edma_irqs[] = {
 	{"edma-err", fsl_edma_irq_handler, },
 	{"edma-tx_0-15", fsl_edma_tx_handler, },
@@ -287,11 +297,13 @@ static struct fsl_edma_irq vf610_edma_irqs[] = {
 static struct fsl_edma_soc_data fsl_edma_s32v234_data = {
 	.n_irqs = ARRAY_SIZE(s32v234_edma_irqs),
 	.irqs = s32v234_edma_irqs,
+	.mux_channel_mapping = s32v234_mux_channel_mapping,
 };
 
 static struct fsl_edma_soc_data fsl_edma_vf610_data = {
 	.n_irqs = ARRAY_SIZE(vf610_edma_irqs),
 	.irqs = vf610_edma_irqs,
+	.mux_channel_mapping = vf610_mux_channel_mapping,
 };
 
 static const struct of_device_id fsl_edma_dt_ids[] = {
