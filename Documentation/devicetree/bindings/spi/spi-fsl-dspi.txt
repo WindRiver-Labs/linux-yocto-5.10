@@ -25,6 +25,8 @@ Optional property:
 - big-endian: If present the dspi device's registers are implemented
   in big endian mode.
 - bus-num : the slave chip chipselect signal number.
+- compatible = "spidev" if a spidev driver is used to interface the spi
+  from userspace
 
 Optional SPI slave node properties:
 - fsl,spi-cs-sck-delay: a delay in nanoseconds between activating chip
