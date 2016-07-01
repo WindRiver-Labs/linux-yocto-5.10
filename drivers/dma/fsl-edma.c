@@ -327,17 +327,6 @@ fsl_edma2_irq_init(struct platform_device *pdev,
 	return 0;
 }
 
-static void fsl_edma_irq_exit(
-		struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
-{
-	if (fsl_edma->txirq == fsl_edma->errirq) {
-		devm_free_irq(&pdev->dev, fsl_edma->txirq, fsl_edma);
-	} else {
-		devm_free_irq(&pdev->dev, fsl_edma->txirq, fsl_edma);
-		devm_free_irq(&pdev->dev, fsl_edma->errirq, fsl_edma);
-	}
-}
-
 static void fsl_disable_clocks(struct fsl_edma_engine *fsl_edma, int nr_clocks)
 {
 	int i;
@@ -382,6 +371,19 @@ static unsigned s32v234_mux_channel_mapping(u32 channel_id)
 static unsigned vf610_mux_channel_mapping(u32 channel_id)
 {
 	return channel_id;
+}
+
+static void fsl_edma_irq_exit(
+		struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
+{
+	unsigned int i;
+	const struct fsl_edma_soc_data *socdata = fsl_edma->socdata;
+
+	for (i = 0; i < socdata->n_irqs; i++) {
+		if (socdata->irqs[i].irqno >= 0)
+			devm_free_irq(&pdev->dev,
+				      socdata->irqs[i].irqno, fsl_edma);
+	}
 }
 
 static void fsl_edma_enable_arbitration(struct fsl_edma_engine *fsl_edma)
