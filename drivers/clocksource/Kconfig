@@ -472,6 +472,11 @@ config OXNAS_RPS_TIMER
 	help
 	  This enables support for the Oxford Semiconductor OXNAS RPS timers.
 
+config FSL_STM_TIMER
+	bool
+	help
+	  Support for Freescale System Timer Module.
+
 config SYS_SUPPORTS_SH_CMT
 	bool
 
