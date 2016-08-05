@@ -144,21 +144,9 @@ KBUILD_CFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
 KBUILD_CPPFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
 KBUILD_AFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
 
-machine-$(CONFIG_ARCH_S32)		+= s32
-
 core-y		+= arch/arm64/
 libs-y		:= arch/arm64/lib/ $(libs-y)
 libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
-
-# The first directory contains additional information for the boot setup code
-ifneq ($(machine-y),)
-MACHINE  := arch/arm/mach-$(word 1,$(machine-y))/
-else
-MACHINE  :=
-endif
-
-machdirs	:= $(patsubst %,arch/arm64/mach-%/,$(machine-y))
-core-y		+= $(machdirs)
 
 # Default target when executing plain make
 boot		:= arch/arm64/boot
