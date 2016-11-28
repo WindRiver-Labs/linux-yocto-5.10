@@ -8,22 +8,58 @@
 #include <linux/delay.h>
 #include <linux/dmaengine.h>
 #include <linux/module.h>
+#include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/time.h>
+#include <linux/pm_qos.h>
 #include <sound/core.h>
 #include <sound/dmaengine_pcm.h>
 #include <sound/pcm_params.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
+#include <linux/pm_runtime.h>
 
 #include "fsl_sai.h"
 #include "imx-pcm.h"
 
 #define FSL_SAI_FLAGS (FSL_SAI_CSR_SEIE |\
 		       FSL_SAI_CSR_FEIE)
+
+static struct fsl_sai_soc_data fsl_sai_vf610 = {
+	.imx = false,
+	/*dataline is mask, not index*/
+	.dataline = 0x1,
+	.fifos = 1,
+	.fifo_depth = 32,
+	.flags = 0,
+};
+
+static struct fsl_sai_soc_data fsl_sai_imx6sx = {
+	.imx = true,
+	.dataline = 0x1,
+	.fifos = 1,
+	.fifo_depth = 32,
+	.flags = 0,
+};
+
+static struct fsl_sai_soc_data fsl_sai_imx6ul = {
+	.imx = true,
+	.dataline = 0x1,
+	.fifos = 1,
+	.fifo_depth = 32,
+	.flags = 0,
+};
+
+static struct fsl_sai_soc_data fsl_sai_imx7ulp = {
+	.imx = true,
+	.dataline = 0x3,
+	.fifos = 2,
+	.fifo_depth = 16,
+	.flags = SAI_FLAG_PMQOS,
+};
 
 static const unsigned int fsl_sai_rates[] = {
 	8000, 11025, 12000, 16000, 22050,
@@ -490,6 +526,29 @@ static int fsl_sai_hw_params(struct snd_pcm_substream *substream,
 				   FSL_SAI_CR5_FBT_MASK, val_cr5);
 	}
 
+	if (sai->soc->dataline != 0x1) {
+		switch (sai->dataline[tx]) {
+			case 0x0:
+				break;
+			case 0x1:
+				regmap_update_bits(sai->regmap, FSL_SAI_xCR4(tx),
+						FSL_SAI_CR4_FCOMB_SOFT | FSL_SAI_CR4_FCOMB_SHIFT, 0);
+				break;
+			case 0x2:
+				regmap_update_bits(sai->regmap, FSL_SAI_xCR4(tx),
+						FSL_SAI_CR4_FCOMB_SOFT | FSL_SAI_CR4_FCOMB_SHIFT,
+						FSL_SAI_CR4_FCOMB_SOFT | FSL_SAI_CR4_FCOMB_SHIFT);
+				break;
+			case 0x3:
+				regmap_update_bits(sai->regmap, FSL_SAI_xCR4(tx),
+						FSL_SAI_CR4_FCOMB_SOFT | FSL_SAI_CR4_FCOMB_SHIFT,
+						FSL_SAI_CR4_FCOMB_SOFT);
+				break;
+			default:
+				break;
+		}
+	}
+
 	regmap_update_bits(sai->regmap, FSL_SAI_xCR3(tx, ofs),
 			   FSL_SAI_CR3_TRCE_MASK,
 			   FSL_SAI_CR3_TRCE((1 << pins) - 1));
@@ -662,6 +721,9 @@ static int fsl_sai_startup(struct snd_pcm_substream *substream,
 	else
 		sai->is_stream_opened[tx] = true;
 
+	regmap_update_bits(sai->regmap, FSL_SAI_xCR3(tx), FSL_SAI_CR3_TRCE0|FSL_SAI_CR3_TRCE1,
+				FSL_SAI_CR3_TRCE(sai->dataline[tx]));
+
 	ret = snd_pcm_hw_constraint_list(substream->runtime, 0,
 			SNDRV_PCM_HW_PARAM_RATE, &fsl_sai_rate_constraints);
 
@@ -691,7 +753,7 @@ static int fsl_sai_dai_probe(struct snd_soc_dai *cpu_dai)
 
 	regmap_update_bits(sai->regmap, FSL_SAI_TCR1,
 			   FSL_SAI_CR1_RFW_MASK(sai->soc_data->fifo_depth),
-			   FSL_SAI_MAXBURST_TX * 2);
+			   sai->soc->fifo_depth - FSL_SAI_MAXBURST_TX);
 	regmap_update_bits(sai->regmap, FSL_SAI_RCR1,
 			   FSL_SAI_CR1_RFW_MASK(sai->soc_data->fifo_depth),
 			   FSL_SAI_MAXBURST_RX - 1);
@@ -737,7 +799,8 @@ static struct reg_default fsl_sai_reg_defaults[] = {
 	{FSL_SAI_TCR3, 0},
 	{FSL_SAI_TCR4, 0},
 	{FSL_SAI_TCR5, 0},
-	{FSL_SAI_TDR,  0},
+	{FSL_SAI_TDR0, 0},
+	{FSL_SAI_TDR1, 0},
 	{FSL_SAI_TMR, 0},
 	{FSL_SAI_RCR1(0), 0},
 	{FSL_SAI_RCR2(0), 0},
@@ -784,8 +847,8 @@ static bool fsl_sai_readable_reg(struct device *dev, unsigned int reg)
 	case FSL_SAI_RCR3:
 	case FSL_SAI_RCR4:
 	case FSL_SAI_RCR5:
-	case FSL_SAI_RDR:
-	case FSL_SAI_RFR:
+	case FSL_SAI_TFR0:
+	case FSL_SAI_TFR1:
 	case FSL_SAI_RMR:
 	case FSL_SAI_MCTL:
 	case FSL_SAI_MDIV:
@@ -818,9 +881,12 @@ static bool fsl_sai_volatile_reg(struct device *dev, unsigned int reg)
 		return true;
 
 	switch (reg) {
-		case FSL_SAI_TFR:
-		case FSL_SAI_RFR:
-		case FSL_SAI_RDR:
+		case FSL_SAI_TFR0:
+		case FSL_SAI_TFR1:
+		case FSL_SAI_RFR0:
+		case FSL_SAI_RFR1:
+		case FSL_SAI_RDR0:
+		case FSL_SAI_RDR1:
 		return true;
 	default:
 		return false;
@@ -836,7 +902,8 @@ static bool fsl_sai_writeable_reg(struct device *dev, unsigned int reg)
 	case FSL_SAI_TCR3:
 	case FSL_SAI_TCR4:
 	case FSL_SAI_TCR5:
-	case FSL_SAI_TDR:
+	case FSL_SAI_TDR0:
+	case FSL_SAI_TDR1:
 	case FSL_SAI_TFR:
 	case FSL_SAI_TMR:
 	case FSL_SAI_RMR:
@@ -909,6 +976,7 @@ static int fsl_sai_check_version(struct device *dev)
 static int fsl_sai_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
+	const struct of_device_id *of_id;
 	struct fsl_sai *sai;
 	struct regmap *gpr;
 	struct resource *res;
@@ -923,11 +991,12 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 	sai->pdev = pdev;
 
-	if (of_device_is_compatible(np, "fsl,imx6sx-sai") ||
-	    of_device_is_compatible(np, "fsl,imx6ul-sai"))
-		sai->sai_on_imx = true;
+	of_id = of_match_device(fsl_sai_ids, &pdev->dev);
+	if (!of_id || !of_id->data)
+		return -EINVAL;
 
 	sai->is_lsb_first = of_property_read_bool(np, "lsb-first");
+	sai->soc = of_id->data;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	base = devm_ioremap_resource(&pdev->dev, res);
@@ -959,9 +1028,23 @@ static int fsl_sai_probe(struct platform_device *pdev)
 		sai->mclk_clk[i] = devm_clk_get(&pdev->dev, tmp);
 		if (IS_ERR(sai->mclk_clk[i])) {
 			dev_err(&pdev->dev, "failed to get mclk%d clock: %ld\n",
-					i + 1, PTR_ERR(sai->mclk_clk[i]));
+					i, PTR_ERR(sai->mclk_clk[i]));
 			sai->mclk_clk[i] = NULL;
 		}
+	}
+
+	/*dataline mask for rx and tx*/
+	ret = of_property_read_u32_index(np, "fsl,dataline", 0, &sai->dataline[0]);
+	if (ret)
+		sai->dataline[0] = 1;
+
+	ret = of_property_read_u32_index(np, "fsl,dataline", 1, &sai->dataline[1]);
+	if (ret)
+		sai->dataline[1] = 1;
+
+	if ((sai->dataline[0] & (~sai->soc->dataline)) || sai->dataline[1] & (~sai->soc->dataline)) {
+		dev_err(&pdev->dev, "dataline setting error, Mask is 0x%x\n", sai->soc->dataline);
+		return -EINVAL;
 	}
 
 	irq = platform_get_irq(pdev, 0);
@@ -1023,8 +1106,8 @@ static int fsl_sai_probe(struct platform_device *pdev)
 				   MCLK_DIR(index));
 	}
 
-	sai->dma_params_rx.addr = res->start + FSL_SAI_RDR;
-	sai->dma_params_tx.addr = res->start + FSL_SAI_TDR;
+	sai->dma_params_rx.addr = res->start + FSL_SAI_RDR0;
+	sai->dma_params_tx.addr = res->start + FSL_SAI_TDR0;
 	sai->dma_params_rx.maxburst = FSL_SAI_MAXBURST_RX;
 	sai->dma_params_tx.maxburst = FSL_SAI_MAXBURST_TX;
 
@@ -1050,7 +1133,7 @@ static int fsl_sai_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_pm_disable;
 
-	if (sai->sai_on_imx) {
+	if (sai->soc->imx)
 		ret = imx_pcm_dma_init(pdev, IMX_SAI_DMABUF_SIZE);
 		if (ret)
 			goto err_pm_disable;
@@ -1096,6 +1179,9 @@ static int fsl_sai_runtime_suspend(struct device *dev)
 
 	clk_disable_unprepare(sai->bus_clk);
 
+	if (sai->soc->flags & SAI_FLAG_PMQOS)
+		pm_qos_remove_request(&sai->pm_qos_req);
+
 	regcache_cache_only(sai->regmap, true);
 
 	return 0;
@@ -1123,6 +1209,10 @@ static int fsl_sai_runtime_resume(struct device *dev)
 		if (ret)
 			goto disable_tx_clk;
 	}
+
+	if (sai->soc->flags & SAI_FLAG_PMQOS)
+		pm_qos_add_request(&sai->pm_qos_req,
+			PM_QOS_CPU_DMA_LATENCY, 0);
 
 	regcache_cache_only(sai->regmap, false);
 	regcache_mark_dirty(sai->regmap);
