@@ -671,6 +671,14 @@ static int fsl_sai_trigger(struct snd_pcm_substream *substream, int cmd,
 			regmap_update_bits(sai->regmap, FSL_SAI_xCSR((!tx), ofs),
 					   FSL_SAI_CSR_TERE, FSL_SAI_CSR_TERE);
 
+		if (!sai->synchronous[TX] && sai->synchronous[RX] && !tx) {
+			regmap_update_bits(sai->regmap, FSL_SAI_xCSR((!tx)),
+				FSL_SAI_CSR_TERE, FSL_SAI_CSR_TERE);
+		} else if (!sai->synchronous[RX] && sai->synchronous[TX] && tx) {
+			regmap_update_bits(sai->regmap, FSL_SAI_xCSR((!tx)),
+				FSL_SAI_CSR_TERE, FSL_SAI_CSR_TERE);
+		}
+
 		regmap_update_bits(sai->regmap, FSL_SAI_xCSR(tx),
 				   FSL_SAI_CSR_xIE_MASK, FSL_SAI_FLAGS);
 		break;
