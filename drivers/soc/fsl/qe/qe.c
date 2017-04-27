@@ -100,12 +100,24 @@ void qe_reset(void)
 		panic("sdma init failed!");
 }
 
+/* issue commands to QE, return 0 on success while -EIO on error
+ *
+ * @cmd: the command code, should be QE_INIT_TX_RX, QE_STOP_TX and so on
+ * @device: which sub-block will run the command, QE_CR_SUBBLOCK_UCCFAST1 - 8
+ * , QE_CR_SUBBLOCK_UCCSLOW1 - 8, QE_CR_SUBBLOCK_MCC1 - 3,
+ * QE_CR_SUBBLOCK_IDMA1 - 4 and such on.
+ * @mcn_protocol: specifies mode for the command for non-MCC, should be
+ * QE_CR_PROTOCOL_HDLC_TRANSPARENT, QE_CR_PROTOCOL_QMC, QE_CR_PROTOCOL_UART
+ * and such on.
+ * @cmd_input: command related data.
+ */
 int qe_issue_cmd(u32 cmd, u32 device, u8 mcn_protocol, u32 cmd_input)
 {
 	unsigned long flags;
 	u8 mcn_shift = 0, dev_shift = 0;
 	u32 val;
 	int ret;
+	int i;
 
 	spin_lock_irqsave(&qe_lock, flags);
 	if (cmd == QE_RESET) {
@@ -134,10 +146,18 @@ int qe_issue_cmd(u32 cmd, u32 device, u8 mcn_protocol, u32 cmd_input)
 	/* wait for the QE_CR_FLG to clear */
 	ret = readx_poll_timeout_atomic(qe_ioread32be, &qe_immr->cp.cecr, val,
 					(val & QE_CR_FLG) == 0, 0, 100);
+	ret = -EIO;
+	for (i = 0; i < 100; i++) {
+		if ((ioread32be(&qe_immr->cp.cecr) & QE_CR_FLG) == 0) {
+			ret = 0;
+			break;
+		}
+		udelay(1);
+	}
 	/* On timeout, ret is -ETIMEDOUT, otherwise it will be 0. */
 	spin_unlock_irqrestore(&qe_lock, flags);
 
-	return ret == 0;
+	return ret;
 }
 EXPORT_SYMBOL(qe_issue_cmd);
 
@@ -161,6 +181,8 @@ unsigned int qe_get_brg_clk(void)
 	struct device_node *qe;
 	u32 brg;
 	unsigned int mod;
+	u32 val;
+	int ret;
 
 	if (brg_clk)
 		return brg_clk;
@@ -169,8 +191,9 @@ unsigned int qe_get_brg_clk(void)
 	if (!qe)
 		return brg_clk;
 
-	if (!of_property_read_u32(qe, "brg-frequency", &brg))
-		brg_clk = brg;
+	ret = of_property_read_u32(qe, "brg-frequency", &val)
+	if (!ret)
+		brg_clk = val;
 
 	of_node_put(qe);
 
