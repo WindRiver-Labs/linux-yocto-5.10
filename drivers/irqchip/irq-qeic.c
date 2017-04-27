@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * arch/powerpc/sysdev/qe_lib/qe_ic.c
+ * drivers/irqchip/irq-qeic.c
  *
- * Copyright (C) 2006 Freescale Semiconductor, Inc.  All rights reserved.
+ * Copyright (C) 2016 Freescale Semiconductor, Inc.  All rights reserved.
  *
  * Author: Li Yang <leoli@freescale.com>
  * Based on code from Shlomi Gridish <gridish@freescale.com>
@@ -40,7 +40,45 @@
 #define QEIC_CRIMR		0x24
 #define QEIC_CIPRTA		0x30
 #define QEIC_CIPRTB		0x34
+#define QEIC_CRICR             0x3c
 #define QEIC_CHIVEC		0x60
+
+/* Interrupt priority registers */
+#define CIPCC_SHIFT_PRI0       29
+#define CIPCC_SHIFT_PRI1       26
+#define CIPCC_SHIFT_PRI2       23
+#define CIPCC_SHIFT_PRI3       20
+#define CIPCC_SHIFT_PRI4       13
+#define CIPCC_SHIFT_PRI5       10
+#define CIPCC_SHIFT_PRI6       7
+#define CIPCC_SHIFT_PRI7       4
+
+/* CICR priority modes */
+#define CICR_GWCC              0x00040000
+#define CICR_GXCC              0x00020000
+#define CICR_GYCC              0x00010000
+#define CICR_GZCC              0x00080000
+#define CICR_GRTA              0x00200000
+#define CICR_GRTB              0x00400000
+#define CICR_HPIT_SHIFT                8
+#define CICR_HPIT_MASK         0x00000300
+#define CICR_HP_SHIFT          24
+#define CICR_HP_MASK           0x3f000000
+
+/* CICNR */
+#define CICNR_WCC1T_SHIFT      20
+#define CICNR_ZCC1T_SHIFT      28
+#define CICNR_YCC1T_SHIFT      12
+#define CICNR_XCC1T_SHIFT      4
+
+/* CRICR */
+#define CRICR_RTA1T_SHIFT      20
+#define CRICR_RTB1T_SHIFT      28
+
+/* Signal indicator */
+#define SIGNAL_MASK            3
+#define SIGNAL_HIGH            2
+#define SIGNAL_LOW             0
 
 struct qe_ic {
 	/* Control registers offset */
