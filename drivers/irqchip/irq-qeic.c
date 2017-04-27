@@ -496,18 +496,15 @@ static void __init qe_ic_init(struct device_node *node)
 	}
 }
 
-static int __init qe_ic_of_init(void)
+static int __init qeic_of_init(struct device_node *node,
+                              struct device_node *parent)
 {
-	struct device_node *np;
-
-	np = of_find_compatible_node(NULL, NULL, "fsl,qe-ic");
-	if (!np) {
-		np = of_find_node_by_type(NULL, "qeic");
-		if (!np)
-			return -ENODEV;
-	}
-	qe_ic_init(np);
-	of_node_put(np);
-	return 0;
+       if (!node)
+               return;
+       qe_ic_init(node, 0, qe_ic_cascade_low_mpic,
+                  qe_ic_cascade_high_mpic);
+       of_node_put(node);
 }
+
+IRQCHIP_DECLARE(qeic, "fsl,qe-ic", qeic_of_init);
 subsys_initcall(qe_ic_of_init);
