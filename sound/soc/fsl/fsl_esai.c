@@ -958,6 +958,7 @@ static int fsl_esai_probe(struct platform_device *pdev)
 	const __be32 *iprop;
 	void __iomem *regs;
 	int irq, ret;
+	unsigned long irqflag = 0;
 
 	esai_priv = devm_kzalloc(&pdev->dev, sizeof(*esai_priv), GFP_KERNEL);
 	if (!esai_priv)
@@ -1008,11 +1009,11 @@ static int fsl_esai_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "failed to get spba clock: %ld\n",
 				PTR_ERR(esai_priv->spbaclk));
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
-		return irq;
+	/* ESAI shared interrupt */
+        if (of_property_read_bool(np, "shared-interrupt"))
+                irqflag = IRQF_SHARED;
 
-	ret = devm_request_irq(&pdev->dev, irq, esai_isr, IRQF_SHARED,
+	ret = devm_request_irq(&pdev->dev, irq, esai_isr, irqflag,
 			       esai_priv->name, esai_priv);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to claim irq %u\n", irq);
