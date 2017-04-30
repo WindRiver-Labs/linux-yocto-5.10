@@ -289,7 +289,6 @@
 #define ASRC_CLK_MAP_LEN	0x30
 
 struct dma_block {
-	dma_addr_t dma_paddr;
 	void *dma_vaddr;
 	unsigned int length;
 };
