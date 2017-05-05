@@ -3440,6 +3440,40 @@ static int setup_rx_err_flow(struct dpaa2_eth_priv *priv,
 	return 0;
 }
 
+#ifdef CONFIG_FSL_DPAA2_ETH_USE_ERR_QUEUE
+static int setup_rx_err_flow(struct dpaa2_eth_priv *priv,
+			     struct dpaa2_eth_fq *fq)
+{
+	struct device *dev = priv->net_dev->dev.parent;
+	struct dpni_queue q = { { 0 } };
+	struct dpni_queue_id qid;
+	u8 q_opt = DPNI_QUEUE_OPT_USER_CTX | DPNI_QUEUE_OPT_DEST;
+	int err;
+
+	err = dpni_get_queue(priv->mc_io, 0, priv->mc_token,
+			     DPNI_QUEUE_RX_ERR, 0, 0, &q, &qid);
+	if (err) {
+		dev_err(dev, "dpni_get_queue() failed (%d)\n", err);
+		return err;
+	}
+
+	fq->fqid = qid.fqid;
+
+	q.destination.id = fq->channel->dpcon_id;
+	q.destination.type = DPNI_DEST_DPCON;
+	q.destination.priority = 1;
+	q.user_context = (u64)fq;
+	err = dpni_set_queue(priv->mc_io, 0, priv->mc_token,
+			     DPNI_QUEUE_RX_ERR, 0, 0, q_opt, &q);
+	if (err) {
+		dev_err(dev, "dpni_set_queue() failed (%d)\n", err);
+		return err;
+	}
+
+	return 0;
+}
+#endif
+
 /* Supported header fields for Rx hash distribution key */
 static const struct dpaa2_eth_dist_fields dist_fields[] = {
 	{
@@ -3821,7 +3855,11 @@ static int dpaa2_eth_bind_dpni(struct dpaa2_eth_priv *priv)
 	/* Configure handling of error frames */
 	err_cfg.errors = DPAA2_FAS_RX_ERR_MASK;
 	err_cfg.set_frame_annotation = 1;
+#ifdef CONFIG_FSL_DPAA2_ETH_USE_ERR_QUEUE
+	err_cfg.error_action = DPNI_ERROR_ACTION_SEND_TO_ERROR_QUEUE;
+#else
 	err_cfg.error_action = DPNI_ERROR_ACTION_DISCARD;
+#endif
 	err = dpni_set_errors_behavior(priv->mc_io, 0, priv->mc_token,
 				       &err_cfg);
 	if (err) {
