@@ -906,11 +906,17 @@ int brcmf_sdiod_probe(struct brcmf_sdio_dev *sdiodev)
 
 	sdio_claim_host(sdiodev->func1);
 
-	ret = sdio_set_block_size(sdiodev->func1, SDIO_FUNC1_BLOCKSIZE);
+	if (sdiodev->func1->device == SDIO_DEVICE_ID_CYPRESS_4373) {
+		f2_blksz = SDIO_4373_FUNC2_BLOCKSIZE;
+	}
+
+	ret = sdio_set_block_size(sdiodev->func2, f2_blksz);
 	if (ret) {
 		brcmf_err("Failed to set F1 blocksize\n");
 		sdio_release_host(sdiodev->func1);
 		goto out;
+	} else {
+		brcmf_dbg(SDIO, "set F2 blocksize to %d\n", f2_blksz);
 	}
 	switch (sdiodev->func2->device) {
 	case SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373:
