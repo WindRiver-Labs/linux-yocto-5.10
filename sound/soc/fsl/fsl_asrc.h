@@ -11,6 +11,7 @@
 #define _FSL_ASRC_H
 
 #include <uapi/linux/mxc_asrc.h>
+#include <linux/miscdevice.h>
 
 #include  "fsl_asrc_common.h"
 
