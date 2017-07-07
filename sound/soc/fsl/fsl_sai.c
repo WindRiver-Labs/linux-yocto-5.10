@@ -35,6 +35,7 @@ static struct fsl_sai_soc_data fsl_sai_vf610 = {
 	.fifos = 1,
 	.fifo_depth = 32,
 	.flags = 0,
+	.constrain_period_size = false,
 };
 
 static struct fsl_sai_soc_data fsl_sai_imx6sx = {
@@ -44,6 +45,7 @@ static struct fsl_sai_soc_data fsl_sai_imx6sx = {
 	.fifo_depth = 32,
 	.flags = 0,
 	.reg_offset = 0,
+	.constrain_period_size = false,
 };
 
 static struct fsl_sai_soc_data fsl_sai_imx6ul = {
@@ -53,6 +55,7 @@ static struct fsl_sai_soc_data fsl_sai_imx6ul = {
 	.fifo_depth = 32,
 	.flags = 0,
 	.reg_offset = 0,
+	.constrain_period_size = false,
 };
 
 static struct fsl_sai_soc_data fsl_sai_imx7ulp = {
@@ -62,6 +65,7 @@ static struct fsl_sai_soc_data fsl_sai_imx7ulp = {
 	.fifo_depth = 16,
 	.flags = SAI_FLAG_PMQOS,
 	.reg_offset = 0,
+	.constrain_period_size = false,
 };
 
 static struct fsl_sai_soc_data fsl_sai_imx8mq = {
@@ -71,6 +75,17 @@ static struct fsl_sai_soc_data fsl_sai_imx8mq = {
 	.fifo_depth = 32,
 	.flags = 0,
 	.reg_offset = 8,
+	.constrain_period_size = false,
+};
+
+static struct fsl_sai_soc_data fsl_sai_imx8qm = {
+	.imx = true,
+	.dataline = 0x3,
+	.fifos = 1,
+	.fifo_depth = 32,
+	.flags = 0,
+	.reg_offset = 0,
+	.constrain_period_size = true,
 };
 
 static const unsigned int fsl_sai_rates[] = {
@@ -742,6 +757,13 @@ static int fsl_sai_startup(struct snd_pcm_substream *substream,
 	regmap_update_bits(sai->regmap, FSL_SAI_xCR3(tx, offset), FSL_SAI_CR3_TRCE0|FSL_SAI_CR3_TRCE1,
 				FSL_SAI_CR3_TRCE(sai->dataline[tx]));
 
+	/* EDMA engine needs periods of size multiple of tx/rx maxburst */
+	if (sai->soc->constrain_period_size)
+			snd_pcm_hw_constraint_step(substream->runtime, 0,
+					   SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
+					   tx ? sai->dma_params_tx.maxburst :
+					   sai->dma_params_rx.maxburst);
+
 	ret = snd_pcm_hw_constraint_list(substream->runtime, 0,
 			SNDRV_PCM_HW_PARAM_RATE, &fsl_sai_rate_constraints);
 
@@ -1228,6 +1250,7 @@ static const struct of_device_id fsl_sai_ids[] = {
 	{ .compatible = "fsl,imx6sx-sai", },
 	{ .compatible = "fsl,imx6ul-sai", },
 	{ .compatible = "fsl,imx8mq-sai", },
+	{ .compatible = "fsl,imx8qm-sai", },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fsl_sai_ids);
