@@ -1035,6 +1035,12 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 {
 	struct imx_i2c_struct *i2c_imx = i2c_get_adapdata(adapter);
 	int result;
+	bool enable_runtime_pm = false;
+
+	if (!pm_runtime_enabled(i2c_imx->adapter.dev.parent)) {
+		pm_runtime_enable(i2c_imx->adapter.dev.parent);
+		enable_runtime_pm = true;
+	}
 
 	result = pm_runtime_get_sync(i2c_imx->adapter.dev.parent);
 	if (result < 0)
@@ -1346,7 +1352,7 @@ static int i2c_imx_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops i2c_imx_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(i2c_imx_suspend, i2c_imx_resume)
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(i2c_imx_suspend, i2c_imx_resume)
 	SET_RUNTIME_PM_OPS(i2c_imx_runtime_suspend,
 			   i2c_imx_runtime_resume, NULL)
 };
