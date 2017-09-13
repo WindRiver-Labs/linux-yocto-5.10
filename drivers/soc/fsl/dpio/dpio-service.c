@@ -74,6 +74,10 @@ static inline struct dpaa2_io *service_select(struct dpaa2_io *d)
 	if (d)
 		return d;
 
+	d = service_select_by_cpu(d, -1);
+	if (d)
+		return d;
+
 	spin_lock(&dpio_list_lock);
 	d = list_entry(dpio_list.next, struct dpaa2_io, node);
 	list_del(&d->node);
