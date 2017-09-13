@@ -6228,6 +6228,25 @@ static void brcmf_init_conf(struct brcmf_cfg80211_conf *conf)
 	conf->retry_long = (u32)-1;
 }
 
+static void brcmf_init_wmm_prio(u8 *priority)
+{
+	/* Initialize AC priority array to default
+	 * 802.1d priority as per following table:
+	 * 802.1d prio 0,3 maps to BE
+	 * 802.1d prio 1,2 maps to BK
+	 * 802.1d prio 4,5 maps to VI
+	 * 802.1d prio 6,7 maps to VO
+	 */
+	priority[0] = AC_BE;
+	priority[3] = AC_BE;
+	priority[1] = AC_BK;
+	priority[2] = AC_BK;
+	priority[4] = AC_VI;
+	priority[5] = AC_VI;
+	priority[6] = AC_VO;
+	priority[7] = AC_VO;
+}
+
 static void brcmf_register_event_handlers(struct brcmf_cfg80211_info *cfg)
 {
 	brcmf_fweh_register(cfg->pub, BRCMF_E_LINK,
