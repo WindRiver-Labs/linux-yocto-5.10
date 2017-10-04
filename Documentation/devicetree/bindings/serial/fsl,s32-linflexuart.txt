@@ -7,14 +7,14 @@ See chapter 47 ("LINFlexD") in the reference manual[1].
 
 Required properties:
 - compatible :
-  - "fsl,s32v234-linflexuart" for LINFlexD configured in UART mode, which
+  - "fsl,s32-linflexuart" for linflex configured in uart mode which
     is compatible with the one integrated on S32V234 SoC
 - reg : Address and length of the register set for the device
 - interrupts : Should contain uart interrupt
 
 Example:
 uart0: serial@40053000 {
-	compatible = "fsl,s32v234-linflexuart";
+	compatible = "fsl,s32-linflexuart";
 	reg = <0x0 0x40053000 0x0 0x1000>;
 	interrupts = <0 59 4>;
 };
