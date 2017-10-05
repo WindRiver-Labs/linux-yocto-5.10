@@ -207,7 +207,7 @@ config ARCH_QCOM
 	  This enables support for the ARMv8 based Qualcomm chipsets.
 
 config ARCH_S32
-	bool "Freescale S32 family" if ARCH_VEXPRESS
+	bool "Freescale S32 family"
 	select PINCTRL
 	select ARCH_S32_CLK
 	help
@@ -324,11 +324,6 @@ config ARCH_ROCKCHIP
 	help
 	  This enables support for the ARMv8 based Rockchip chipsets,
 	  like the RK3368.
-
-config ARCH_S32
-	bool "NXP S32 SoC Family"
-	help
-	  This enables support for the NXP S32 family of processors.
 
 config ARCH_SEATTLE
 	bool "AMD Seattle SoC Family"
