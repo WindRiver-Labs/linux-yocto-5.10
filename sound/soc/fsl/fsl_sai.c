@@ -80,7 +80,7 @@ static struct fsl_sai_soc_data fsl_sai_imx8mq = {
 
 static struct fsl_sai_soc_data fsl_sai_imx8qm = {
 	.imx = true,
-	.dataline = 0x3,
+	.dataline = 0xf,
 	.fifos = 1,
 	.fifo_depth = 32,
 	.flags = 0,
@@ -904,6 +904,12 @@ static bool fsl_sai_readable_reg(struct device *dev, unsigned int reg)
 	case FSL_SAI_RCR5:
 	case FSL_SAI_TFR0:
 	case FSL_SAI_TFR1:
+	case FSL_SAI_RFR2:
+	case FSL_SAI_RFR3:
+	case FSL_SAI_RFR4:
+	case FSL_SAI_RFR5:
+	case FSL_SAI_RFR6:
+	case FSL_SAI_RFR7:
 	case FSL_SAI_RMR:
 	case FSL_SAI_MCTL:
 	case FSL_SAI_MDIV:
@@ -938,8 +944,20 @@ static bool fsl_sai_volatile_reg(struct device *dev, unsigned int reg)
 	switch (reg) {
 		case FSL_SAI_TFR0:
 		case FSL_SAI_TFR1:
+		case FSL_SAI_TFR2:
+		case FSL_SAI_TFR3:
+		case FSL_SAI_TFR4:
+		case FSL_SAI_TFR5:
+		case FSL_SAI_TFR6:
+		case FSL_SAI_TFR7:
 		case FSL_SAI_RFR0:
 		case FSL_SAI_RFR1:
+		case FSL_SAI_RFR2:
+		case FSL_SAI_RFR3:
+		case FSL_SAI_RFR4:
+		case FSL_SAI_RFR5:
+		case FSL_SAI_RFR6:
+		case FSL_SAI_RFR7:
 		case FSL_SAI_RDR0:
 		case FSL_SAI_RDR1:
 		return true;
