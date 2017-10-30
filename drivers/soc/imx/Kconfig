@@ -24,4 +24,8 @@ config IMX8M_PM_DOMAINS
 	depends on ARCH_MXC || (COMPILE_TEST && OF)
 	depends on PM
 	select PM_GENERIC_DOMAINS
+
+config IMX8M_BUSFREQ
+	bool "i.MX8M busfreq"
+	depends on ARCH_MXC && ARM64
 endmenu
