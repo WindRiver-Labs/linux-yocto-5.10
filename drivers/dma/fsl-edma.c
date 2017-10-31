@@ -22,12 +22,43 @@
 
 static int is_vf610_edma(struct fsl_edma_engine *data);
 static int is_s32v234_edma(struct fsl_edma_engine *data);
+static int is_s32gen1_edma(struct fsl_edma_engine *data);
 
 static void fsl_edma_synchronize(struct dma_chan *chan)
 {
 	struct fsl_edma_chan *fsl_chan = to_fsl_edma_chan(chan);
 
 	vchan_synchronize(&fsl_chan->vchan);
+}
+
+static u16 edma_readw(struct fsl_edma_engine *edma, void __iomem *addr)
+{
+	if (edma->big_endian)
+		return ioread16be(addr);
+	else
+		return ioread16(addr);
+}
+
+static void fsl_edma3_enable_request(struct fsl_edma_chan *fsl_chan)
+{
+	void __iomem *addr = fsl_chan->edma->membase;
+	u32 ch = fsl_chan->vchan.chan.chan_id;
+	const struct fsl_edma_soc_data *socdata = fsl_chan->edma->socdata;
+	struct fsl_edma_hw_tcd *hw_tcd = (struct fsl_edma_hw_tcd *)
+		socdata->ops->edma_get_tcd_addr(fsl_chan);
+	u16 csr = edma_readw(fsl_chan->edma, &hw_tcd->csr);
+
+	edma_writel(fsl_chan->edma, EDMA3_CHn_CSR_ERQ | EDMA3_CHn_CSR_EEI,
+			addr + EDMA3_CHn_CSR(ch));
+	edma_writew(fsl_chan->edma, csr | EDMA_TCD_CSR_START, &hw_tcd->csr);
+}
+
+static void fsl_edma3_disable_request(struct fsl_edma_chan *fsl_chan)
+{
+	void __iomem *addr = fsl_chan->edma->membase;
+	u32 ch = fsl_chan->vchan.chan.chan_id;
+
+	edma_writel(fsl_chan->edma, 0, addr + EDMA3_CHn_CSR(ch));
 }
 
 static irqreturn_t fsl_edma_tx_handler(int irq, void *dev_id)
@@ -74,6 +105,45 @@ static irqreturn_t fsl_edma_tx_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t fsl_edma3_tx_handler(int irq, void *dev_id)
+{
+	struct fsl_edma_engine *fsl_edma = dev_id;
+	unsigned int ch, ch_int;
+	void __iomem *base_addr;
+	struct fsl_edma_chan *fsl_chan;
+	bool handled = false;
+
+	base_addr = fsl_edma->membase;
+
+	for (ch = 0; ch < fsl_edma->n_chans; ch++) {
+		ch_int = edma_readl(fsl_edma,
+				fsl_edma->membase + EDMA3_CHn_INT(ch));
+		if (ch_int & EDMA3_CHn_INT_INT) {
+			handled = true;
+			edma_writel(fsl_edma, EDMA3_CHn_INT_INT,
+				base_addr + EDMA3_CHn_INT(ch));
+
+			fsl_chan = &fsl_edma->chans[ch];
+
+			spin_lock(&fsl_chan->vchan.lock);
+			if (!fsl_chan->edesc->iscyclic) {
+				list_del(&fsl_chan->edesc->vdesc.node);
+				vchan_cookie_complete(&fsl_chan->edesc->vdesc);
+				fsl_chan->edesc = NULL;
+				fsl_chan->status = DMA_COMPLETE;
+			} else {
+				vchan_cyclic_callback(&fsl_chan->edesc->vdesc);
+			}
+
+			if (!fsl_chan->edesc)
+				fsl_edma_xfer_desc(fsl_chan);
+
+			spin_unlock(&fsl_chan->vchan.lock);
+		}
+	}
+	return handled ? IRQ_HANDLED : IRQ_NONE;
+}
+
 static irqreturn_t fsl_edma_err_handler(int irq, void *dev_id)
 {
 	struct fsl_edma_engine *fsl_edma = dev_id;
@@ -95,12 +165,42 @@ static irqreturn_t fsl_edma_err_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t fsl_edma3_err_handler(int irq, void *dev_id)
+{
+	struct fsl_edma_engine *fsl_edma = dev_id;
+	unsigned int err, ch, ch_es;
+
+	err = edma_readl(fsl_edma, fsl_edma->membase + EDMA3_MP_ES);
+	if (!EDMA3_MP_ES_VLD(err))
+		return IRQ_NONE;
+
+	for (ch = 0; ch < fsl_edma->n_chans; ch++) {
+		ch_es = edma_readl(fsl_edma,
+				fsl_edma->membase + EDMA3_CHn_ES(ch));
+		if (ch_es & EDMA3_CHn_ES_ERR) {
+			fsl_edma3_disable_request(&fsl_edma->chans[ch]);
+			edma_writel(fsl_edma, EDMA3_CHn_ES_ERR,
+				fsl_edma->membase + EDMA3_CHn_ES(ch));
+			fsl_edma->chans[ch].status = DMA_ERROR;
+		}
+	}
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t fsl_edma_irq_handler(int irq, void *dev_id)
 {
 	if (fsl_edma_tx_handler(irq, dev_id) == IRQ_HANDLED)
 		return IRQ_HANDLED;
 
 	return fsl_edma_err_handler(irq, dev_id);
+}
+
+static irqreturn_t fsl_edma3_irq_handler(int irq, void *dev_id)
+{
+	if (fsl_edma3_tx_handler(irq, dev_id) == IRQ_HANDLED)
+		return IRQ_HANDLED;
+
+	return fsl_edma3_err_handler(irq, dev_id);
 }
 
 static struct dma_chan *fsl_edma_xlate(struct of_phandle_args *dma_spec,
@@ -284,6 +384,42 @@ static unsigned vf610_mux_channel_mapping(u32 channel_id)
 	return channel_id;
 }
 
+static void fsl_edma_enable_arbitration(struct fsl_edma_engine *fsl_edma)
+{
+	void __iomem *addr = fsl_edma->membase;
+
+	edma_writel(fsl_edma, EDMA_CR_ERGA | EDMA_CR_ERCA, addr + EDMA_CR);
+}
+
+static void fsl_edma3_enable_arbitration(struct fsl_edma_engine *fsl_edma)
+{
+	void __iomem *addr = fsl_edma->membase;
+
+	edma_writel(fsl_edma, EDMA3_MP_CSR_ERCA, addr + EDMA3_MP_CSR);
+}
+
+static void __iomem *fsl_edma_get_tcd_addr(struct fsl_edma_chan *fsl_chan)
+{
+	void __iomem *membase = fsl_chan->edma->membase;
+	u32 ch = fsl_chan->vchan.chan.chan_id;
+
+	return (EDMA_TCD(ch) + membase);
+}
+
+static void __iomem *fsl_edma3_get_tcd_addr(struct fsl_edma_chan *fsl_chan)
+{
+	void __iomem *membase = fsl_chan->edma->membase;
+	u32 ch = fsl_chan->vchan.chan.chan_id;
+
+	return (EDMA3_TCD(ch) + membase);
+}
+
+static struct fsl_edma_irq s32gen1_edma_irqs[] = {
+	{"edma-err", fsl_edma3_irq_handler, },
+	{"edma-tx_0-15", fsl_edma3_tx_handler, },
+	{"edma-tx_16-31", fsl_edma3_tx_handler, },
+};
+
 static struct fsl_edma_irq s32v234_edma_irqs[] = {
 	{"edma-err", fsl_edma_irq_handler, },
 	{"edma-tx_0-15", fsl_edma_tx_handler, },
@@ -294,19 +430,47 @@ static struct fsl_edma_irq vf610_edma_irqs[] = {
 	{"edma-err", fsl_edma_irq_handler, },
 	{"edma-tx", fsl_edma_tx_handler, },
 };
+
+static struct fsl_edma_ops fsl_edma_ops = {
+	.edma_enable_request = fsl_edma_enable_request,
+	.edma_disable_request = fsl_edma_disable_request,
+	.edma_enable_arbitration = fsl_edma_enable_arbitration,
+	.edma_get_tcd_addr = fsl_edma_get_tcd_addr,
+};
+
+static struct fsl_edma_ops fsl_edma3_ops = {
+	.edma_enable_request = fsl_edma3_enable_request,
+	.edma_disable_request = fsl_edma3_disable_request,
+	.edma_enable_arbitration = fsl_edma3_enable_arbitration,
+	.edma_get_tcd_addr = fsl_edma3_get_tcd_addr,
+};
+
+static struct fsl_edma_soc_data fsl_edma_s32gen1_data = {
+	.n_irqs = ARRAY_SIZE(s32gen1_edma_irqs),
+	.irqs = s32gen1_edma_irqs,
+	.mux_channel_mapping = s32v234_mux_channel_mapping,
+	.ops = &fsl_edma3_ops,
+};
+
 static struct fsl_edma_soc_data fsl_edma_s32v234_data = {
 	.n_irqs = ARRAY_SIZE(s32v234_edma_irqs),
 	.irqs = s32v234_edma_irqs,
 	.mux_channel_mapping = s32v234_mux_channel_mapping,
+	.ops = &fsl_edma_ops,
 };
 
 static struct fsl_edma_soc_data fsl_edma_vf610_data = {
 	.n_irqs = ARRAY_SIZE(vf610_edma_irqs),
 	.irqs = vf610_edma_irqs,
 	.mux_channel_mapping = vf610_mux_channel_mapping,
+	.ops = &fsl_edma_ops,
 };
 
 static const struct of_device_id fsl_edma_dt_ids[] = {
+	{
+	  .compatible = "fsl,s32gen1-edma",
+	  .data = &fsl_edma_s32gen1_data,
+	},
 	{
 	  .compatible = "fsl,s32v234-edma",
 	  .data = &fsl_edma_s32v234_data,
@@ -318,6 +482,11 @@ static const struct of_device_id fsl_edma_dt_ids[] = {
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
+
+static inline int is_s32gen1_edma(struct fsl_edma_engine *data)
+{
+	return data->socdata == &fsl_edma_s32gen1_data;
+}
 
 static inline int is_s32v234_edma(struct fsl_edma_engine *data)
 {
@@ -337,6 +506,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	struct fsl_edma_engine *fsl_edma;
 	const struct fsl_edma_drvdata *drvdata = NULL;
 	struct fsl_edma_chan *fsl_chan;
+	struct fsl_edma_hw_tcd *hw_tcd;
 	struct edma_regs *regs;
 	struct resource *res;
 	int len, chans;
@@ -428,7 +598,10 @@ static int fsl_edma_probe(struct platform_device *pdev)
 		fsl_chan->vchan.desc_free = fsl_edma_free_desc;
 		vchan_init(&fsl_chan->vchan, &fsl_edma->dma_dev);
 
-		edma_writew(fsl_edma, 0x0, &regs->tcd[i].csr);
+		hw_tcd = (struct fsl_edma_hw_tcd *)
+			fsl_edma->socdata->ops->edma_get_tcd_addr(fsl_chan);
+
+		edma_writew(fsl_edma, 0x0, &hw_tcd->csr);
 		fsl_edma_chan_mux(fsl_chan, 0, false);
 	}
 
@@ -480,7 +653,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	}
 
 	/* enable round robin arbitration */
-	edma_writel(fsl_edma, EDMA_CR_ERGA | EDMA_CR_ERCA, regs->cr);
+	fsl_edma->socdata->ops->edma_enable_arbitration(fsl_edma);
 
 	return 0;
 }

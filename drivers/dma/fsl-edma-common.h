@@ -10,6 +10,19 @@
 #include <linux/platform_device.h>
 #include "virt-dma.h"
 
+#define EDMA_TCD(ch)		(0x1000 + 32 * (ch))
+
+/* edma3 regs. */
+#define EDMA3_MP_CSR			0x00
+#define EDMA3_MP_ES			0x04
+
+#define EDMA3_CHn_CSR(ch)	(0x1000 + (ch) * 0x1000)
+#define EDMA3_CHn_ES(ch)	(0x1004 + (ch) * 0x1000)
+#define EDMA3_CHn_INT(ch)	(0x1008 + (ch) * 0x1000)
+
+#define EDMA3_TCD(ch)		(0x1020 + 0x1000 * (ch))
+
+/* edma2 fields. */
 #define EDMA_CR_EDBG		BIT(1)
 #define EDMA_CR_ERCA		BIT(2)
 #define EDMA_CR_ERGA		BIT(3)
@@ -24,6 +37,32 @@
 #define EDMA_CEEI_CEEI(x)	((x) & GENMASK(4, 0))
 #define EDMA_CINT_CINT(x)	((x) & GENMASK(4, 0))
 #define EDMA_CERR_CERR(x)	((x) & GENMASK(4, 0))
+
+/* edma3 fields. */
+#define EDMA3_MP_CSR_ERCA	BIT(2)
+#define EDMA3_MP_ES_VLD(x)	((x) & 0x80000000)
+
+#define EDMA3_CHn_CSR_ERQ	BIT(0)
+#define EDMA3_CHn_CSR_EEI	BIT(2)
+#define EDMA3_CHn_ES_ERR	BIT(31)
+#define EDMA3_CHn_INT_INT	BIT(0)
+
+/* edma2 & edma3 TCD fields. */
+#define EDMA_TCD_SADDR(tcd)		(0x00 + (tcd))
+#define EDMA_TCD_SOFF(tcd)		(0x04 + (tcd))
+#define EDMA_TCD_ATTR(tcd)		(0x06 + (tcd))
+#define EDMA_TCD_NBYTES(tcd)		(0x08 + (tcd))
+#define EDMA_TCD_SLAST(tcd)		(0x0C + (tcd))
+#define EDMA_TCD_DADDR(tcd)		(0x10 + (tcd))
+#define EDMA_TCD_DOFF(tcd)		(0x14 + (tcd))
+#define EDMA_TCD_CITER_ELINK(tcd)	(0x16 + (tcd))
+#define EDMA_TCD_CITER(tcd)		(0x16 + (tcd))
+#define EDMA_TCD_DLAST_SGA(tcd)		(0x18 + (tcd))
+#define EDMA_TCD_CSR(tcd)		(0x1C + (tcd))
+#define EDMA_TCD_BITER_ELINK(tcd)	(0x1E + (tcd))
+#define EDMA_TCD_BITER(tcd)		(0x1E + (tcd))
+
+/* edma2 & edma3 defines. */
 
 #define EDMA_TCD_ATTR_DSIZE(x)		(((x) & GENMASK(2, 0)))
 #define EDMA_TCD_ATTR_DMOD(x)		(((x) & GENMASK(4, 0)) << 3)
@@ -51,6 +90,9 @@
 #define EDMA_TCD_CSR_E_LINK		BIT(5)
 #define EDMA_TCD_CSR_ACTIVE		BIT(6)
 #define EDMA_TCD_CSR_DONE		BIT(7)
+#define EDMA_TCD_CSR_MAJOR_LINK		BIT(5)
+#define EDMA_TCD_CSR_EEOP		BIT(6)
+#define EDMA_TCD_CSR_ESDA		BIT(7)
 
 #define EDMAMUX_CHCFG_DIS		0x0
 #define EDMAMUX_CHCFG_ENBL		0x80
@@ -68,6 +110,20 @@ enum fsl_edma_pm_state {
 };
 
 struct fsl_edma_hw_tcd {
+	u32	saddr;
+	u16	soff;
+	u16	attr;
+	u32	nbytes;
+	u32	slast;
+	u32	daddr;
+	u16	doff;
+	u16	citer;
+	u32	dlast_sga;
+	u16	csr;
+	u16	biter;
+};
+
+struct fsl_edma_tcd {
 	__le32	saddr;
 	__le16	soff;
 	__le16	attr;
@@ -108,7 +164,7 @@ struct edma_regs {
 
 struct fsl_edma_sw_tcd {
 	dma_addr_t			ptcd;
-	struct fsl_edma_hw_tcd		*vtcd;
+	struct fsl_edma_tcd		*vtcd;
 };
 
 struct fsl_edma_chan {
@@ -158,10 +214,18 @@ struct fsl_edma_irq {
 	int irqno;
 };
 
+struct fsl_edma_ops {
+	void    (*edma_enable_request)(struct fsl_edma_chan *);
+	void    (*edma_disable_request)(struct fsl_edma_chan *);
+	void    (*edma_enable_arbitration)(struct fsl_edma_engine *);
+	void __iomem*    (*edma_get_tcd_addr)(struct fsl_edma_chan *);
+};
+
 struct fsl_edma_soc_data {
 	int n_irqs;
 	struct fsl_edma_irq	*irqs;
 	unsigned int (*mux_channel_mapping)(u32 channel_id);
+	struct fsl_edma_ops	*ops;
 };
 
 struct fsl_edma_engine {

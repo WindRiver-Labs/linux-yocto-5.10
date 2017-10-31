@@ -165,7 +165,7 @@ int fsl_edma_terminate_all(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
-	fsl_edma_disable_request(fsl_chan);
+	fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
 	fsl_chan->edesc = NULL;
 	fsl_chan->idle = true;
 	vchan_get_all_descriptors(&fsl_chan->vchan, &head);
@@ -182,7 +182,7 @@ int fsl_edma_pause(struct dma_chan *chan)
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
 	if (fsl_chan->edesc) {
-		fsl_edma_disable_request(fsl_chan);
+		fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
 		fsl_chan->status = DMA_PAUSED;
 		fsl_chan->idle = true;
 	}
@@ -198,7 +198,7 @@ int fsl_edma_resume(struct dma_chan *chan)
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
 	if (fsl_chan->edesc) {
-		fsl_edma_enable_request(fsl_chan);
+		fsl_chan->edma->socdata->ops->edma_enable_request(fsl_chan);
 		fsl_chan->status = DMA_IN_PROGRESS;
 		fsl_chan->idle = false;
 	}
@@ -272,8 +272,9 @@ static size_t fsl_edma_desc_residue(struct fsl_edma_chan *fsl_chan,
 		struct virt_dma_desc *vdesc, bool in_progress)
 {
 	struct fsl_edma_desc *edesc = fsl_chan->edesc;
-	struct edma_regs *regs = &fsl_chan->edma->regs;
-	u32 ch = fsl_chan->vchan.chan.chan_id;
+	const struct fsl_edma_soc_data *socdata = fsl_chan->edma->socdata;
+	struct fsl_edma_hw_tcd *hw_tcd = (struct fsl_edma_hw_tcd *)
+		socdata->ops->edma_get_tcd_addr(fsl_chan);
 	enum dma_transfer_direction dir = edesc->dirn;
 	dma_addr_t cur_addr, dma_addr;
 	size_t len, size;
@@ -288,9 +289,9 @@ static size_t fsl_edma_desc_residue(struct fsl_edma_chan *fsl_chan,
 		return len;
 
 	if (dir == DMA_MEM_TO_DEV)
-		cur_addr = edma_readl(fsl_chan->edma, &regs->tcd[ch].saddr);
+		cur_addr = edma_readl(fsl_chan->edma, &hw_tcd->saddr);
 	else
-		cur_addr = edma_readl(fsl_chan->edma, &regs->tcd[ch].daddr);
+		cur_addr = edma_readl(fsl_chan->edma, &hw_tcd->saddr);
 
 	/* figure out the finished and calculate the residue */
 	for (i = 0; i < fsl_chan->edesc->n_tcds; i++) {
@@ -344,41 +345,41 @@ enum dma_status fsl_edma_tx_status(struct dma_chan *chan,
 EXPORT_SYMBOL_GPL(fsl_edma_tx_status);
 
 static void fsl_edma_set_tcd_regs(struct fsl_edma_chan *fsl_chan,
-				  struct fsl_edma_hw_tcd *tcd)
+				  struct fsl_edma_tcd *tcd)
 {
 	struct fsl_edma_engine *edma = fsl_chan->edma;
-	struct edma_regs *regs = &fsl_chan->edma->regs;
-	u32 ch = fsl_chan->vchan.chan.chan_id;
+	const struct fsl_edma_soc_data *socdata = fsl_chan->edma->socdata;
+	struct fsl_edma_hw_tcd *hw_tcd = (struct fsl_edma_hw_tcd *)
+		socdata->ops->edma_get_tcd_addr(fsl_chan);
 
 	/*
-	 * TCD parameters are stored in struct fsl_edma_hw_tcd in little
+	 * TCD parameters are stored in struct fsl_edma_tcd in little
 	 * endian format. However, we need to load the TCD registers in
 	 * big- or little-endian obeying the eDMA engine model endian,
 	 * and this is performed from specific edma_write functions
 	 */
-	edma_writew(edma, 0,  &regs->tcd[ch].csr);
+	edma_writew(edma, 0, &hw_tcd->csr);
 
-	edma_writel(edma, (s32)tcd->saddr, &regs->tcd[ch].saddr);
-	edma_writel(edma, (s32)tcd->daddr, &regs->tcd[ch].daddr);
+	edma_writel(edma, le32_to_cpu(tcd->saddr), &hw_tcd->saddr);
+	edma_writel(edma, le32_to_cpu(tcd->daddr), &hw_tcd->daddr);
 
-	edma_writew(edma, (s16)tcd->attr, &regs->tcd[ch].attr);
-	edma_writew(edma, tcd->soff, &regs->tcd[ch].soff);
+	edma_writew(edma, le16_to_cpu(tcd->attr), &hw_tcd->attr);
+	edma_writew(edma, le16_to_cpu(tcd->soff), &hw_tcd->soff);
 
-	edma_writel(edma, (s32)tcd->nbytes, &regs->tcd[ch].nbytes);
-	edma_writel(edma, (s32)tcd->slast, &regs->tcd[ch].slast);
+	edma_writel(edma, le32_to_cpu(tcd->nbytes), &hw_tcd->nbytes);
+	edma_writel(edma, le32_to_cpu(tcd->slast), &hw_tcd->slast);
 
-	edma_writew(edma, (s16)tcd->citer, &regs->tcd[ch].citer);
-	edma_writew(edma, (s16)tcd->biter, &regs->tcd[ch].biter);
-	edma_writew(edma, (s16)tcd->doff, &regs->tcd[ch].doff);
+	edma_writew(edma, le16_to_cpu(tcd->citer), &hw_tcd->citer);
+	edma_writew(edma, le16_to_cpu(tcd->biter), &hw_tcd->biter);
+	edma_writew(edma, le16_to_cpu(tcd->doff), &hw_tcd->doff);
 
-	edma_writel(edma, (s32)tcd->dlast_sga,
-			&regs->tcd[ch].dlast_sga);
+	edma_writel(edma, le32_to_cpu(tcd->dlast_sga), &hw_tcd->dlast_sga);
 
-	edma_writew(edma, (s16)tcd->csr, &regs->tcd[ch].csr);
+	edma_writew(edma, le16_to_cpu(tcd->csr), &hw_tcd->csr);
 }
 
 static inline
-void fsl_edma_fill_tcd(struct fsl_edma_hw_tcd *tcd, u32 src, u32 dst,
+void fsl_edma_fill_tcd(struct fsl_edma_tcd *tcd, u32 src, u32 dst,
 		       u16 attr, u16 soff, u32 nbytes, u32 slast, u16 citer,
 		       u16 biter, u16 doff, u32 dlast_sga, bool major_int,
 		       bool disable_req, bool enable_sg)
@@ -599,7 +600,7 @@ void fsl_edma_xfer_desc(struct fsl_edma_chan *fsl_chan)
 		return;
 	fsl_chan->edesc = to_fsl_edma_desc(vdesc);
 	fsl_edma_set_tcd_regs(fsl_chan, fsl_chan->edesc->tcd[0].vtcd);
-	fsl_edma_enable_request(fsl_chan);
+	fsl_chan->edma->socdata->ops->edma_enable_request(fsl_chan);
 	fsl_chan->status = DMA_IN_PROGRESS;
 	fsl_chan->idle = false;
 }
@@ -630,7 +631,7 @@ int fsl_edma_alloc_chan_resources(struct dma_chan *chan)
 	struct fsl_edma_chan *fsl_chan = to_fsl_edma_chan(chan);
 
 	fsl_chan->tcd_pool = dma_pool_create("tcd_pool", chan->device->dev,
-				sizeof(struct fsl_edma_hw_tcd),
+				sizeof(struct fsl_edma_tcd),
 				32, 0);
 	return 0;
 }
@@ -643,7 +644,7 @@ void fsl_edma_free_chan_resources(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
-	fsl_edma_disable_request(fsl_chan);
+	fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
 	fsl_edma_chan_mux(fsl_chan, 0, false);
 	fsl_chan->edesc = NULL;
 	vchan_get_all_descriptors(&fsl_chan->vchan, &head);
