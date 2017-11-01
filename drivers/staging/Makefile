@@ -48,5 +48,6 @@ obj-$(CONFIG_FIELDBUS_DEV)     += fieldbus/
 obj-$(CONFIG_KPC2000)		+= kpc2000/
 obj-$(CONFIG_QLGE)		+= qlge/
 obj-$(CONFIG_FSL_SDK_DPA)      += fsl_qbman/
+obj-$(CONFIG_FSL_PPFE)         += fsl_ppfe/
 obj-$(CONFIG_WFX)		+= wfx/
 obj-y				+= hikey9xx/
