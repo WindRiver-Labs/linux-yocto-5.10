@@ -59,6 +59,7 @@
  * reasonable number of frames will be pending at any given time.
  * Ingress frame drop due to buffer pool depletion should be a corner case only
  */
+#define DPAA2_ETH_MAX_FRAMES_PER_QUEUE (DPAA2_ETH_FQ_TAILDROP_THRESH / 64)
 #define DPAA2_ETH_NUM_BUFS		1280
 #define DPAA2_ETH_REFILL_THRESH \
 	(DPAA2_ETH_NUM_BUFS - DPAA2_ETH_BUFS_PER_CMD)
