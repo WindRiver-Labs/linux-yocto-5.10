@@ -43,6 +43,8 @@ static struct snd_pcm_hw_constraint_list fsl_asrc_rate_constraints = {
 	.list = supported_asrc_rate,
 };
 
+#define CLK_MAP_NUM 48
+
 /*
  * The following tables map the relationship between asrc_inclk/asrc_outclk in
  * fsl_asrc.h and the registers of ASRCSR
@@ -698,6 +700,11 @@ static int fsl_asrc_dai_hw_params(struct snd_pcm_substream *substream,
 		config.input_sample_rate  = rate;
 		config.output_sample_rate = asrc->asrc_rate;
 
+		config.inclk = fsl_asrc_select_clk(asrc_priv,
+				config.input_sample_rate, IN);
+		config.outclk = fsl_asrc_select_clk(asrc_priv,
+				config.output_sample_rate, OUT);
+
 		ret = fsl_asrc_config_pair(pair, false, true);
 		if (ret) {
 			dev_err(dai->dev, "fail to config asrc pair\n");
@@ -708,6 +715,11 @@ static int fsl_asrc_dai_hw_params(struct snd_pcm_substream *substream,
 		config.output_format  = params_format(params);
 		config.input_sample_rate  = asrc->asrc_rate;
 		config.output_sample_rate = rate;
+
+		config.inclk = fsl_asrc_select_clk(asrc_priv,
+				config.input_sample_rate, IN);
+		config.outclk = fsl_asrc_select_clk(asrc_priv,
+				config.output_sample_rate, OUT);
 
 		ret = fsl_asrc_config_pair(pair, true, false);
 		if (ret) {
