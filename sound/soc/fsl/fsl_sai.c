@@ -518,8 +518,12 @@ static int fsl_sai_hw_params(struct snd_pcm_substream *substream,
 	pins = DIV_ROUND_UP(channels, slots);
 
 	if (!sai->slave_mode[tx]) {
-		ret = fsl_sai_set_bclk(cpu_dai, tx,
-			slots * slot_width * params_rate(params));
+		if (sai->bitclk_freq)
+			ret = fsl_sai_set_bclk(cpu_dai, tx,
+				sai->bitclk_freq);
+		else
+			ret = fsl_sai_set_bclk(cpu_dai, tx,
+				slots * slot_width * params_rate(params));
 		if (ret)
 			return ret;
 
