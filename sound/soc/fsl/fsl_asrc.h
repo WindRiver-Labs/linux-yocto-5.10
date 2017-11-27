@@ -330,4 +330,7 @@ struct fsl_asrc_priv {
 	u32 regcache_cfg;
 };
 
+int fsl_asrc_request_pair(int channels, struct fsl_asrc_pair *pair);
+void fsl_asrc_release_pair(struct fsl_asrc_pair *pair);
+
 #endif /* _FSL_ASRC_H */

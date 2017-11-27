@@ -13,6 +13,7 @@
 #include <sound/pcm_params.h>
 
 #include "fsl_asrc_common.h"
+#include "fsl_asrc.h"
 
 #define FSL_ASRC_DMABUF_SIZE	(256 * 1024)
 
@@ -345,7 +346,13 @@ static int fsl_asrc_dma_startup(struct snd_soc_component *component,
 	struct dma_chan *tmp_chan = NULL;
 	u8 dir = tx ? OUT : IN;
 	bool release_pair = true;
+	struct dma_slave_caps dma_caps;
+	u32 addr_widths = BIT(DMA_SLAVE_BUSWIDTH_1_BYTE) |
+                          BIT(DMA_SLAVE_BUSWIDTH_2_BYTES) |
+                          BIT(DMA_SLAVE_BUSWIDTH_4_BYTES);
+
 	int ret = 0;
+	int i;
 
 	ret = snd_pcm_hw_constraint_integer(substream->runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
@@ -383,17 +390,61 @@ static int fsl_asrc_dma_startup(struct snd_soc_component *component,
 
 	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 
-	/* Refine the snd_imx_hardware according to caps of DMA. */
-	ret = snd_dmaengine_pcm_refine_runtime_hwparams(substream,
-							dma_data,
-							&snd_imx_hardware,
-							tmp_chan);
-	if (ret < 0) {
-		dev_err(dev, "failed to refine runtime hwparams\n");
-		goto out;
-	}
+	ret = dma_get_slave_caps(tmp_chan, &dma_caps);
+        if (ret == 0) {
+                if (dma_caps.cmd_pause)
+                        snd_imx_hardware.info |= SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME;
+                if (dma_caps.residue_granularity <= DMA_RESIDUE_GRANULARITY_SEGMENT)
+                        snd_imx_hardware.info |= SNDRV_PCM_INFO_BATCH;
 
-	release_pair = false;
+                if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+                        addr_widths = dma_caps.dst_addr_widths;
+                else
+                        addr_widths = dma_caps.src_addr_widths;
+        }
+
+	/*
+         * If SND_DMAENGINE_PCM_DAI_FLAG_PACK is set keep
+         * hw.formats set to 0, meaning no restrictions are in place.
+         * In this case it's the responsibility of the DAI driver to
+         * provide the supported format information.
+         */
+        if (!(dma_data->flags & SND_DMAENGINE_PCM_DAI_FLAG_PACK))
+                /*
+                 * Prepare formats mask for valid/allowed sample types. If the
+                 * dma does not have support for the given physical word size,
+                 * it needs to be masked out so user space can not use the
+                 * format which produces corrupted audio.
+                 * In case the dma driver does not implement the slave_caps the
+                 * default assumption is that it supports 1, 2 and 4 bytes
+                 * widths.
+                 */
+                for (i = 0; i <= SNDRV_PCM_FORMAT_LAST; i++) {
+                        int bits = snd_pcm_format_physical_width(i);
+
+                        /*
+                         * Enable only samples with DMA supported physical
+                         * widths
+                         */
+                        switch (bits) {
+                        case 8:
+                        case 16:
+                        case 24:
+                        case 32:
+                        case 64:
+                                if (addr_widths & (1 << (bits / 8)))
+                                        snd_imx_hardware.formats |= (1LL << i);
+                                break;
+                        default:
+                                /* Unsupported types */
+                                break;
+                        }
+                }
+
+        if (tmp_chan)
+                dma_release_channel(tmp_chan);
+        fsl_asrc_release_pair(pair);
+
 	snd_soc_set_runtime_hwparams(substream, &snd_imx_hardware);
 
 out:
