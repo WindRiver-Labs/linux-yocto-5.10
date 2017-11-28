@@ -305,21 +305,15 @@ static int imx_hifi_startup(struct snd_pcm_substream *substream)
 			return ret;
 	}
 
-	ret = clk_prepare_enable(data->codec_clk);
-	if (ret) {
-		dev_err(card->dev, "Failed to enable MCLK: %d\n", ret);
-		return ret;
-	}
-
 	return ret;
 }
 
 static void imx_hifi_shutdown(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_card *card = rtd->card;
-	struct imx_wm8960_data *data = snd_soc_card_get_drvdata(card);
-	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
+        struct snd_soc_pcm_runtime *rtd = substream->private_data;
+        struct snd_soc_card *card = rtd->card;
+        struct imx_wm8960_data *data = snd_soc_card_get_drvdata(card);
+        bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 
 }
 
