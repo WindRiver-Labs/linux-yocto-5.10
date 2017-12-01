@@ -40,12 +40,18 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_dma.h>
+#include <linux/of_gpio.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_data/i2c-imx.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/gpio.h>
+#include <linux/of_address.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
+#include <linux/libata.h>
 
 /* This will be the driver name the kernel reports */
 #define DRIVER_NAME "imx-i2c"
@@ -106,6 +112,26 @@
 #define I2CR_IEN_OPCODE_1	I2CR_IEN
 
 #define I2C_PM_TIMEOUT		10 /* ms */
+
+static const struct of_device_id pinmux_of_match[] = {
+        { .compatible = "fsl,ls1012a-vf610-i2c", .data = &ls1012a_pinmux_cfg},
+        { .compatible = "fsl,ls1043a-vf610-i2c", .data = &ls1043a_pinmux_cfg},
+        { .compatible = "fsl,ls1046a-vf610-i2c", .data = &ls1046a_pinmux_cfg},
+        {},
+};
+MODULE_DEVICE_TABLE(of, pinmux_of_match);
+
+/* The SCFG, Supplemental Configuration Unit, provides SoC specific
+ * configuration and status registers for the device. There is a
+ * SDHC IO VSEL control register on SCFG for some platforms. It's
+ * used to support SDHC IO voltage switching.
+ */
+static const struct of_device_id scfg_device_ids[] = {
+        { .compatible = "fsl,ls1012a-scfg", },
+        { .compatible = "fsl,ls1043a-scfg", },
+        { .compatible = "fsl,ls1046a-scfg", },
+        {}
+};
 
 #define IMX_I2C_MAX_E_BIT_RATE 384000  /* 384kHz from e7805 errata*/
 
@@ -204,6 +230,12 @@ struct imx_i2c_struct {
 	struct pinctrl_state *pinctrl_pins_gpio;
 
 	struct imx_i2c_dma	*dma;
+	int			layerscape_bus_recover;
+	int 			gpio;
+	int			need_set_pmuxcr;
+	int			pmuxcr_set;
+	int			pmuxcr_endian;
+	void __iomem		*pmuxcr_addr;
 };
 
 static const struct imx_i2c_hwdata imx1_i2c_hwdata = {
@@ -979,6 +1011,79 @@ static int i2c_imx_read(struct imx_i2c_struct *i2c_imx, struct i2c_msg *msgs,
 	return 0;
 }
 
+/*
+ * Based on the I2C specification, if the data line (SDA) is
+ * stuck low, the master should send nine  * clock pulses.
+ * The I2C slave device that held the bus low should release it
+ * sometime within  * those nine clocks. Due to this erratum,
+ * the I2C controller cannot generate nine clock pulses.
+ */
+static int i2c_imx_recovery_for_layerscape(struct imx_i2c_struct *i2c_imx)
+{
+        u32 pmuxcr = 0;
+        int ret;
+        unsigned int i, temp;
+
+        /* configure IICx_SCL/GPIO pin as a GPIO */
+        if (i2c_imx->need_set_pmuxcr == 1) {
+                pmuxcr = ioread32be(i2c_imx->pmuxcr_addr);
+                if (i2c_imx->pmuxcr_endian == BIG_ENDIAN)
+                        iowrite32be(i2c_imx->pmuxcr_set|pmuxcr,
+                                    i2c_imx->pmuxcr_addr);
+                else
+                        iowrite32(i2c_imx->pmuxcr_set|pmuxcr,
+                                  i2c_imx->pmuxcr_addr);
+        }
+
+        ret = gpio_request(i2c_imx->gpio, i2c_imx->adapter.name);
+        if (ret) {
+                dev_err(&i2c_imx->adapter.dev,
+                        "can't get gpio: %d\n", ret);
+                return ret;
+        }
+
+	/* Configure GPIO pin as an output and open drain. */
+        gpio_direction_output(i2c_imx->gpio, 1);
+        udelay(10);
+
+        /* Write data to generate 9 pulses */
+        for (i = 0; i < 9; i++) {
+                gpio_set_value(i2c_imx->gpio, 1);
+                udelay(10);
+                gpio_set_value(i2c_imx->gpio, 0);
+                udelay(10);
+        }
+        /* ensure that the last level sent is always high */
+        gpio_set_value(i2c_imx->gpio, 1);
+
+        /*
+         * Set I2Cx_IBCR = 0h00 to generate a STOP
+         */
+        imx_i2c_write_reg(i2c_imx->hwdata->i2cr_ien_opcode, i2c_imx, IMX_I2C_I2CR);
+
+        /*
+         * Set I2Cx_IBCR = 0h80 to reset the I2Cx controller
+         */
+        imx_i2c_write_reg(i2c_imx->hwdata->i2cr_ien_opcode | I2CR_IEN, i2c_imx, IMX_I2C_I2CR);
+
+        /* Restore the saved value of the register SCFG_RCWPMUXCR0 */
+        if (i2c_imx->need_set_pmuxcr == 1) {
+                if (i2c_imx->pmuxcr_endian == BIG_ENDIAN)
+                        iowrite32be(pmuxcr, i2c_imx->pmuxcr_addr);
+                else
+                        iowrite32(pmuxcr, i2c_imx->pmuxcr_addr);
+        }
+	/*
+         * Set I2C_IBSR[IBAL] to clear the IBAL bit if-
+         * I2C_IBSR[IBAL] = 1
+         */
+        temp = imx_i2c_read_reg(i2c_imx, IMX_I2C_I2SR);
+        if (temp & I2SR_IAL)
+                i2c_imx_clr_al_bit(temp, i2c_imx);
+
+        return 0;
+}
+
 static int i2c_imx_xfer_common(struct i2c_adapter *adapter,
 			       struct i2c_msg *msgs, int num, bool atomic)
 {
@@ -1080,8 +1185,13 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 	* before switching to master mode and attempting a Start cycle
 	*/
 	result =  i2c_imx_bus_busy(i2c_imx, 0);
-	if (result)
-		goto out;
+	if (result) {
+		/* timeout */
+		if ((result == -ETIMEDOUT) && (i2c_imx->layerscape_bus_recover == 1))
+			i2c_imx_recovery_for_layerscape(i2c_imx);
+		else
+			goto out;
+	}
 
 	result = pm_runtime_get_sync(i2c_imx->adapter.dev.parent);
 	if (result < 0)
@@ -1093,6 +1203,15 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 	pm_runtime_put_autosuspend(i2c_imx->adapter.dev.parent);
 
 	return result;
+
+out:
+        if (enable_runtime_pm)
+                pm_runtime_disable(i2c_imx->adapter.dev.parent);
+
+        dev_dbg(&i2c_imx->adapter.dev, "<%s> exit with: %s: %d\n", __func__,
+                (result < 0) ? "error" : "success msg",
+                        (result < 0) ? result : num);
+        return (result < 0) ? result : num;
 }
 
 static int i2c_imx_xfer_atomic(struct i2c_adapter *adapter,
@@ -1174,6 +1293,50 @@ static int i2c_imx_init_recovery_info(struct imx_i2c_struct *i2c_imx,
 	rinfo->recover_bus = i2c_generic_scl_recovery;
 	i2c_imx->adapter.bus_recovery_info = rinfo;
 
+	return 0;
+}
+
+/*
+ * switch SCL and SDA to their GPIO function and do some bitbanging
+ * for bus recovery.
+ * There are platforms such as Layerscape that don't support pinctrl, so add
+ * workaround for layerscape, it has no effect for other platforms.
+ */
+static int i2c_imx_init_recovery_for_layerscape(
+		struct imx_i2c_struct *i2c_imx,
+		struct platform_device *pdev)
+{
+	const struct of_device_id *of_id;
+	struct device_node *np		= pdev->dev.of_node;
+	struct pinmux_cfg		*pinmux_cfg;
+	struct device_node *scfg_node;
+	void __iomem *scfg_base = NULL;
+
+	i2c_imx->gpio = of_get_named_gpio(np, "scl-gpios", 0);
+	if (!gpio_is_valid(i2c_imx->gpio)) {
+		dev_info(&pdev->dev, "scl-gpios not found\n");
+		return 0;
+	}
+	pinmux_cfg = devm_kzalloc(&pdev->dev, sizeof(*pinmux_cfg), GFP_KERNEL);
+	if (!pinmux_cfg)
+		return -ENOMEM;
+
+	i2c_imx->need_set_pmuxcr = 0;
+	of_id = of_match_node(pinmux_of_match, np);
+	if (of_id) {
+		pinmux_cfg = (struct pinmux_cfg *)of_id->data;
+		i2c_imx->pmuxcr_endian = pinmux_cfg->endian;
+		i2c_imx->pmuxcr_set = pinmux_cfg->pmuxcr_set_bit;
+		scfg_node = of_find_matching_node(NULL, scfg_device_ids);
+		if (scfg_node) {
+			scfg_base = of_iomap(scfg_node, 0);
+			if (scfg_base) {
+				i2c_imx->pmuxcr_addr = scfg_base + pinmux_cfg->pmuxcr_offset;
+				i2c_imx->need_set_pmuxcr = 1;
+			}
+		}
+	}
+	i2c_imx->layerscape_bus_recover = 1;
 	return 0;
 }
 
@@ -1298,8 +1461,13 @@ static int i2c_imx_probe(struct platform_device *pdev)
 			i2c_imx, IMX_I2C_I2CR);
 	imx_i2c_write_reg(i2c_imx->hwdata->i2sr_clr_opcode, i2c_imx, IMX_I2C_I2SR);
 
+#ifdef CONFIG_ARCH_LAYERSCAPE
+	/* Init optional bus recovery for layerscape */
+	ret = i2c_imx_init_recovery_for_layerscape(i2c_imx, pdev);
+#else
 	/* Init optional bus recovery function */
 	ret = i2c_imx_init_recovery_info(i2c_imx, pdev);
+#endif
 	/* Give it another chance if pinctrl used is not ready yet */
 	if (ret == -EPROBE_DEFER)
 		goto clk_notifier_unregister;
