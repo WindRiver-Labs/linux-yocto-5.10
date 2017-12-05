@@ -83,6 +83,8 @@ extern bool arm64_use_ng_mappings;
 		__val;							\
 	 })
 
+#define PAGE_S2_NS             __pgprot(PAGE_S2_MEMATTR(NORMAL) | PTE_S2_RDWR | PTE_TYPE_PAGE | PTE_AF)
+
 #define PAGE_NONE		__pgprot(((_PAGE_DEFAULT) & ~PTE_VALID) | PTE_PROT_NONE | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
 /* shared+writable pages are clean by default, hence PTE_RDONLY|PTE_WRITE */
 #define PAGE_SHARED		__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN | PTE_WRITE)
