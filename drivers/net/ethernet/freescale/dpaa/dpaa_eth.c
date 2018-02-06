@@ -3112,6 +3112,37 @@ static int dpaa_eth_probe(struct platform_device *pdev)
 		goto free_netdev;
 	}
 
+	err = bman_is_probed();
+       if (!err)
+               return -EPROBE_DEFER;
+       if (err < 0) {
+               dev_err(&pdev->dev, "failing probe due to bman probe error\n");
+               return -ENODEV;
+       }
+       err = qman_is_probed();
+       if (!err)
+               return -EPROBE_DEFER;
+       if (err < 0) {
+               dev_err(&pdev->dev, "failing probe due to qman probe error\n");
+               return -ENODEV;
+       }
+       err = bman_portals_probed();
+       if (!err)
+               return -EPROBE_DEFER;
+       if (err < 0) {
+               dev_err(&pdev->dev,
+                       "failing probe due to bman portals probe error\n");
+               return -ENODEV;
+       }
+       err = qman_portals_probed();
+       if (!err)
+               return -EPROBE_DEFER;
+       if (err < 0) {
+               dev_err(&pdev->dev,
+                       "failing probe due to qman portals probe error\n");
+               return -ENODEV;
+       }
+
 	/* Devices used for DMA mapping */
 	priv->rx_dma_dev = fman_port_get_device(mac_dev->port[RX]);
 	priv->tx_dma_dev = fman_port_get_device(mac_dev->port[TX]);
