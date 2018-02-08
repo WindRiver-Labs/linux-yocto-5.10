@@ -946,6 +946,14 @@ static struct reg_default fsl_sai_v3_reg_defaults[] = {
 	{FSL_SAI_TCR3(8), 0},
 	{FSL_SAI_TCR4(8), 0},
 	{FSL_SAI_TCR5(8), 0},
+	{FSL_SAI_TDR0, 0},
+        {FSL_SAI_TDR1, 0},
+        {FSL_SAI_TDR2, 0},
+        {FSL_SAI_TDR3, 0},
+        {FSL_SAI_TDR4, 0},
+        {FSL_SAI_TDR5, 0},
+        {FSL_SAI_TDR6, 0},
+        {FSL_SAI_TDR7, 0},
 	{FSL_SAI_TMR, 0},
 	{FSL_SAI_RCR1(8), 0},
 	{FSL_SAI_RCR2(8), 0},
@@ -986,6 +994,14 @@ static bool fsl_sai_readable_reg(struct device *dev, unsigned int reg)
 	case FSL_SAI_TFR6:
 	case FSL_SAI_TFR7:
 	case FSL_SAI_TMR:
+	case FSL_SAI_RDR0:
+        case FSL_SAI_RDR1:
+        case FSL_SAI_RDR2:
+        case FSL_SAI_RDR3:
+        case FSL_SAI_RDR4:
+        case FSL_SAI_RDR5:
+        case FSL_SAI_RDR6:
+        case FSL_SAI_RDR7:
 	case FSL_SAI_RCSR:
 	case FSL_SAI_RCR1:
 	case FSL_SAI_RCR2:
@@ -1040,6 +1056,14 @@ static bool fsl_sai_volatile_reg(struct device *dev, unsigned int reg)
 		case FSL_SAI_TFR5:
 		case FSL_SAI_TFR6:
 		case FSL_SAI_TFR7:
+		case FSL_SAI_RDR0:
+	        case FSL_SAI_RDR1:
+        	case FSL_SAI_RDR2:
+	        case FSL_SAI_RDR3:
+	        case FSL_SAI_RDR4:
+	        case FSL_SAI_RDR5:
+	        case FSL_SAI_RDR6:
+	        case FSL_SAI_RDR7:
 		case FSL_SAI_RFR0:
 		case FSL_SAI_RFR1:
 		case FSL_SAI_RFR2:
@@ -1070,6 +1094,12 @@ static bool fsl_sai_writeable_reg(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case FSL_SAI_TDR0:
 	case FSL_SAI_TDR1:
+        case FSL_SAI_TDR2:
+        case FSL_SAI_TDR3:
+        case FSL_SAI_TDR4:
+        case FSL_SAI_TDR5:
+        case FSL_SAI_TDR6:
+        case FSL_SAI_TDR7:
 	case FSL_SAI_TFR:
 	case FSL_SAI_TMR:
 	case FSL_SAI_RMR:
