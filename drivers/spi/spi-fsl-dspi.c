@@ -53,6 +53,8 @@
 
 #define SPI_SR				0x2c
 #define SPI_SR_TCFQF			BIT(31)
+#define SPI_SR_TXRXS			BIT(30)
+#define SPI_SR_EOQF			BIT(28)
 #define SPI_SR_TFUF			BIT(27)
 #define SPI_SR_TFFF			BIT(25)
 #define SPI_SR_CMDTCF			BIT(23)
@@ -912,6 +914,7 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	struct spi_device *spi = message->spi;
 	struct spi_transfer *transfer;
 	int status = 0;
+	unsigned int val;
 
 	message->actual_length = 0;
 
@@ -945,8 +948,10 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 		dspi->progress = 0;
 
 		regmap_update_bits(dspi->regmap, SPI_MCR,
-				   SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF,
-				   SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF);
+				SPI_MCR_HALT, SPI_MCR_HALT);
+		while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
+				val & SPI_SR_TXRXS)
+			;
 
 		spi_take_timestamp_pre(dspi->ctlr, dspi->cur_transfer,
 				       dspi->progress, !dspi->irq);
@@ -965,6 +970,10 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 				} while (status == -EINPROGRESS);
 			}
 		}
+		regmap_update_bits(dspi->regmap, SPI_MCR,
+				SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF |
+				SPI_MCR_HALT,
+				SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF);
 		if (status)
 			break;
 
