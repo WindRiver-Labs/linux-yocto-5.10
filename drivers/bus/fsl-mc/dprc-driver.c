@@ -650,7 +650,7 @@ int dprc_setup(struct fsl_mc_device *mc_dev)
 			  &mc_dev->mc_handle);
 	if (error < 0) {
 		dev_err(&mc_dev->dev, "dprc_open() failed: %d\n", error);
-		goto error_cleanup_msi_domain;
+		goto error_cleanup_uapi;
 	}
 
 	error = dprc_get_attributes(mc_dev->mc_io, 0, mc_dev->mc_handle,
@@ -684,6 +684,10 @@ int dprc_setup(struct fsl_mc_device *mc_dev)
 
 error_cleanup_open:
 	(void)dprc_close(mc_dev->mc_io, 0, mc_dev->mc_handle);
+
+error_cleanup_uapi:
+	if (fsl_mc_is_root_dprc(&mc_dev->dev))
+		fsl_mc_uapi_remove_device_file(mc_bus);
 
 error_cleanup_msi_domain:
 	if (msi_domain_set)
@@ -826,7 +830,15 @@ static int dprc_remove(struct fsl_mc_device *mc_dev)
 
 	device_for_each_child(&mc_dev->dev, NULL, __fsl_mc_device_remove);
 
+	error = fsl_mc_uapi_create_device_file(mc_bus);
+        if (error < 0) {
+                error = -EPROBE_DEFER;
+	        goto error_cleanup_msi_domain;
+        }
+
 	dprc_cleanup(mc_dev);
+
+	fsl_mc_uapi_remove_device_file(mc_bus);
 
 	dev_info(&mc_dev->dev, "DPRC device unbound from driver");
 	return 0;
