@@ -1697,7 +1697,7 @@ static struct sk_buff *dpaa_cleanup_tx_fd(const struct dpaa_priv *priv,
                else
 #endif
                        /* Free the page frag that we allocated on Tx */
-                       skb_free_frag(phys_to_virt(addr));
+		       skb_free_frag(skbh);
 	} else {
 		dma_unmap_single(priv->tx_dma_dev, addr,
 				 priv->tx_headroom + qm_fd_get_length(fd),
@@ -1782,14 +1782,14 @@ static struct sk_buff *contig_fd_to_skb(const struct dpaa_priv *priv,
  * The page fragment holding the S/G Table is recycled here.
  */
 static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
-				    const struct qm_fd *fd)
+				    const struct qm_fd *fd,
+				    struct dpaa_bp *dpaa_bp,
+				    void *vaddr)
 {
 	ssize_t fd_off = qm_fd_get_offset(fd);
-	dma_addr_t addr = qm_fd_addr(fd);
 	const struct qm_sg_entry *sgt;
 	struct page *page, *head_page;
-	struct dpaa_bp *dpaa_bp;
-	void *vaddr, *sg_vaddr;
+	void *sg_vaddr;
 	int frag_off, frag_len;
 	struct sk_buff *skb;
 	dma_addr_t sg_addr;
@@ -1798,7 +1798,6 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 	int *count_ptr;
 	int i, j;
 
-	vaddr = phys_to_virt(addr);
 	WARN_ON(!IS_ALIGNED((unsigned long)vaddr, SMP_CACHE_BYTES));
 
 	/* Iterate through the SGT entries and add data buffers to the skb */
@@ -1817,8 +1816,15 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 
 		/* We may use multiple Rx pools */
 		dpaa_bp = dpaa_bpid2pool(sgt[i].bpid);
-		if (!dpaa_bp)
-			goto free_buffers;
+		if (!dpaa_bp) {
+                       pr_info("%s: fail to get dpaa_bp for sg bpid %d\n",
+                               __func__, sgt[i].bpid);
+                        goto free_buffers;
+               }
+               sg_vaddr = phys_to_virt(dpaa_iova_to_phys(dpaa_bp->dev,
+                                                         sg_addr));
+               WARN_ON(!IS_ALIGNED((unsigned long)sg_vaddr,
+                                   SMP_CACHE_BYTES));
 
 		if (!skb) {
 			sz = dpaa_bp->size +
@@ -2604,7 +2610,7 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 	if (likely(fd_format == qm_fd_contig))
 		skb = contig_fd_to_skb(priv, fd, dpaa_bp, vaddr);
 	else
-		skb = sg_fd_to_skb(priv, fd);
+		skb = sg_fd_to_skb(priv, fd, dpaa_bp, vaddr);
 	if (!skb)
 		return qman_cb_dqrr_consume;
 
