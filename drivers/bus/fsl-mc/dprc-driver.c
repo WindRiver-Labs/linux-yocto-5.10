@@ -186,6 +186,8 @@ static void fsl_mc_obj_device_add(struct fsl_mc_device *mc_bus_dev,
  * dprc_add_new_devices - Adds devices to the logical bus for a DPRC
  *
  * @mc_bus_dev: pointer to the fsl-mc device that represents a DPRC object
+ * @driver_override: driver override to apply to new objects found in the
+ * DPRC, or NULL, if none.
  * @obj_desc_array: array of device descriptors for child devices currently
  * present in the physical DPRC.
  * @num_child_objects_in_mc: number of entries in obj_desc_array
@@ -195,6 +197,7 @@ static void fsl_mc_obj_device_add(struct fsl_mc_device *mc_bus_dev,
  * in the physical DPRC.
  */
 static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
+				 const char *driver_override,
 				 struct fsl_mc_obj_desc *obj_desc_array,
 				 int num_child_objects_in_mc)
 {
@@ -337,7 +340,7 @@ int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
 	dprc_remove_devices(mc_bus_dev, child_obj_desc_array,
 			    num_child_objects);
 
-	dprc_add_new_devices(mc_bus_dev, child_obj_desc_array,
+	dprc_add_new_devices(mc_bus_dev, driver_override, child_obj_desc_array,
 			     num_child_objects);
 
 	if (child_obj_desc_array)
