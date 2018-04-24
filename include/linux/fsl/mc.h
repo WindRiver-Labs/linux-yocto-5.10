@@ -442,6 +442,7 @@ extern struct device_type fsl_mc_bus_dprc_type;
 extern struct device_type fsl_mc_bus_dpni_type;
 extern struct device_type fsl_mc_bus_dpio_type;
 extern struct device_type fsl_mc_bus_dpsw_type;
+extern struct device_type fsl_mc_bus_dpdmux_type;
 extern struct device_type fsl_mc_bus_dpbp_type;
 extern struct device_type fsl_mc_bus_dpcon_type;
 extern struct device_type fsl_mc_bus_dpmcp_type;
