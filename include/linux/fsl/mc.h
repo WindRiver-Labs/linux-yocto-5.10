@@ -515,6 +515,21 @@ static inline bool is_fsl_mc_bus_dpdcei(const struct fsl_mc_device *mc_dev)
 	return mc_dev->dev.type == &fsl_mc_bus_dpdcei_type;
 }
 
+static inline bool is_fsl_mc_bus_dpaiop(const struct fsl_mc_device *mc_dev)
+{
+	return mc_dev->dev.type == &fsl_mc_bus_dpaiop_type;
+}
+
+static inline bool is_fsl_mc_bus_dpci(const struct fsl_mc_device *mc_dev)
+{
+	return mc_dev->dev.type == &fsl_mc_bus_dpci_type;
+}
+
+static inline bool is_fsl_mc_bus_dpdmai(const struct fsl_mc_device *mc_dev)
+{
+	return mc_dev->dev.type == &fsl_mc_bus_dpdmai_type;
+}
+
 /*
  * Data Path Resource Container (DPRC) API
  */
