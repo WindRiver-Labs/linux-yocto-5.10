@@ -177,19 +177,19 @@ static int nxp_config_init(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: config_init failed\n");
+	dev_err(&phydev->mdio.dev, "read error: config_init failed\n");
 	return reg_val;
 
 phy_pmode_transit_error:
-	dev_err(&phydev->dev, "pmode error: config_init failed\n");
+	dev_err(&phydev->mdio.dev, "pmode error: config_init failed\n");
 	return err;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "read/write error: config_init failed\n");
+	dev_err(&phydev->mdio.dev, "read/write error: config_init failed\n");
 	return err;
 
 unsupported_phy_error:
-	dev_err(&phydev->dev, "unsupported phy, config_init failed\n");
+	dev_err(&phydev->mdio.dev, "unsupported phy, config_init failed\n");
 	return -1;
 }
 
@@ -220,7 +220,7 @@ static int nxp_probe(struct phy_device *phydev)
 		return err;
 
 	/* register sysfs files */
-	err = sysfs_create_group(&phydev->dev.kobj, &nxp_attribute_group);
+	err = sysfs_create_group(&phydev->mdio.dev.kobj, &nxp_attribute_group);
 	if (err)
 		goto register_sysfs_error;
 
@@ -228,11 +228,11 @@ static int nxp_probe(struct phy_device *phydev)
 
 /* error handling */
 register_sysfs_error:
-	dev_err(&phydev->dev, "sysfs file creation failed\n");
+	dev_err(&phydev->mdio.dev, "sysfs file creation failed\n");
 	return -ENOMEM;
 
 phy_allocation_error:
-	dev_err(&phydev->dev, "memory allocation for priv data failed\n");
+	dev_err(&phydev->mdio.dev, "memory allocation for priv data failed\n");
 	return -ENOMEM;
 }
 
@@ -240,7 +240,7 @@ phy_allocation_error:
 static void nxp_remove(struct phy_device *phydev)
 {
 	/* unregister sysfs files */
-	sysfs_remove_group(&phydev->dev.kobj, &nxp_attribute_group);
+	sysfs_remove_group(&phydev->mdio.dev.kobj, &nxp_attribute_group);
 
 	/* free custom data struct */
 	if (phydev->priv) {
@@ -265,7 +265,7 @@ static int nxp_ack_interrupt(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: ack_interrupt failed\n");
+	dev_err(&phydev->mdio.dev, "read error: ack_interrupt failed\n");
 	return err;
 }
 
@@ -283,7 +283,7 @@ static int nxp_did_interrupt(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: did_interrupt failed\n");
+	dev_err(&phydev->mdio.dev, "read error: did_interrupt failed\n");
 	return 0;
 }
 
@@ -314,7 +314,7 @@ static int nxp_config_intr(struct phy_device *phydev)
 	return 0;
 
 phy_write_error:
-	dev_err(&phydev->dev, "write error: config_intr failed\n");
+	dev_err(&phydev->mdio.dev, "write error: config_intr failed\n");
 	return err;
 }
 
@@ -343,7 +343,7 @@ static inline void handle_pwon_interrupt(struct phy_device *phydev)
 	 */
 	if ((phydev->phy_id & NXP_PHY_ID_MASK) == NXP_PHY_ID_TJA1102P0) {
 		struct phy_device *phydevp1 =
-		    search_phy_by_addr(phydev->addr + 1);
+		    search_phy_by_addr(phydev->mdio.addr + 1);
 		if (!phydevp1)
 			return;
 
@@ -363,7 +363,7 @@ static inline void handle_uvr_interrupt(struct phy_device *phydev)
 	 */
 	if ((phydev->phy_id & NXP_PHY_ID_MASK) == NXP_PHY_ID_TJA1102P0) {
 		struct phy_device *phydevp1 =
-		    search_phy_by_addr(phydev->addr + 1);
+		    search_phy_by_addr(phydev->mdio.addr + 1);
 		if (!phydevp1)
 			return;
 
@@ -410,19 +410,19 @@ static void poll(struct work_struct *work)
 
 		/* warnings */
 		if (interrupts & INTERRUPT_PHY_INIT_FAIL)
-			dev_err(&phydev->dev, "PHY initialization failed\n");
+			dev_err(&phydev->mdio.dev, "PHY initialization failed\n");
 		if (interrupts & INTERRUPT_LINK_STATUS_FAIL)
-			dev_err(&phydev->dev, "PHY link status failed\n");
+			dev_err(&phydev->mdio.dev, "PHY link status failed\n");
 		if (interrupts & INTERRUPT_SYM_ERR)
-			dev_err(&phydev->dev, "PHY symbol error detected\n");
+			dev_err(&phydev->mdio.dev, "PHY symbol error detected\n");
 		if (interrupts & INTERRUPT_SNR_WARNING)
-			dev_err(&phydev->dev, "PHY SNR warning\n");
+			dev_err(&phydev->mdio.dev, "PHY SNR warning\n");
 		if (interrupts & INTERRUPT_CONTROL_ERROR)
-			dev_err(&phydev->dev, "PHY control error\n");
+			dev_err(&phydev->mdio.dev, "PHY control error\n");
 		if (interrupts & INTERRUPT_UV_ERR)
-			dev_err(&phydev->dev, "PHY undervoltage error\n");
+			dev_err(&phydev->mdio.dev, "PHY undervoltage error\n");
 		if (interrupts & INTERRUPT_TEMP_ERROR)
-			dev_err(&phydev->dev, "PHY temperature error\n");
+			dev_err(&phydev->mdio.dev, "PHY temperature error\n");
 	}
 
 	/* requeue poll function */
@@ -467,7 +467,7 @@ static void set_link_control(struct phy_device *phydev, int enable_link_control)
 	return;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: setting link control failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: setting link control failed\n");
 	return;
 }
 
@@ -496,7 +496,7 @@ static int set_master_cfg(struct phy_device *phydev, int setMaster)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: set_master_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: %s failed\n", __func__);
 	return err;
 }
 
@@ -519,7 +519,7 @@ static int get_master_cfg(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: get_master_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -536,7 +536,7 @@ static int get_link_status(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: get_link_status failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -580,15 +580,15 @@ static int nxp_sleep(struct phy_device *phydev)
 
 /* error handling */
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: sleep not possible\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: sleep not possible\n");
 	return 0;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: entering sleep failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: entering sleep failed\n");
 	return err;
 
 phy_transition_error:
-	dev_err(&phydev->dev, "sleep request timed out\n");
+	dev_err(&phydev->mdio.dev, "sleep request timed out\n");
 	return err;
 }
 
@@ -667,19 +667,19 @@ static int wakeup_from_sleep(struct phy_device *phydev)
 
 /* error handling */
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: wakeup not possible\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: wakeup not possible\n");
 	return 0;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: wakeup failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: wakeup failed\n");
 	return err;
 
 phy_transition_error:
-	dev_err(&phydev->dev, "power mode transition failed\n");
+	dev_err(&phydev->mdio.dev, "power mode transition failed\n");
 	return err;
 
 unsupported_phy_error:
-	dev_err(&phydev->dev, "unsupported phy, wakeup failed\n");
+	dev_err(&phydev->mdio.dev, "unsupported phy, wakeup failed\n");
 	return -1;
 }
 
@@ -702,7 +702,7 @@ static int wakeup_from_normal(struct phy_device *phydev)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: wakeup_from_normal failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: %s failed\n", __func__);
 	return err;
 }
 
@@ -737,15 +737,15 @@ static int nxp_wakeup(struct phy_device *phydev)
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: nxp_wakeup failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 
 phy_SMI_disabled:
-	dev_err(&phydev->dev, "SMI interface disabled, cannot be woken up\n");
+	dev_err(&phydev->mdio.dev, "SMI interface disabled, cannot be woken up\n");
 	return 0;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: wakeup_from_normal failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: %s failed\n", __func__);
 	return err;
 }
 
@@ -766,11 +766,11 @@ static int nxp_suspend(struct phy_device *phydev)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: resume failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: resume failed\n");
 	return err;
 
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: suspend not possible\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: suspend not possible\n");
 	return 0;
 }
 
@@ -809,15 +809,15 @@ static int nxp_resume(struct phy_device *phydev)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: resume failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: resume failed\n");
 	return err;
 
 phy_transition_error:
-	dev_err(&phydev->dev, "power mode transition failed\n");
+	dev_err(&phydev->mdio.dev, "power mode transition failed\n");
 	return err;
 
 phy_pll_error:
-	dev_err(&phydev->dev, "Error: PLL is unstable and not locked\n");
+	dev_err(&phydev->mdio.dev, "Error: PLL is unstable and not locked\n");
 	return err;
 }
 
@@ -882,7 +882,7 @@ static int enter_test_mode(struct phy_device *phydev, enum test_mode tmode)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: setting test mode failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: setting test mode failed\n");
 	return err;
 }
 
@@ -902,7 +902,7 @@ static int set_loopback(struct phy_device *phydev, int enable_loopback)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: configuring loopback failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: configuring loopback failed\n");
 	return err;
 }
 
@@ -957,11 +957,11 @@ static int enter_loopback_mode(struct phy_device *phydev,
 
 /* error handling */
 phy_set_loopback_error:
-	dev_err(&phydev->dev, "error: enable/disable loopback failed\n");
+	dev_err(&phydev->mdio.dev, "error: enable/disable loopback failed\n");
 	return err;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: setting loopback mode failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: setting loopback mode failed\n");
 	return err;
 }
 
@@ -1014,7 +1014,7 @@ static int enter_led_mode(struct phy_device *phydev, enum led_mode lmode)
 
 /* error handling */
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: setting led mode failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: setting led mode failed\n");
 	return err;
 }
 
@@ -1027,7 +1027,10 @@ static ssize_t sysfs_get_master_cfg(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
 	int is_master;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	is_master = get_master_cfg(phydev);
 
@@ -1046,7 +1049,10 @@ static ssize_t sysfs_set_master_cfg(struct device *dev,
 {
 	int err;
 	int setMaster;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	/* parse the buffer */
 	err = kstrtoint(buf, 10, &setMaster);
@@ -1065,11 +1071,11 @@ static ssize_t sysfs_set_master_cfg(struct device *dev,
 
 /* error handling */
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_set_master_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n", __func__);
 	return err;
 
 phy_cfg_error:
-	dev_err(&phydev->dev, "phy cfg error: sysfs_set_master_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "phy cfg error: %s failed\n", __func__);
 	return err;
 }
 
@@ -1081,7 +1087,10 @@ static ssize_t sysfs_get_power_cfg(struct device *dev,
 {
 	int reg_val;
 	char *pmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	reg_val = phy_read(phydev, MII_ECTRL);
 	if (reg_val < 0)
@@ -1118,7 +1127,7 @@ static ssize_t sysfs_get_power_cfg(struct device *dev,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_power_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -1133,7 +1142,10 @@ static ssize_t sysfs_set_power_cfg(struct device *dev,
 {
 	int err;
 	int pmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	/* parse the buffer */
 	err = kstrtoint(buf, 10, &pmode);
@@ -1164,11 +1176,11 @@ static ssize_t sysfs_set_power_cfg(struct device *dev,
 
 /* error handling */
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_set_power_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n", __func__);
 	return err;
 
 phy_pmode_transit_error:
-	dev_err(&phydev->dev, "pmode error: sysfs_set_power_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "pmode error: %s failed\n", __func__);
 	return err;
 }
 
@@ -1180,7 +1192,10 @@ static ssize_t sysfs_get_loopback_cfg(struct device *dev,
 {
 	int reg_val;
 	char *lmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	reg_val = phy_read(phydev, MII_BMCR);
 	if (reg_val < 0)
@@ -1218,7 +1233,7 @@ static ssize_t sysfs_get_loopback_cfg(struct device *dev,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_loopback_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -1233,7 +1248,10 @@ static ssize_t sysfs_set_loopback_cfg(struct device *dev,
 {
 	int err;
 	int lmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	if (!managed_mode)
 		goto phy_auto_op_error;
@@ -1267,15 +1285,15 @@ static ssize_t sysfs_set_loopback_cfg(struct device *dev,
 
 /* error handling */
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: loopback not available\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: loopback not available\n");
 	return count;
 
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_set_loopback_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n");
 	return err;
 
 phy_lmode_transit_error:
-	dev_err(&phydev->dev, "lmode error: sysfs_set_loopback_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "lmode error: %s failed\n");
 	return err;
 }
 
@@ -1288,7 +1306,10 @@ static ssize_t sysfs_get_cable_test(struct device *dev,
 	int reg_val;
 	int err;
 	char *c_test_result;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	if (!managed_mode)
 		goto phy_auto_op_error;
@@ -1327,19 +1348,19 @@ static ssize_t sysfs_get_cable_test(struct device *dev,
 
 /* error handling */
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: cabletest not available\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: cabletest not available\n");
 	return 0;
 
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_cable_test failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: sysfs_get_cable_test failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: %s failed\n", __func__);
 	return err;
 
 phy_transition_error:
-	dev_err(&phydev->dev, "Timeout: cable test failed to finish in time\n");
+	dev_err(&phydev->mdio.dev, "Timeout: cable test failed to finish in time\n");
 	return err;
 }
 
@@ -1351,7 +1372,10 @@ static ssize_t sysfs_get_test_mode(struct device *dev,
 {
 	int reg_val;
 	char *tmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	reg_val = phy_read(phydev, MII_ECTRL);
 	if (reg_val < 0)
@@ -1391,7 +1415,7 @@ static ssize_t sysfs_get_test_mode(struct device *dev,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_test_mode failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -1404,7 +1428,10 @@ static ssize_t sysfs_set_test_mode(struct device *dev,
 {
 	int err;
 	int tmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	if (!managed_mode)
 		goto phy_auto_op_error;
@@ -1461,15 +1488,15 @@ static ssize_t sysfs_set_test_mode(struct device *dev,
 
 /* error handling */
 phy_auto_op_error:
-	dev_err(&phydev->dev, "phy is in auto mode: testmodes not available\n");
+	dev_err(&phydev->mdio.dev, "phy is in auto mode: testmodes not available\n");
 	return count;
 
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_get_test_mode failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n", __func__);
 	return err;
 
 phy_tmode_transit_error:
-	dev_err(&phydev->dev, "tmode error: sysfs_get_test_mode failed\n");
+	dev_err(&phydev->mdio.dev, "tmode error: %s failed\n", __func__);
 	return err;
 }
 
@@ -1481,7 +1508,10 @@ static ssize_t sysfs_get_led_cfg(struct device *dev,
 {
 	int reg_val;
 	char *lmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	lmode = "DISABLED\n";
 
@@ -1519,7 +1549,7 @@ static ssize_t sysfs_get_led_cfg(struct device *dev,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_led_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 }
 
@@ -1533,7 +1563,10 @@ static ssize_t sysfs_set_led_cfg(struct device *dev,
 {
 	int err;
 	int lmode;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	/* parse the buffer */
 	err = kstrtoint(buf, 10, &lmode);
@@ -1567,11 +1600,11 @@ static ssize_t sysfs_set_led_cfg(struct device *dev,
 
 /* error handling */
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_set_led_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n", __func__);
 	return err;
 
 phy_lmode_transit_error:
-	dev_err(&phydev->dev, "lmode error: sysfs_set_led_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "lmode error: %s failed\n", __func__);
 	return err;
 }
 
@@ -1583,7 +1616,10 @@ static ssize_t sysfs_get_link_status(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
 	int linkup;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	linkup = get_link_status(phydev);
 
@@ -1600,7 +1636,10 @@ static ssize_t sysfs_get_wakeup_cfg(struct device *dev,
 {
 	int reg_val;
 	int fwdphyloc_en, remwuphy_en, locwuphy_en, fwdphyrem_en;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	if ((phydev->phy_id & NXP_PHY_ID_MASK) == NXP_PHY_ID_TJA1102P0 ||
 	    (phydev->phy_id & NXP_PHY_ID_MASK) == NXP_PHY_ID_TJA1102P1) {
@@ -1657,11 +1696,11 @@ static ssize_t sysfs_get_wakeup_cfg(struct device *dev,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: sysfs_get_wakeup_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "read error: %s failed\n", __func__);
 	return reg_val;
 
 unsupported_phy_error:
-	dev_err(&phydev->dev, "unsupported phy, sysfs_get_wakeup_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "unsupported phy, %s failed\n", __func__);
 	return -1;
 }
 
@@ -1674,7 +1713,10 @@ static ssize_t sysfs_set_wakeup_cfg(struct device *dev,
 				    const char *buf, size_t count)
 {
 	int err, reg_val, reg_mask, wakeup_cfg;
-	struct phy_device *phydev = container_of(dev, struct phy_device, dev);
+	struct mdio_device *mdiodev = container_of(dev, struct mdio_device,
+						   dev);
+	struct phy_device *phydev = container_of(mdiodev, struct phy_device,
+						 mdio);
 
 	/* parse the buffer */
 	err = kstrtoint(buf, 16, &wakeup_cfg);
@@ -1720,7 +1762,7 @@ static ssize_t sysfs_set_wakeup_cfg(struct device *dev,
 		     (wakeup_cfg & SYSFS_FWDPHYREM)) ||
 		    wakeup_cfg & SYSFS_FWDPHYLOC ||
 		    !(wakeup_cfg & SYSFS_REMWUPHY)) {
-			dev_alert(&phydev->dev, "Invalid configuration\n");
+			dev_alert(&phydev->mdio.dev, "Invalid configuration\n");
 		} else if (wakeup_cfg & SYSFS_LOCWUPHY &&
 			   wakeup_cfg & SYSFS_FWDPHYREM) {
 			err = enter_led_mode(phydev, NO_LED_MODE);
@@ -1733,15 +1775,15 @@ static ssize_t sysfs_set_wakeup_cfg(struct device *dev,
 
 /* error handling */
 phy_parse_error:
-	dev_err(&phydev->dev, "parse error: sysfs_set_wakeup_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "parse error: %s failed\n", __func__);
 	return err;
 
 phy_configure_error:
-	dev_err(&phydev->dev, "phy r/w error: sysfs_set_wakeup_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "phy r/w error: %s failed\n", __func__);
 	return err;
 
 phy_lmode_transit_error:
-	dev_err(&phydev->dev, "lmode error: sysfs_set_wakeup_cfg failed\n");
+	dev_err(&phydev->mdio.dev, "lmode error: %s failed\n", __func__);
 	return err;
 }
 
@@ -1807,11 +1849,11 @@ static inline int phy_configure_bit(struct phy_device *phydev, int reg_name,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: phy config failed\n");
+	dev_err(&phydev->mdio.dev, "read error: phy config failed\n");
 	return reg_val;
 
 phy_write_error:
-	dev_err(&phydev->dev, "write error: phy config failed\n");
+	dev_err(&phydev->mdio.dev, "write error: phy config failed\n");
 	return err;
 }
 
@@ -1842,11 +1884,11 @@ static inline int phy_configure_bits(struct phy_device *phydev, int reg_name,
 
 /* error handling */
 phy_read_error:
-	dev_err(&phydev->dev, "read error: phy config failed\n");
+	dev_err(&phydev->mdio.dev, "read error: phy config failed\n");
 	return reg_val;
 
 phy_write_error:
-	dev_err(&phydev->dev, "write error: phy config failed\n");
+	dev_err(&phydev->mdio.dev, "write error: phy config failed\n");
 	return err;
 }
 
@@ -1942,7 +1984,7 @@ static struct phy_device *search_phy_by_addr(int phy_addr)
 	while (dev) {
 		if (dev->phydev) {
 			/* check if there is a phy at given addr */
-			phydev = dev->phydev->bus->phy_map[phy_addr];
+			phydev = dev->phydev->mdio.bus->phy_map[phy_addr];
 			if (phydev)
 				return phydev;
 		}
@@ -2018,12 +2060,12 @@ static struct class *bus_class_from_net_device(struct net_device *net_device,
 
 	if (!net_device ||
 	    !net_device->phydev ||
-	    !net_device->phydev->bus ||
-	    !net_device->phydev->bus->dev.class ||
-	    !net_device->phydev->bus->dev.class->name)
+	    !net_device->phydev->mdio.bus ||
+	    !net_device->phydev->mdio.bus->dev.class ||
+	    !net_device->phydev->mdio.bus->dev.class->name)
 		return NULL;
 
-	bus_class = net_device->phydev->bus->dev.class;
+	bus_class = net_device->phydev->mdio.bus->dev.class;
 	if (strcmp(bus_class->name, required_name) != 0)
 		return NULL;
 
@@ -2083,9 +2125,9 @@ static int TJA1102p1_fixup_register(void)
 		goto phy_not_found;
 
 	/* check if the fixup drv is already loaded */
-	drv = driver_find("TJA1102_p1", phydev->dev.bus);
+	drv = driver_find("TJA1102_p1", phydev->mdio.dev.bus);
 	if (drv) {
-		dev_alert(&phydev->dev, "fixup driver already loaded\n");
+		dev_alert(&phydev->mdio.dev, "fixup driver already loaded\n");
 	} else {
 		err = phy_driver_register(&nxp_TJA1102p1_fixup_driver);
 		if (err)
@@ -2117,9 +2159,9 @@ static void unregister_TJA1102p1_fixup(void)
 		return;
 
 	/* check if the fixup drv was previously loaded */
-	drv = driver_find("TJA1102_p1", phydev->dev.bus);
+	drv = driver_find("TJA1102_p1", phydev->mdio.dev.bus);
 	if (drv) {
-		dev_alert(&phydev->dev, "unloading fixup driver\n");
+		dev_alert(&phydev->mdio.dev, "unloading fixup driver\n");
 		phy_driver_unregister(&nxp_TJA1102p1_fixup_driver);
 	}
 }
