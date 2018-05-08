@@ -1909,7 +1909,6 @@ static struct phy_driver nxp_drivers[] = {
 	 .config_intr = &nxp_config_intr,
 	 .ack_interrupt = &nxp_ack_interrupt,
 	 .did_interrupt = &nxp_did_interrupt,
-	 .driver = {.owner = THIS_MODULE},
 	 },
 	{
 	 .phy_id = NXP_PHY_ID_TJA1102P0,
@@ -1927,7 +1926,6 @@ static struct phy_driver nxp_drivers[] = {
 	 .config_intr = &nxp_config_intr,
 	 .ack_interrupt = &nxp_ack_interrupt,
 	 .did_interrupt = &nxp_did_interrupt,
-	 .driver = {.owner = THIS_MODULE},
 	 },
 	{
 	 .phy_id = NXP_PHY_ID_TJA1102S,
@@ -1945,7 +1943,6 @@ static struct phy_driver nxp_drivers[] = {
 	 .config_intr = &nxp_config_intr,
 	 .ack_interrupt = &nxp_ack_interrupt,
 	 .did_interrupt = &nxp_did_interrupt,
-	 .driver = {.owner = THIS_MODULE},
 	 }
 };
 
@@ -1966,7 +1963,6 @@ static struct phy_driver nxp_TJA1102p1_fixup_driver = {
 	.config_intr = &nxp_config_intr,
 	.ack_interrupt = &nxp_ack_interrupt,
 	.did_interrupt = &nxp_did_interrupt,
-	.driver = {.owner = THIS_MODULE},
 };
 
 /* Helper function: Search net devices for a specific phy with given
@@ -2130,7 +2126,8 @@ static int TJA1102p1_fixup_register(void)
 	if (drv) {
 		dev_alert(&phydev->mdio.dev, "fixup driver already loaded\n");
 	} else {
-		err = phy_driver_register(&nxp_TJA1102p1_fixup_driver);
+		err = phy_driver_register(&nxp_TJA1102p1_fixup_driver,
+					  THIS_MODULE);
 		if (err)
 			goto drv_registration_error;
 
@@ -2175,7 +2172,8 @@ static int __init nxp_init(void)
 	pr_alert("loading NXP PHY driver: [%s]\n",
 		 (managed_mode ? "managed mode" : "autonomous mode"));
 
-	err = phy_drivers_register(nxp_drivers, ARRAY_SIZE(nxp_drivers));
+	err = phy_drivers_register(nxp_drivers, ARRAY_SIZE(nxp_drivers),
+				   THIS_MODULE);
 	if (err)
 		goto drv_registration_error;
 
