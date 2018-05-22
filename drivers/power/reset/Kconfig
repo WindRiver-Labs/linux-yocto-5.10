@@ -284,10 +284,18 @@ config NVMEM_REBOOT_MODE
 	  then the bootloader can read it and take different
 	  action according to the mode.
 
+config POWER_RESET_S32GEN1
+	bool "NXP S32GEN1 reset driver"
+	depends on ARCH_S32
+	default SOC_S32GEN1
+	help
+		Reboot support for the NXP S32GEN1 SoCs.
+
 config POWER_RESET_S32V
 	bool "Freescale/NXP S32V reset driver"
 	depends on ARCH_S32
 	help
 		Reboot support for the Freescale/NXP S32V SoCs.
+
 endif
 
