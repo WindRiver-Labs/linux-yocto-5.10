@@ -6,6 +6,7 @@
 // Copyright (c) 2009 Sascha Hauer, Pengutronix
 // Copyright (c) 2010-2017 Pengutronix, Marc Kleine-Budde <kernel@pengutronix.de>
 // Copyright (c) 2014 David Jander, Protonic Holland
+// Copyright 2018 NXP
 //
 // Based on code originally by Andrey Volkov <avolkov@varma-el.com>
 
@@ -416,6 +417,10 @@ static const struct flexcan_devtype_data fsl_lx2160a_r1_devtype_data = {
 };
 
 static struct flexcan_devtype_data fsl_s32v234_devtype_data = {
+	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR,
+};
+
+static struct flexcan_devtype_data fsl_s32gen1_devtype_data = {
 	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR,
 };
 
@@ -1916,6 +1921,7 @@ static const struct of_device_id flexcan_of_match[] = {
 	{ .compatible = "fsl,ls1021ar2-flexcan", .data = &fsl_ls1021a_r2_devtype_data, },
 	{ .compatible = "fsl,lx2160ar1-flexcan", .data = &fsl_lx2160a_r1_devtype_data, },
 	{ .compatible = "fsl,s32v234-flexcan", .data = &fsl_s32v234_devtype_data, },
+	{ .compatible = "fsl,s32gen1-flexcan", .data = &fsl_s32gen1_devtype_data, },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, flexcan_of_match);
