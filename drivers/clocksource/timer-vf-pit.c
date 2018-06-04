@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2012-2016 Freescale Semiconductor, Inc.
+ * Copyright 2018 NXP
  */
 
 #include <linux/interrupt.h>
@@ -297,3 +298,4 @@ static int __init pit_timer_init(struct device_node *np)
 }
 TIMER_OF_DECLARE(s32v234, "fsl,s32v234-pit", pit_timer_init);
 TIMER_OF_DECLARE(vf610, "fsl,vf610-pit", pit_timer_init);
+TIMER_OF_DECLARE(s32gen1, "fsl,s32gen1-pit", pit_timer_init);
