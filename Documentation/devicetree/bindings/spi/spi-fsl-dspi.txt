@@ -4,6 +4,7 @@ Required properties:
 - compatible : must be one of:
 	"fsl,vf610-dspi",
 	"fsl,s32v234-dspi",
+	"fsl,s32gen1-dspi",
 	"fsl,ls1021a-v1.0-dspi",
 	"fsl,ls1012a-dspi" (optionally followed by "fsl,ls1021a-v1.0-dspi"),
 	"fsl,ls1028a-dspi",
