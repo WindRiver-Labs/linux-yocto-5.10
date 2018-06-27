@@ -252,6 +252,14 @@ static int fsl_sai_set_dai_sysclk_tr(struct snd_soc_dai *cpu_dai,
 	return 0;
 }
 
+static int fsl_sai_set_dai_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
+{
+	struct fsl_sai *sai = snd_soc_dai_get_drvdata(dai);
+
+	sai->bitclk_ratio = ratio;
+	return 0;
+}
+
 static int fsl_sai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 		int clk_id, unsigned int freq, int dir)
 {
@@ -584,6 +592,7 @@ static int fsl_sai_hw_params(struct snd_pcm_substream *substream,
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	unsigned int channels = params_channels(params);
 	u32 word_width = params_width(params);
+	u32 rate = params_rate(params);
 	u32 val_cr4 = 0, val_cr5 = 0;
 	u32 slots = (channels == 1) ? 2 : channels;
 	u32 slot_width = word_width;
@@ -619,12 +628,12 @@ static int fsl_sai_hw_params(struct snd_pcm_substream *substream,
 		pins = channels;
 
 	if (!sai->slave_mode[tx]) {
-		if (sai->bitclk_freq)
+		if (sai->bitclk_ratio)
 			ret = fsl_sai_set_bclk(cpu_dai, tx,
-				sai->bitclk_freq);
+					rate * sai->bitclk_ratio);
 		else
 			ret = fsl_sai_set_bclk(cpu_dai, tx,
-				slots * slot_width * params_rate(params));
+					rate * slots * slot_width);
 		if (ret)
 			return ret;
 
@@ -910,6 +919,7 @@ static int fsl_sai_startup(struct snd_pcm_substream *substream,
 }
 
 static const struct snd_soc_dai_ops fsl_sai_pcm_dai_ops = {
+	.set_bclk_ratio = fsl_sai_set_dai_bclk_ratio,
 	.set_sysclk	= fsl_sai_set_dai_sysclk,
 	.set_fmt	= fsl_sai_set_dai_fmt,
 	.set_tdm_slot	= fsl_sai_set_dai_tdm_slot,

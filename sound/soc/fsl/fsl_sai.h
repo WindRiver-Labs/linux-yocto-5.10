@@ -237,7 +237,6 @@
 #define FSL_SAI_CLK_MAST3	3
 
 #define FSL_SAI_MCLK_MAX	4
-#define FSL_SAI_CLK_BIT		5
 
 /* SAI data transfer numbers per DMA request */
 #define FSL_SAI_MAXBURST_TX 6
@@ -305,7 +304,7 @@ struct fsl_sai {
 	unsigned int mclk_streams;
 	unsigned int slots;
 	unsigned int slot_width;
-	unsigned int bitclk_freq;
+	unsigned int bitclk_ratio;
 
 	struct snd_soc_dai_driver cpu_dai_drv;
 	struct snd_dmaengine_dai_dma_data dma_params_rx;
