@@ -49,6 +49,7 @@
 #include "dwmac1000.h"
 #include "dwxgmac2.h"
 #include "hwif.h"
+#include "stmmac_tsn.h"
 
 #define	STMMAC_ALIGN(x)		ALIGN(ALIGN(x, SMP_CACHE_BYTES), 16)
 #define	TSO_MAX_BUFF_SIZE	(SZ_16K - 1)
@@ -6556,6 +6557,12 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 	if (ret)
 		return ret;
 
+	/* Initialize TSN capability */
+	stmmac_tsnif_setup(priv, priv->hw);
+	ret = stmmac_tsn_init(priv, priv->hw, priv->dev);
+	if (ret)
+		return ret;
+
 	/* Get the HW capability (new GMAC newer than 3.50a) */
 	priv->hw_cap_support = stmmac_get_hw_features(priv);
 	if (priv->hw_cap_support) {
@@ -6954,6 +6961,14 @@ int stmmac_dvr_probe(struct device *device,
 
 	ndev->features |= ndev->hw_features | NETIF_F_HIGHDMA;
 	ndev->watchdog_timeo = msecs_to_jiffies(watchdog);
+
+	/* TSN HW feature setup */
+	if (priv->hw->tsn_info.cap.est_support && priv->plat->tsn_est_en) {
+		stmmac_set_tsn_feat(priv, priv->hw, ndev, TSN_FEAT_ID_EST,
+				    true);
+		dev_info(priv->device, "EST feature enabled\n");
+	}
+
 #ifdef STMMAC_VLAN_TAG_USED
 	/* Both mac100 and gmac support receive VLAN tag detection */
 	ndev->hw_features |= NETIF_F_HW_VLAN_CTAG_RX | NETIF_F_HW_VLAN_STAG_RX;
