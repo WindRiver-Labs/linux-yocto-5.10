@@ -92,6 +92,8 @@
 #define AT803X_DEBUG_REG_5			0x05
 #define AT803X_DEBUG_TX_CLK_DLY_EN		BIT(8)
 
+#define AT803X_LPI_EN                          BIT(8)
+
 #define AT803X_DEBUG_REG_1F			0x1F
 #define AT803X_DEBUG_PLL_ON			BIT(2)
 #define AT803X_DEBUG_RGMII_1V8			BIT(3)
@@ -517,6 +519,30 @@ static int at803x_probe(struct phy_device *phydev)
 
 	return at803x_parse_dt(phydev);
 }
+
+static void at803x_enable_smart_eee(struct phy_device *phydev, int on)
+{
+       int value;
+
+       /* 5.1.11 Smart_eee control3 */
+       value = phy_read_mmd(phydev, MDIO_MMD_PCS, 0x805D);
+       if (on)
+               value |= AT803X_LPI_EN;
+       else
+               value &= ~AT803X_LPI_EN;
+       phy_write_mmd(phydev, MDIO_MMD_PCS, 0x805D, value);
+}
+
+ static int at803x_config_init(struct phy_device *phydev)
+ {
+        int ret;
+
+
+#ifdef CONFIG_AT803X_PHY_SMART_EEE
+       at803x_enable_smart_eee(phydev, 1);
+#else
+       at803x_enable_smart_eee(phydev, 0);
+#endif
 
 static void at803x_remove(struct phy_device *phydev)
 {
