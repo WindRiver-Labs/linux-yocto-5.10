@@ -41,6 +41,7 @@ properties:
               - fsl,imx8mq-usdhc
               - fsl,imx8qxp-usdhc
               - fsl,s32v234-usdhc
+              - fsl,s32gen1-usdhc
           - const: fsl,imx7d-usdhc
 
   reg:
