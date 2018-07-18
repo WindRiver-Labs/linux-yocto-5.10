@@ -514,6 +514,8 @@ struct mac_device_info {
 	unsigned int pcs;
 	unsigned int pmt;
 	unsigned int ps;
+	bool mdio_intr_en;
+	wait_queue_head_t mdio_busy_wait;
 	unsigned int xlgmac;
 	unsigned int num_vlan;
 	u32 vlan_filter[32];

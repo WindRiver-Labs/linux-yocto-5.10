@@ -298,6 +298,11 @@ static void get_arttime(struct mii_bus *mii, int intel_adhoc_addr,
 	*art_time = ns;
 }
 
+static int stmmac_cross_ts_isr(struct stmmac_priv *priv)
+{
+	return (readl(priv->ioaddr + GMAC_INT_STATUS) & GMAC_INT_TSIE);
+}
+
 static int intel_crosststamp(ktime_t *device,
 			     struct system_counterval_t *system,
 			     void *ctx)
@@ -368,14 +373,14 @@ static int intel_crosststamp(ktime_t *device,
 	gpio_value |= GMAC_GPO1;
 	writel(gpio_value, ioaddr + GMAC_GPIO_STATUS);
 
-	/* Poll for time sync operation done */
-	ret = readl_poll_timeout(priv->ioaddr + GMAC_INT_STATUS, v,
-				 (v & GMAC_INT_TSIE), 100, 10000);
-
-	if (ret == -ETIMEDOUT) {
-		pr_err("%s: Wait for time sync operation timeout\n", __func__);
-		return ret;
-	}
+	/* Time sync done Indication - Interrupt method */
+	if (priv->hw->mdio_intr_en) {
+		if (!wait_event_timeout(priv->hw->mdio_busy_wait,
+					stmmac_cross_ts_isr(priv), HZ / 100))
+			return -ETIMEDOUT;
+	} else if (readl_poll_timeout(priv->ioaddr + GMAC_INT_STATUS, v,
+				     (v & GMAC_INT_TSIE), 100, 10000))
+		return -ETIMEDOUT;
 
 	num_snapshot = (readl(ioaddr + GMAC_TIMESTAMP_STATUS) &
 			GMAC_TIMESTAMP_ATSNS_MASK) >>

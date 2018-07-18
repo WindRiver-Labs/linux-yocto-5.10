@@ -129,6 +129,9 @@
 #define TCEIE				BIT(0)
 #define DMA_ECC_INT_STATUS		0x00001088
 
+/* MDIO interrupt enable in MAC_Interrupt_Enable register */
+#define GMAC_INT_MDIO_EN		BIT(18)
+
 /* EQoS version 5.xx VLAN Tag Filter Fail Packets Queuing */
 #define GMAC_RXQ_CTRL4			0x00000094
 #define GMAC_RXQCTRL_VFFQ_MASK		GENMASK(19, 17)
