@@ -38,6 +38,7 @@ struct ak5558_priv {
 	struct gpio_desc *reset_gpiod; /* Reset & Power down GPIO */
 	int slots;
 	int slot_width;
+	struct regulator_bulk_data supplies[AK5558_NUM_SUPPLIES];
 };
 
 /* ak5558 register cache & default register settings */
