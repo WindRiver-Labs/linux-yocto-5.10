@@ -289,6 +289,9 @@
 #define ASRC_CLK_MAX_NUM	16
 #define ASRC_CLK_MAP_LEN	0x30
 
+#define DMA_SDMA 0
+#define DMA_EDMA 1
+
 struct dma_block {
 	void *dma_vaddr;
 	unsigned int length;
