@@ -808,17 +808,6 @@ static int fsl_spdif_qget(struct snd_kcontrol *kcontrol,
 }
 
 /* Valid bit information */
-static int fsl_spdif_rx_vbit_info(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-
-	return 0;
-}
-
 /* Get valid good bit from interrupt status register */
 static int fsl_spdif_rx_vbit_get(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
@@ -860,17 +849,6 @@ static int fsl_spdif_tx_vbit_put(struct snd_kcontrol *kcontrol,
 	u32 val = (1 - ucontrol->value.integer.value[0]) << SCR_VAL_OFFSET;
 
 	regmap_update_bits(regmap, REG_SPDIF_SCR, SCR_VAL_MASK, val);
-
-	return 0;
-}
-
-static int fsl_spdif_tx_vbit_info(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
 
 	return 0;
 }
@@ -967,18 +945,6 @@ static int fsl_spdif_rxrate_get(struct snd_kcontrol *kcontrol,
 		rate = spdif_get_rxclk_rate(spdif_priv, SPDIF_DEFAULT_GAINSEL);
 
 	ucontrol->value.integer.value[0] = rate;
-
-	return 0;
-}
-
-/* User bit sync mode info */
-static int fsl_spdif_usync_info(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
 
 	return 0;
 }
@@ -1093,7 +1059,7 @@ static struct snd_kcontrol_new fsl_spdif_ctrls[] = {
 		.access = SNDRV_CTL_ELEM_ACCESS_READ |
 			SNDRV_CTL_ELEM_ACCESS_WRITE |
 			SNDRV_CTL_ELEM_ACCESS_VOLATILE,
-		.info = fsl_spdif_usync_info,
+		.info = snd_ctl_boolean_mono_info,
 		.get = fsl_spdif_usync_get,
 		.put = fsl_spdif_usync_put,
 	},
