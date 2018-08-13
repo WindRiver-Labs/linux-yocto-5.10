@@ -23,6 +23,8 @@ properties:
           - fsl,imx28-flexcan
           - fsl,imx25-flexcan
           - fsl,p1010-flexcan
+          - fsl,s32v234-flexcan
+          - fsl,s32gen1-flexcan
           - fsl,vf610-flexcan
           - fsl,ls1021ar2-flexcan
           - fsl,lx2160ar1-flexcan
