@@ -57,4 +57,4 @@ obj-$(CONFIG_HABANA_AI)		+= habanalabs/
 obj-$(CONFIG_UACCE)		+= uacce/
 obj-$(CONFIG_XILINX_SDFEC)	+= xilinx_sdfec.o
 obj-$(CONFIG_HISI_HIKEY_USB)	+= hisi_hikey_usb.o
-obj-$(CONFIG_FCCU_S32V234)	+= fccu/
+obj-$(CONFIG_FCCU)		+= fccu/
