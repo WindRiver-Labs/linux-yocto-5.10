@@ -51,3 +51,14 @@ config FSL_RCPM
 	  Note that currently this driver will not support PowerPC based
 	  QorIQ processor.
 endmenu
+
+menu "NXP SoC drivers"
+
+config S32_DEBUG_REGACCESS
+	bool "Userspace access to SoC registers"
+	help
+	  Enabling this option leads to the creation of entries in
+	  /sys/kernel/s32_regaccess which can be used to read and write
+	  SoC registers from userspace.
+
+endmenu
