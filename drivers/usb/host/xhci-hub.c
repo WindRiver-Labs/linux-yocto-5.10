@@ -1719,6 +1719,8 @@ retry:
 	return 0;
 }
 
+EXPORT_SYMBOL(xhci_bus_suspend);
+
 /*
  * Workaround for missing Cold Attach Status (CAS) if device re-plugged in S3.
  * warm reset a USB3 device stuck in polling or compliance mode after resume.
