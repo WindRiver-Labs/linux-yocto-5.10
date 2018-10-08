@@ -26,6 +26,7 @@ obj-y += cadence/
 obj-$(CONFIG_DRM_NWL_MIPI_DSI) += nwl-dsi/
 obj-$(CONFIG_DRM_ITE_IT6263) += it6263.o
 obj-$(CONFIG_DRM_SEC_MIPI_DSIM) += sec-dsim.o
+obj-$(CONFIG_DRM_NXP_SEIKO_43WVFIG) += nxp-seiko-43wvfig.o
 obj-$(CONFIG_DRM_TI_TPD12S015) += ti-tpd12s015.o
 obj-$(CONFIG_DRM_NWL_MIPI_DSI) += nwl-dsi.o
 
