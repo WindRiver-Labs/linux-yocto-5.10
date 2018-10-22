@@ -1198,8 +1198,11 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 
 	ci->role = ci_get_role(ci);
 	/* only update vbus status for peripheral */
-	if (ci->role == CI_ROLE_GADGET)
-		ci_handle_vbus_connected(ci);
+	if (ci->role == CI_ROLE_GADGET) {
+               /* Let DP pull down if it isn't currently */
+               hw_write(ci, OP_USBCMD, USBCMD_RS, 0);
+                ci_handle_vbus_connected(ci);
+       }
 
 	if (!ci_otg_is_fsm_mode(ci)) {
 
