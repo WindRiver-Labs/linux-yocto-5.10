@@ -138,7 +138,7 @@ enum {
 	NXPS32,
 };
 
-static const struct fsl_dspi_devtype_data devtype_data[] = {
+static struct fsl_dspi_devtype_data devtype_data[] = {
 	[VF610] = {
 		.trans_mode		= DSPI_DMA_MODE,
 		.max_clock_factor	= 2,
@@ -231,7 +231,7 @@ struct fsl_dspi {
 	const void				*tx;
 	void					*rx;
 	u16					tx_cmd;
-	const struct fsl_dspi_devtype_data	*devtype_data;
+	struct fsl_dspi_devtype_data	*devtype_data;
 
 	struct completion			xfer_done;
 
@@ -1245,6 +1245,7 @@ static int dspi_probe(struct platform_device *pdev)
 	struct fsl_dspi *dspi;
 	struct resource *res;
 	void __iomem *base;
+	u32 fifo_size;
 	bool big_endian;
 
 	dspi = devm_kzalloc(&pdev->dev, sizeof(*dspi), GFP_KERNEL);
@@ -1292,7 +1293,7 @@ static int dspi_probe(struct platform_device *pdev)
 		if (of_property_read_bool(np, "spi-slave"))
 			ctlr->slave = true;
 
-		dspi->devtype_data = of_device_get_match_data(&pdev->dev);
+		dspi->devtype_data = (struct fsl_dspi_devtype_data *)of_device_get_match_data(&pdev->dev);
 		if (!dspi->devtype_data) {
 			dev_err(&pdev->dev, "can't get devtype_data\n");
 			ret = -EFAULT;
@@ -1313,6 +1314,10 @@ static int dspi_probe(struct platform_device *pdev)
 		ctlr->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 32);
 	else
 		ctlr->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 16);
+
+	ret = of_property_read_u32(np, "spi-fifo-size", &fifo_size);
+	if (ret >= 0)
+		dspi->devtype_data->fifo_size = fifo_size;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	base = devm_ioremap_resource(&pdev->dev, res);
