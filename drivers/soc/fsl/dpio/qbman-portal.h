@@ -163,6 +163,9 @@ extern
 int (*qbman_swp_enqueue_ptr)(struct qbman_swp *s,
 			     const struct qbman_eq_desc *d,
 			     const struct dpaa2_fd *fd);
+
+int qbman_orp_drop(struct qbman_swp *s, u16 orpid, u16 seqnum);
+
 extern
 int (*qbman_swp_enqueue_multiple_ptr)(struct qbman_swp *s,
 				      const struct qbman_eq_desc *d,
