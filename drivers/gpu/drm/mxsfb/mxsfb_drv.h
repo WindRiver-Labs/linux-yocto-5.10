@@ -12,6 +12,7 @@
 #include <drm/drm_device.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_plane.h>
+#include <drm/drm_simple_kms_helper.h>
 
 struct clk;
 
@@ -32,6 +33,7 @@ struct mxsfb_drm_private {
 	struct clk			*clk;
 	struct clk			*clk_axi;
 	struct clk			*clk_disp_axi;
+	struct drm_simple_display_pipe  pipe;
 
 	struct drm_device		*drm;
 	struct {
@@ -53,9 +55,9 @@ to_mxsfb_drm_private(struct drm_device *drm)
 	return drm->dev_private;
 }
 
+int mxsfb_kms_init(struct mxsfb_drm_private *mxsfb);
+
 void mxsfb_enable_axi_clk(struct mxsfb_drm_private *mxsfb);
 void mxsfb_disable_axi_clk(struct mxsfb_drm_private *mxsfb);
-
-int mxsfb_kms_init(struct mxsfb_drm_private *mxsfb);
 
 #endif /* __MXSFB_DRV_H__ */
