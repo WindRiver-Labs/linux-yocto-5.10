@@ -48,6 +48,17 @@ config VIDEO_IMX_CAPTURE
 if VIDEO_IMX_CAPTURE
 menu "i.MX8QXP/QM Camera ISI/MIPI Features support"
 
+config IMX8_MIPI_CSI2
+	tristate "IMX8 MIPI CSI2 Controller"
+	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	default y
+	help
+	 Enable support for video4linux camera sensor interface driver for
+	 i.MX8QM/QXP platform.
+
+endmenu
+endif  #VIDEO_IMX_CAPTURE
+
 config IMX8_ISI_CORE
 	bool "IMX8 Image Sensor Interface Core Driver"
 	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
