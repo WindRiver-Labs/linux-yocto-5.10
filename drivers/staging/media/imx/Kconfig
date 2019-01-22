@@ -64,6 +64,14 @@ config IMX8_MIPI_CSI2
 	 Enable support for video4linux camera sensor interface driver for
 	 i.MX8QM/QXP platform.
 
+config IMX8_MEDIA_DEVICE
+	tristate "IMX8 Media Device Driver"
+	select V4L2_FWNODE
+	default y
+	help
+         This media device is a virtual device which used to manage
+         all modules in image subsystem of imx8qxp/qm platform.
+
 endmenu
 endif  #VIDEO_IMX_CAPTURE
 
