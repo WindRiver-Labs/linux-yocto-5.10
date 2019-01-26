@@ -1195,7 +1195,7 @@ static int i2c_imx_xfer(struct i2c_adapter *adapter,
 
 	result = pm_runtime_get_sync(i2c_imx->adapter.dev.parent);
 	if (result < 0)
-		return result;
+		goto out;
 
 	result = i2c_imx_xfer_common(adapter, msgs, num, false);
 
