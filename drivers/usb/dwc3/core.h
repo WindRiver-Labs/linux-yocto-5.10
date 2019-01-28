@@ -964,6 +964,7 @@ struct dwc3_scratchpad_array {
  * @otg_restart_host: flag that OTG controller needs to restart host
  * @nr_scratch: number of scratch buffers
  * @u1u2: only used on revisions <1.83a for workaround
+ * @otg_caps: the OTG capabilities from hardware point
  * @maximum_speed: maximum speed requested (mainly for testing purposes)
  * @ip: controller's ID
  * @revision: controller's version of an IP
@@ -1127,6 +1128,7 @@ struct dwc3 {
 	u32			nr_scratch;
 	u32			u1u2;
 	u32			maximum_speed;
+	struct usb_otg_caps     otg_caps;
 
 	u32			ip;
 
