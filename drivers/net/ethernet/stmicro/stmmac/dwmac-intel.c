@@ -450,6 +450,7 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->pdev = pdev;
 	plat->phy_addr = -1;
 	plat->clk_csr = 5;
+	plat->clk_trail_n = 2;
 	plat->has_gmac = 0;
 	plat->has_gmac4 = 1;
 	plat->force_sf_dma_mode = 0;

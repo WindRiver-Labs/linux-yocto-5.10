@@ -199,6 +199,7 @@ struct plat_stmmacenet_data {
 	struct stmmac_safety_feature_cfg *safety_feat_cfg;
 	int clk_csr;
 	int has_gmac;
+	int clk_trail_n;
 	int enh_desc;
 	int tx_coe;
 	int rx_coe;
