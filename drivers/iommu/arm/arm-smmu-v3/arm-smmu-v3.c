@@ -808,7 +808,20 @@ static int arm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu,
 		 * d. Advance the hardware prod pointer
 		 * Control dependency ordering from the entries becoming valid.
 		 */
-		writel_relaxed(prod, cmdq->q.prod_reg);
+		if (smmu->options & ARM_SMMU_OPT_FORCE_QDRAIN) {
+			u32 p, c = readl_relaxed(cmdq->q.cons_reg);
+			while (Q_IDX(&llq, c) != Q_IDX(&llq, prod) ||
+			       Q_WRP(&llq, c) != Q_WRP(&llq, prod)) {
+				p = Q_IDX(&llq, c) | Q_WRP(&llq, c);
+				p++;
+				writel_relaxed(p, cmdq->q.prod_reg);
+				do {
+					cpu_relax();
+					c = readl_relaxed(cmdq->q.cons_reg);
+				} while (Q_IDX(&llq, c) != Q_IDX(&llq, p));
+			}
+		} else
+			writel_relaxed(prod, cmdq->q.prod_reg);
 
 		/*
 		 * e. Tell the next owner we're done
@@ -3358,6 +3371,22 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	dev_info(smmu->dev, "ias %lu-bit, oas %lu-bit (features 0x%08x)\n",
 		 smmu->ias, smmu->oas, smmu->features);
+
+	/* Options based on implementation */
+	reg = readl_relaxed(smmu->base + ARM_SMMU_IIDR);
+
+	switch (reg) {
+	case IIDR_CN96XX_A0:
+		/* Marvell Octeontx2 SMMU wrongly issues unsupported
+		 * 64 byte memory reads under certain conditions for
+		 * reading commands from the command queue.
+		 * Force command queue drain for every two writes,
+		 * so that SMMU issues only 32 byte reads.
+		 */
+		smmu->options |= ARM_SMMU_OPT_FORCE_QDRAIN;
+		break;
+	}
+
 	return 0;
 }
 
