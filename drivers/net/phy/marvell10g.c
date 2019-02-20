@@ -478,7 +478,8 @@ static int mv3310_config_init(struct phy_device *phydev)
 	    phydev->interface != PHY_INTERFACE_MODE_2500BASEX &&
 	    phydev->interface != PHY_INTERFACE_MODE_XAUI &&
 	    phydev->interface != PHY_INTERFACE_MODE_RXAUI &&
-	    phydev->interface != PHY_INTERFACE_MODE_10GBASER)
+	    phydev->interface != PHY_INTERFACE_MODE_10GBASER &&
+	    phydev->interface != PHY_INTERFACE_MODE_5GKR)
 		return -ENODEV;
 
 	phydev->mdix_ctrl = ETH_TP_MDI_AUTO;
@@ -613,7 +614,8 @@ static void mv3310_update_interface(struct phy_device *phydev)
 
 	if ((phydev->interface == PHY_INTERFACE_MODE_SGMII ||
 	     phydev->interface == PHY_INTERFACE_MODE_2500BASEX ||
-	     phydev->interface == PHY_INTERFACE_MODE_10GBASER) &&
+	     phydev->interface == PHY_INTERFACE_MODE_10GBASER ||
+	     phydev->interface == PHY_INTERFACE_MODE_5GKR) &&
 	    phydev->link) {
 		/* The PHY automatically switches its serdes interface (and
 		 * active PHYXS instance) between Cisco SGMII, 10GBase-R and
@@ -624,6 +626,9 @@ static void mv3310_update_interface(struct phy_device *phydev)
 		switch (phydev->speed) {
 		case SPEED_10000:
 			phydev->interface = PHY_INTERFACE_MODE_10GBASER;
+			break;
+		case SPEED_5000:
+			phydev->interface = PHY_INTERFACE_MODE_5GKR;
 			break;
 		case SPEED_2500:
 			phydev->interface = PHY_INTERFACE_MODE_2500BASEX;
