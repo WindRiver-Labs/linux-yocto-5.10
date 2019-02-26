@@ -3,6 +3,26 @@
 menu "PCI controller drivers"
 	depends on PCI
 
+config PCI_AXXIA
+	bool "AXXIA PCIe controller"
+	depends on ARCH_AXXIA && !ARM64
+	default ARCH_AXXIA
+	help
+	 Enables support for the Axxia X7 PCIe controller.
+	 There are two PEI controllers on Axxia X7/AXM55xx
+	 family of devices.
+	 Only RootComplex mode is supported.
+
+config PCI_AXXIA_DW
+	bool "AXXIA PCIe controller"
+	depends on ARCH_AXXIA && ARM64
+	default ARCH_AXXIA
+	help
+	 Enables support for the Axxia PCIe DesignWare controller.
+	 There are three PEI controllers on Axxia X9/AXM56xx and
+	 XLF/AXC67xx families of devices.
+	 Only RootComplex mode is supported.
+
 config PCI_MVEBU
 	bool "Marvell EBU PCIe controller"
 	depends on ARCH_MVEBU || ARCH_DOVE || COMPILE_TEST
