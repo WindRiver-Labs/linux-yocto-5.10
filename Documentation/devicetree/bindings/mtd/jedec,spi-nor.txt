@@ -26,10 +26,12 @@ Required properties:
                  n25q128a11
                  n25q128a13
                  n25q512a
+                 s25fl129p1   # e.g. spansion,s25fl129p1
                  s25fl256s1
                  s25fl512s
                  s25sl12801
                  s25fl008k
+                 s25fl016k    # e.g. spansion,s25fl016k
                  s25fl064k
                  sst25vf040b
                  m25p40
