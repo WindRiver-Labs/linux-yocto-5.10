@@ -457,53 +457,87 @@ err:
 	return ret;
 }
 
-static int _genpd_power_off(struct generic_pm_domain *genpd, bool timed)
+static int genpd_power_off(struct generic_pm_domain *genpd, bool one_dev_on,
+                           unsigned int depth)
 {
-	unsigned int state_idx = genpd->state_idx;
-	ktime_t time_start;
-	s64 elapsed_ns;
-	int ret;
+        struct pm_domain_data *pdd;
+        struct gpd_link *link;
+        unsigned int not_suspended = 0;
+        int ret;
 
-	/* Notify consumers that we are about to power off. */
-	ret = raw_notifier_call_chain_robust(&genpd->power_notifiers,
-					     GENPD_NOTIFY_PRE_OFF,
-					     GENPD_NOTIFY_ON, NULL);
-	ret = notifier_to_errno(ret);
-	if (ret)
-		return ret;
+        /*
+         * Do not try to power off the domain in the following situations:
+         * (1) The domain is already in the "power off" state.
+         * (2) System suspend is in progress.
+         */
+        if (!genpd_status_on(genpd) || genpd->prepared_count > 0)
+                return 0;
 
-	if (!genpd->power_off)
-		goto out;
+        /*
+         * Abort power off for the PM domain in the following situations:
+         * (1) The domain is configured as always on.
+         * (2) When the domain has a subdomain being powered on.
+         */
+        if (genpd_is_always_on(genpd) ||
+                        genpd_is_rpm_always_on(genpd) ||
+                        atomic_read(&genpd->sd_count) > 0)
+                return -EBUSY;
 
-	if (!timed) {
-		ret = genpd->power_off(genpd);
-		if (ret)
-			goto busy;
+        list_for_each_entry(pdd, &genpd->dev_list, list_node) {
+                enum pm_qos_flags_status stat;
 
-		goto out;
-	}
+                stat = dev_pm_qos_flags(pdd->dev, PM_QOS_FLAG_NO_POWER_OFF);
+                if (stat > PM_QOS_FLAGS_NONE)
+                        return -EBUSY;
 
-	time_start = ktime_get();
-	ret = genpd->power_off(genpd);
-	if (ret)
-		goto busy;
+		                /*
+                 * Do not allow PM domain to be powered off, when an IRQ safe
+                 * device is part of a non-IRQ safe domain.
+                 */
+                if (!pm_runtime_suspended(pdd->dev) ||
+                        irq_safe_dev_in_no_sleep_domain(pdd->dev, genpd))
+                        not_suspended++;
+        }
 
-	elapsed_ns = ktime_to_ns(ktime_sub(ktime_get(), time_start));
-	if (elapsed_ns <= genpd->states[state_idx].power_off_latency_ns)
-		goto out;
+        if (not_suspended > 1 || (not_suspended == 1 && !one_dev_on))
+                return -EBUSY;
 
-	genpd->states[state_idx].power_off_latency_ns = elapsed_ns;
-	genpd->max_off_time_changed = true;
-	pr_debug("%s: Power-%s latency exceeded, new value %lld ns\n",
-		 genpd->name, "off", elapsed_ns);
+        if (genpd->gov && genpd->gov->power_down_ok) {
+                if (!genpd->gov->power_down_ok(&genpd->domain))
+                        return -EAGAIN;
+        }
 
-out:
-	raw_notifier_call_chain(&genpd->power_notifiers, GENPD_NOTIFY_OFF,
-				NULL);
-	return 0;
-busy:
-	raw_notifier_call_chain(&genpd->power_notifiers, GENPD_NOTIFY_ON, NULL);
-	return ret;
+        /* Default to shallowest state. */
+        if (!genpd->gov)
+                genpd->state_idx = 0;
+
+        /* Choose the deepest state if no devices using this domain */
+        if (!genpd->device_count)
+                genpd->state_idx = genpd->state_count - 1;
+
+        /*
+         * If sd_count > 0 at this point, one of the subdomains hasn't
+         * managed to call genpd_power_on() for the master yet after
+         * incrementing it.  In that case genpd_power_on() will wait
+         * for us to drop the lock, so we can call .power_off() and let
+         * the genpd_power_on() restore power for us (this shouldn't
+         * happen very often).
+         */
+        ret = _genpd_power_off(genpd, true);
+        if (ret)
+                return ret;
+
+	genpd->status = GPD_STATE_POWER_OFF;
+        genpd_update_accounting(genpd);
+
+        list_for_each_entry(link, &genpd->slave_links, slave_node) {
+                genpd_sd_counter_dec(link->master);
+                genpd_lock_nested(link->master, depth + 1);
+                genpd_power_off(link->master, false, depth + 1);
+                genpd_unlock(link->master);
+        }
+
+        return 0;
 }
 
 /**
