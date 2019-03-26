@@ -624,8 +624,24 @@ SYM_CODE_START_LOCAL(el0_fiq_invalid)
 SYM_CODE_END(el0_fiq_invalid)
 
 SYM_CODE_START_LOCAL(el0_error_invalid)
+#ifdef CONFIG_AXXIA_FAULT
+	kernel_entry	0
+	mov		x0, sp
+	mov		x1, #0
+	mrs		x2, esr_el1
+	bl		axxia_x9xlf_fault
+	cmp		x0, #0
+	beq		1f
+	mov		x0, sp	// Return Failure
+	mov		x1, #BAD_ERROR
+	mrs		x2, esr_el1
+	b		bad_mode
+1:
+	kernel_exit	0	// Return Success
+#else
 	inv_entry 0, BAD_ERROR
 SYM_CODE_END(el0_error_invalid)
+#endif
 
 #ifdef CONFIG_COMPAT
 SYM_CODE_START_LOCAL(el0_fiq_invalid_compat)
@@ -646,7 +662,23 @@ SYM_CODE_START_LOCAL(el1_fiq_invalid)
 SYM_CODE_END(el1_fiq_invalid)
 
 SYM_CODE_START_LOCAL(el1_error_invalid)
+#ifdef CONFIG_AXXIA_FAULT
+	kernel_entry	1
+	mov		x0, sp
+	mov		x1, #1
+	mrs		x2, esr_el1
+	bl		axxia_x9xlf_fault
+	cmp		x0, #0
+	beq		1f
+	mov		x0, sp	// Return Failure
+	mov		x1, #BAD_ERROR
+	mrs		x2, esr_el1
+	b		bad_mode
+1:
+	kernel_exit	1
+#else
 	inv_entry 1, BAD_ERROR
+#endif
 SYM_CODE_END(el1_error_invalid)
 
 /*
