@@ -534,6 +534,10 @@
 		status = "disabled";
 	};
 
+	hse: hse@40334000 {
+		compatible = "fsl,s32gen1-hse";
+	};
+
 	can4: flexcan@44000000{
 		compatible = "fsl,s32gen1-flexcan";
 		reg = <0x0 0x44000000 0x0 0xA000>;
