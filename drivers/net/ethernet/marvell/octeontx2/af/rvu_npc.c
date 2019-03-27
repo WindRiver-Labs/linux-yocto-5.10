@@ -1229,6 +1229,13 @@ int rvu_npc_init(struct rvu *rvu)
 	/* Configure MKEX profile */
 	npc_load_mkex_profile(rvu, blkaddr, rvu->mkex_pfl_name);
 
+	err = npc_flow_steering_init(rvu, blkaddr);
+	if (err) {
+		dev_err(rvu->dev,
+			"Incorrect mkex profile loaded using default mkex\n");
+		npc_load_mkex_profile(rvu, blkaddr, def_pfl_name);
+	}
+
 	/* Set TX miss action to UCAST_DEFAULT i.e
 	 * transmit the packet on NIX LF SQ's default channel.
 	 */
