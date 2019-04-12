@@ -954,6 +954,41 @@ static int otx2_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *nfc)
 	return ret;
 }
 
+static int otx2vf_get_rxnfc(struct net_device *dev,
+			    struct ethtool_rxnfc *nfc, u32 *rules)
+{
+	struct otx2_nic *pfvf = netdev_priv(dev);
+	int ret = -EOPNOTSUPP;
+
+	switch (nfc->cmd) {
+	case ETHTOOL_GRXRINGS:
+		nfc->data = pfvf->hw.rx_queues;
+		ret = 0;
+		break;
+	case ETHTOOL_GRXFH:
+		return otx2_get_rss_hash_opts(pfvf, nfc);
+	default:
+		break;
+	}
+	return ret;
+}
+
+static int otx2vf_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *nfc)
+{
+	struct otx2_nic *pfvf = netdev_priv(dev);
+	int ret = -EOPNOTSUPP;
+
+	switch (nfc->cmd) {
+	case ETHTOOL_SRXFH:
+		ret = otx2_set_rss_hash_opts(pfvf, nfc);
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+
 static u32 otx2_get_rxfh_key_size(struct net_device *netdev)
 {
 	struct otx2_nic *pfvf = netdev_priv(netdev);
@@ -1163,6 +1198,40 @@ int otx2_destroy_ethtool_flows(struct otx2_nic *pfvf)
 
 	pfvf->entries_alloc = false;
 	mutex_unlock(&pfvf->mbox.lock);
+
+	return 0;
+}
+
+int otx2_delete_vf_ethtool_flows(struct otx2_nic *pfvf)
+{
+	struct npc_delete_flow_req *req;
+	struct otx2_flow *iter, *tmp;
+	int err;
+
+	mutex_lock(&pfvf->mbox.lock);
+	req = otx2_mbox_alloc_msg_npc_delete_flow(&pfvf->mbox);
+	if (!req) {
+		mutex_unlock(&pfvf->mbox.lock);
+		return -ENOMEM;
+	}
+
+	req->all_vfs = 1;
+	/* Send message to AF */
+	err = otx2_sync_mbox_msg(&pfvf->mbox);
+	if (err) {
+		mutex_unlock(&pfvf->mbox.lock);
+		return err;
+	}
+
+	mutex_unlock(&pfvf->mbox.lock);
+	/* AF deleted VF entries now remove from ethtool list */
+	list_for_each_entry_safe(iter, tmp, &pfvf->flows, list) {
+		if (iter->is_vf) {
+			list_del(&iter->list);
+			kfree(iter);
+			pfvf->nr_flows--;
+		}
+	}
 
 	return 0;
 }

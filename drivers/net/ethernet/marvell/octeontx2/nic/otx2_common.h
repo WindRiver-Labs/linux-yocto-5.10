@@ -647,6 +647,7 @@ void otx2_set_ethtool_ops(struct net_device *netdev);
 int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);
 int otx2_delete_rxvlan_offload_flow(struct otx2_nic *pfvf);
 int otx2_destroy_ethtool_flows(struct otx2_nic *pfvf);
+int otx2_delete_vf_ethtool_flows(struct otx2_nic *pfvf);
 void otx2vf_set_ethtool_ops(struct net_device *netdev);
 
 int otx2_open(struct net_device *netdev);
