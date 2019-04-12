@@ -27,6 +27,8 @@
 #define DRV_NAME	"octeontx2-nicpf"
 #define DRV_STRING	"Marvell OcteonTX2 NIC Physical Function Driver"
 
+#define MAX_ETHTOOL_FLOWS	36
+
 /* Supported devices */
 static const struct pci_device_id otx2_pf_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_RVU_PF) },
@@ -1736,6 +1738,7 @@ int otx2_stop(struct net_device *netdev)
 
 	/* First stop packet Rx/Tx */
 	otx2_rxtx_enable(pf, false);
+	otx2_destroy_ethtool_flows(pf);
 
 	/* Clear RSS enable flag */
 	rss = &pf->hw.rss_info;
@@ -1868,6 +1871,7 @@ static int otx2_set_features(struct net_device *netdev,
 {
 	netdev_features_t changed = features ^ netdev->features;
 	struct otx2_nic *pf = netdev_priv(netdev);
+	bool ntuple = !!(features & NETIF_F_NTUPLE);
 
 	if ((changed & NETIF_F_LOOPBACK) && netif_running(netdev))
 		return otx2_cgx_config_loopback(pf,
@@ -1876,6 +1880,9 @@ static int otx2_set_features(struct net_device *netdev,
 	if ((changed & NETIF_F_HW_VLAN_CTAG_RX) && netif_running(netdev))
 		return otx2_enable_rxvlan(pf,
 					  features & NETIF_F_HW_VLAN_CTAG_RX);
+
+	if ((changed & NETIF_F_NTUPLE) && !ntuple)
+		otx2_destroy_ethtool_flows(pf);
 
 	return 0;
 }
@@ -2238,7 +2245,7 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			       NETIF_F_GSO_UDP_L4);
 	netdev->features |= netdev->hw_features;
 
-	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL |
+	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL | NETIF_F_NTUPLE |
 			       NETIF_F_HW_VLAN_STAG_RX |
 			       NETIF_F_HW_VLAN_CTAG_RX;
 
@@ -2261,6 +2268,8 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto err_unreg_netdev;
 
+	INIT_LIST_HEAD(&pf->flows);
+	pf->max_flows = MAX_ETHTOOL_FLOWS;
 	otx2_set_ethtool_ops(netdev);
 
 	/* Enable link notifications */
@@ -2431,6 +2440,7 @@ static void otx2_remove(struct pci_dev *pdev)
 	otx2_cgx_config_linkevents(pf, false);
 
 	unregister_netdev(netdev);
+	otx2_destroy_ethtool_flows(pf);
 	otx2_sriov_disable(pf->pdev);
 	if (pf->otx2_wq)
 		destroy_workqueue(pf->otx2_wq);
