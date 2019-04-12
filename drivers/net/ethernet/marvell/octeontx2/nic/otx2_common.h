@@ -273,6 +273,12 @@ struct otx2_nic {
 	u16			rxvlan_entry;
 	bool			rxvlan_alloc;
 
+	bool			entries_alloc;
+	u32			max_flows;
+	u32			nr_flows;
+	u16			entry_list[NPC_MAX_NONCONTIG_ENTRIES];
+	struct list_head	flows;
+
 	struct otx2_ptp		*ptp;
 	struct hwtstamp_config	tstamp;
 };
@@ -641,6 +647,7 @@ void otx2_set_ethtool_ops(struct net_device *netdev);
 void otx2vf_set_ethtool_ops(struct net_device *netdev);
 int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);
 int otx2_delete_rxvlan_offload_flow(struct otx2_nic *pfvf);
+int otx2_destroy_ethtool_flows(struct otx2_nic *pfvf);
 
 int otx2_open(struct net_device *netdev);
 int otx2_stop(struct net_device *netdev);
