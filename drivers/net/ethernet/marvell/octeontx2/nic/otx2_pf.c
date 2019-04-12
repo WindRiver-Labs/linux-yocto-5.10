@@ -27,6 +27,8 @@
 #define DRV_NAME	"octeontx2-nicpf"
 #define DRV_STRING	"Marvell OcteonTX2 NIC Physical Function Driver"
 
+#define MAX_ETHTOOL_FLOWS	36
+
 /* Supported devices */
 static const struct pci_device_id otx2_pf_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_RVU_PF) },
@@ -1739,6 +1741,7 @@ int otx2_stop(struct net_device *netdev)
 
 	/* First stop packet Rx/Tx */
 	otx2_rxtx_enable(pf, false);
+	otx2_destroy_ethtool_flows(pf);
 
 	/* Cleanup Queue IRQ */
 	vec = pci_irq_vector(pf->pdev,
@@ -1867,10 +1870,15 @@ static int otx2_set_features(struct net_device *netdev,
 {
 	netdev_features_t changed = features ^ netdev->features;
 	struct otx2_nic *pf = netdev_priv(netdev);
+	bool ntuple = !!(features & NETIF_F_NTUPLE);
 
 	if ((changed & NETIF_F_LOOPBACK) && netif_running(netdev))
 		return otx2_cgx_config_loopback(pf,
 						features & NETIF_F_LOOPBACK);
+
+	if ((changed & NETIF_F_NTUPLE) && !ntuple)
+		otx2_destroy_ethtool_flows(pf);
+
 	return 0;
 }
 
@@ -2234,7 +2242,7 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL |
 			       NETIF_F_HW_VLAN_STAG_RX |
-			       NETIF_F_HW_VLAN_CTAG_RX;
+			       NETIF_F_HW_VLAN_CTAG_RX | NETIF_F_NTUPLE;
 
 	netdev->gso_max_segs = OTX2_MAX_GSO_SEGS;
 	netdev->watchdog_timeo = OTX2_TX_TIMEOUT;
@@ -2255,6 +2263,8 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto err_unreg_netdev;
 
+	INIT_LIST_HEAD(&pf->flows);
+	pf->max_flows = MAX_ETHTOOL_FLOWS;
 	otx2_set_ethtool_ops(netdev);
 
 	/* Enable link notifications */
@@ -2425,6 +2435,7 @@ static void otx2_remove(struct pci_dev *pdev)
 	if (pf->otx2_wq)
 		destroy_workqueue(pf->otx2_wq);
 
+	otx2_destroy_ethtool_flows(pf);
 	otx2_ptp_destroy(pf);
 	otx2_detach_resources(&pf->mbox);
 	otx2_disable_mbox_intr(pf);
