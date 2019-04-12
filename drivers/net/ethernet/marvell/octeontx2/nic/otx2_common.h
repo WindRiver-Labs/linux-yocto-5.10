@@ -270,6 +270,8 @@ struct otx2_nic {
 
 	/* Block address of NIX either BLKADDR_NIX0 or BLKADDR_NIX1 */
 	int			nix_blkaddr;
+	u16			rxvlan_entry;
+	bool			rxvlan_alloc;
 
 	struct otx2_ptp		*ptp;
 	struct hwtstamp_config	tstamp;
@@ -637,6 +639,8 @@ int otx2_update_rq_stats(struct otx2_nic *pfvf, int qidx);
 int otx2_update_sq_stats(struct otx2_nic *pfvf, int qidx);
 void otx2_set_ethtool_ops(struct net_device *netdev);
 void otx2vf_set_ethtool_ops(struct net_device *netdev);
+int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);
+int otx2_delete_rxvlan_offload_flow(struct otx2_nic *pfvf);
 
 int otx2_open(struct net_device *netdev);
 int otx2_stop(struct net_device *netdev);
