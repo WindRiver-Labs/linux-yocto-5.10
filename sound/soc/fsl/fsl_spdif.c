@@ -662,6 +662,67 @@ static int fsl_spdif_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int fsl_spdif_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
+                int clk_id, unsigned int freq, int dir)
+{
+        struct fsl_spdif_priv *data = snd_soc_dai_get_drvdata(cpu_dai);
+        struct platform_device *pdev = data->pdev;
+        struct device *dev = &pdev->dev;
+        struct clk *clk, *p, *pll = 0, *npll = 0;
+        u64 ratio = freq;
+        int ret, i;
+        bool reparent = false;
+
+        if (dir != SND_SOC_CLOCK_OUT || freq == 0 || clk_id != STC_TXCLK_SPDIF_ROOT)
+                return 0;
+
+        if (data->pll8k_clk == NULL || data->pll11k_clk == NULL)
+                return 0;
+
+        clk = data->txclk[clk_id];
+        if (IS_ERR_OR_NULL(clk)) {
+                dev_err(dev, "no rxtx%d clock in devicetree\n", clk_id);
+                return PTR_ERR(clk);
+        }
+
+        p = clk;
+        while (p && data->pll8k_clk && data->pll11k_clk) {
+                struct clk *pp = clk_get_parent(p);
+
+                if (clk_is_match(pp, data->pll8k_clk) ||
+                    clk_is_match(pp, data->pll11k_clk)) {
+                        pll = pp;
+                        break;
+                }
+                p = pp;
+        }
+
+        npll = (do_div(ratio, 8000) ? data->pll11k_clk : data->pll8k_clk);
+        reparent = (pll && !clk_is_match(pll, npll));
+
+        clk_disable_unprepare(clk);
+        if (reparent) {
+                ret = clk_set_parent(p, npll);
+                if (ret < 0)
+                        dev_warn(cpu_dai->dev, "failed to set parent %s: %d\n",
+                                 __clk_get_name(npll), ret);
+        }
+
+        ret = clk_set_rate(clk, freq);
+        if (ret < 0)
+                dev_warn(cpu_dai->dev, "failed to set clock rate (%u): %d\n",
+                         freq, ret);
+        clk_prepare_enable(clk);
+
+        for (i = 0; i < SPDIF_TXRATE_MAX; i++) {
+                ret = fsl_spdif_probe_txclk(data, i);
+                if (ret)
+                        return ret;
+        }
+
+        return 0;
+}
+
 static const struct snd_soc_dai_ops fsl_spdif_dai_ops = {
 	.startup = fsl_spdif_startup,
 	.hw_params = fsl_spdif_hw_params,
