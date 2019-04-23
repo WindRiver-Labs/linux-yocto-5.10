@@ -6,6 +6,8 @@ Required properties:
 - reg : Offset and length of the register set for the device
 - interrupts : Should contain CSPI/eCSPI interrupt
 - fsl,spi-num-chipselects : Contains the number of the chipselect
+- "fsl,imx6ul-ecspi" ERR009165 fixed on i.MX6UL and later Soc
+    (https://www.nxp.com/docs/en/errata/IMX6DQCE.pdf)
 - cs-gpios : Specifies the gpio pins to be used for chipselects.
 
 Example:
