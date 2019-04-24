@@ -84,5 +84,13 @@ config IMX8_ISI_M2M
 	depends on IMX8_ISI_CORE
 	default y
 
+config IMX8_PARALLEL_CSI
+	tristate "IMX8 Parallel Capture Controller"
+	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	default y
+	help
+	  Enable support for video4linux parallel camera sensor interface
+	  driver for i.MX8QM/QXP platform.
+
 endmenu
 endif  #VIDEO_IMX_CAPTURE
