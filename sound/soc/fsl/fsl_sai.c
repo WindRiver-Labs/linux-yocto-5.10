@@ -277,25 +277,19 @@ static int fsl_sai_set_mclk_rate(struct snd_soc_dai *dai, int clk_id,
 	if (pll) {
 		npll = (do_div(ratio, 8000) ? sai->pll11k_clk : sai->pll8k_clk);
 		if (!clk_is_match(pll, npll)) {
-			if (sai->mclk_streams == 0) {
-				ret = clk_set_parent(p, npll);
-				if (ret < 0)
-					dev_warn(dai->dev,
-						"failed to set parent %s: %d\n",
-						__clk_get_name(npll), ret);
-			} else {
-				dev_err(dai->dev,
-					"PLL %s is in use by a running stream.\n",
-					__clk_get_name(pll));
-				return -EINVAL;
-			}
+			ret = clk_set_parent(p, npll);
+			if (ret < 0)
+				dev_warn(dai->dev,
+					 "failed to set parent %s: %d\n",
+					 __clk_get_name(npll), ret);
 		}
 	}
 
 	ret = clk_set_rate(sai->mclk_clk[clk_id], freq);
 	if (ret < 0)
 		dev_err(dai->dev, "failed to set clock rate (%u): %d\n",
-				freq, ret);
+			freq, ret);
+
 	return ret;
 }
 
