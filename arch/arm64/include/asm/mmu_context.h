@@ -254,6 +254,12 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
 
+#ifdef CONFIG_MRVL_OCTEONTX_EL0_INTR
+int lock_context(struct mm_struct *mm, int index);
+int unlock_context_by_index(int index);
+bool unlock_context_by_mm(struct mm_struct *mm);
+#endif
+
 unsigned long arm64_mm_context_get(struct mm_struct *mm);
 void arm64_mm_context_put(struct mm_struct *mm);
 
