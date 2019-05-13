@@ -29,6 +29,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "mxsfb_drv.h"
 #include "mxsfb_regs.h"
@@ -93,6 +94,18 @@ static const struct mxsfb_devdata mxsfb_devdata[] = {
 	},
 };
 
+void mxsfb_enable_axi_clk(struct mxsfb_drm_private *mxsfb)
+{
+        if (mxsfb->clk_axi)
+                clk_prepare_enable(mxsfb->clk_axi);
+}
+
+void mxsfb_disable_axi_clk(struct mxsfb_drm_private *mxsfb)
+{
+        if (mxsfb->clk_axi)
+                clk_disable_unprepare(mxsfb->clk_axi);
+}
+
 static struct drm_framebuffer *
 mxsfb_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		const struct drm_mode_fb_cmd2 *mode_cmd)
@@ -109,6 +122,12 @@ mxsfb_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 	}
 
 	return drm_gem_fb_create(dev, file_priv, mode_cmd);
+}
+
+static struct mxsfb_drm_private *
+drm_pipe_to_mxsfb_drm_private(struct drm_simple_display_pipe *pipe)
+{
+        return container_of(pipe, struct mxsfb_drm_private, pipe);
 }
 
 /**
@@ -150,6 +169,7 @@ static int mxsfb_atomic_helper_check(struct drm_device *dev,
 		if (old_bpp != new_bpp)
 			new_state->mode_changed = true;
 	}
+
 	return ret;
 }
 
@@ -163,11 +183,9 @@ static const struct drm_mode_config_helper_funcs mxsfb_mode_config_helpers = {
 	.atomic_commit_tail = drm_atomic_helper_commit_tail_rpm,
 };
 
-enum drm_mode_status mxsfb_pipe_mode_valid(struct drm_crtc *crtc,
+enum drm_mode_status mxsfb_pipe_mode_valid(struct drm_simple_display_pipe *pipe,
                                            const struct drm_display_mode *mode)
 {
-        struct drm_simple_display_pipe *pipe =
-                container_of(crtc, struct drm_simple_display_pipe, crtc);
         struct mxsfb_drm_private *mxsfb = drm_pipe_to_mxsfb_drm_private(pipe);
         u32 bpp;
         u64 bw;
