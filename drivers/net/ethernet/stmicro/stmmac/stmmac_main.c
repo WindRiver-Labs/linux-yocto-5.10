@@ -2652,6 +2652,8 @@ static void stmmac_tx_err(struct stmmac_priv *priv, u32 chan)
 	netif_tx_stop_queue(netdev_get_tx_queue(priv->dev, chan));
 
 	stmmac_stop_tx_dma(priv, chan);
+	stmmac_stop_mac_tx(priv, priv->ioaddr);
+
 	dma_free_tx_skbufs(priv, chan);
 	stmmac_clear_tx_descriptors(priv, chan);
 	tx_q->dirty_tx = 0;
@@ -2661,6 +2663,7 @@ static void stmmac_tx_err(struct stmmac_priv *priv, u32 chan)
 	stmmac_init_tx_chan(priv, priv->ioaddr, priv->plat->dma_cfg,
 			    tx_q->dma_tx_phy, chan);
 	stmmac_start_tx_dma(priv, chan);
+	stmmac_start_mac_tx(priv, priv->ioaddr);
 
 	priv->dev->stats.tx_errors++;
 	netif_tx_wake_queue(netdev_get_tx_queue(priv->dev, chan));
@@ -3364,6 +3367,8 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 
 	/* Start the ball rolling... */
 	stmmac_start_all_dma(priv);
+	stmmac_start_mac_tx(priv, priv->ioaddr);
+	stmmac_start_mac_rx(priv, priv->ioaddr);
 
 	/* Set HW VLAN stripping mode */
 	stmmac_set_hw_vlan_mode(priv, priv->ioaddr, dev->features);
@@ -3902,6 +3907,8 @@ int stmmac_release(struct net_device *dev)
 
 	/* Stop TX/RX DMA and clear the descriptors */
 	stmmac_stop_all_dma(priv);
+	stmmac_stop_mac_tx(priv, priv->ioaddr);
+	stmmac_stop_mac_rx(priv, priv->ioaddr);
 
 	/* Release and free the Rx/Tx resources */
 	free_dma_desc_resources(priv);
@@ -7306,6 +7313,9 @@ int stmmac_dvr_remove(struct device *dev)
 	netdev_info(priv->dev, "%s: removing driver", __func__);
 
 	stmmac_stop_all_dma(priv);
+	stmmac_stop_mac_tx(priv, priv->ioaddr);
+	stmmac_stop_mac_rx(priv, priv->ioaddr);
+
 	stmmac_mac_set(priv, priv->ioaddr, false);
 	netif_carrier_off(ndev);
 	unregister_netdev(ndev);
@@ -7371,6 +7381,8 @@ int stmmac_suspend(struct device *dev)
 
 	/* Stop TX/RX DMA */
 	stmmac_stop_all_dma(priv);
+	stmmac_stop_mac_tx(priv, priv->ioaddr);
+	stmmac_stop_mac_rx(priv, priv->ioaddr);
 
 	if (priv->plat->serdes_powerdown)
 		priv->plat->serdes_powerdown(ndev, priv->plat->bsp_priv);
