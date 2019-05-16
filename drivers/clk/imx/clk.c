@@ -153,6 +153,7 @@ void imx_cscmr1_fixup(u32 *val)
 static bool imx_keep_uart_clocks;
 static int imx_enabled_uart_clocks;
 static struct clk **imx_uart_clocks;
+static int earlycon_bits __initdata;
 
 static int __init imx_keep_uart_clocks_param(char *str)
 {
@@ -165,9 +166,28 @@ __setup_param("earlycon", imx_keep_uart_earlycon,
 __setup_param("earlyprintk", imx_keep_uart_earlyprintk,
 	      imx_keep_uart_clocks_param, 0);
 
+static void imx_earlycon_get(void)
+{
+	int ret = 0;
+
+#ifdef CONFIG_DEBUG_LL
+	if (IS_ENABLED(CONFIG_DEBUG_IMX_UART_PORT))
+		earlycon_bits |= BIT(CONFIG_DEBUG_IMX_UART_PORT - 1);
+#endif
+
+	if (!of_stdout)
+		return;
+
+	ret = of_alias_get_id(of_stdout, "serial");
+	if (ret >= 0)
+		earlycon_bits |= BIT(ret);
+}
+
 void imx_register_uart_clocks(unsigned int clk_count)
 {
 	imx_enabled_uart_clocks = 0;
+
+	imx_earlycon_get();
 
 /* i.MX boards use device trees now.  For build tests without CONFIG_OF, do nothing */
 #ifdef CONFIG_OF
@@ -179,7 +199,8 @@ void imx_register_uart_clocks(unsigned int clk_count)
 		if (!of_stdout)
 			return;
 
-		for (i = 0; i < clk_count; i++) {
+		for (i = 0; (earlycon_bits & BIT(i)) &&
+			imx_uart_clocks[i]; i++) {
 			imx_uart_clocks[imx_enabled_uart_clocks] = of_clk_get(of_stdout, i);
 
 			/* Stop if there are no more of_stdout references */
@@ -202,7 +223,8 @@ static int __init imx_clk_disable_uart(void)
 	if (imx_keep_uart_clocks && imx_enabled_uart_clocks) {
 		int i;
 
-		for (i = 0; i < imx_enabled_uart_clocks; i++) {
+		for (i = 0; (earlycon_bits & BIT(i)) &&
+			imx_uart_clocks[i]; i++) {
 			clk_disable_unprepare(imx_uart_clocks[i]);
 			clk_put(imx_uart_clocks[i]);
 		}
