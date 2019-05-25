@@ -61,11 +61,11 @@ int rvu_mbox_handler_tim_lf_alloc(struct rvu *rvu,
 	int lf, blkaddr;
 	u64 regval;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, 0);
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, pcifunc);
 	if (blkaddr < 0)
 		return TIM_AF_LF_INVALID;
 
-	lf = rvu_get_lf(rvu, &rvu->hw->block[BLKTYPE_TIM], pcifunc, req->ring);
+	lf = rvu_get_lf(rvu, &rvu->hw->block[blkaddr], pcifunc, req->ring);
 	if (lf < 0)
 		return TIM_AF_LF_INVALID;
 
@@ -101,9 +101,13 @@ int rvu_mbox_handler_tim_lf_free(struct rvu *rvu,
 				 struct msg_rsp *rsp)
 {
 	u16 pcifunc = req->hdr.pcifunc;
-	int lf;
+	int lf, blkaddr;
 
-	lf = rvu_get_lf(rvu, &rvu->hw->block[BLKTYPE_TIM], pcifunc, req->ring);
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, pcifunc);
+	if (blkaddr < 0)
+		return TIM_AF_LF_INVALID;
+
+	lf = rvu_get_lf(rvu, &rvu->hw->block[blkaddr], pcifunc, req->ring);
 	if (lf < 0)
 		return TIM_AF_LF_INVALID;
 
@@ -119,11 +123,11 @@ int rvu_mbox_handler_tim_config_ring(struct rvu *rvu,
 	u32 intervalmin;
 	u64 regval;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, 0);
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, pcifunc);
 	if (blkaddr < 0)
 		return TIM_AF_LF_INVALID;
 
-	lf = rvu_get_lf(rvu, &rvu->hw->block[BLKTYPE_TIM], pcifunc, req->ring);
+	lf = rvu_get_lf(rvu, &rvu->hw->block[blkaddr], pcifunc, req->ring);
 	if (lf < 0)
 		return TIM_AF_LF_INVALID;
 
@@ -216,11 +220,11 @@ int rvu_mbox_handler_tim_enable_ring(struct rvu *rvu,
 	int lf, blkaddr;
 	u64 regval;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, 0);
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, pcifunc);
 	if (blkaddr < 0)
 		return TIM_AF_LF_INVALID;
 
-	lf = rvu_get_lf(rvu, &rvu->hw->block[BLKTYPE_TIM], pcifunc, req->ring);
+	lf = rvu_get_lf(rvu, &rvu->hw->block[blkaddr], pcifunc, req->ring);
 	if (lf < 0)
 		return TIM_AF_LF_INVALID;
 
@@ -248,11 +252,11 @@ int rvu_mbox_handler_tim_disable_ring(struct rvu *rvu,
 	int lf, blkaddr;
 	u64 regval;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, 0);
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_TIM, pcifunc);
 	if (blkaddr < 0)
 		return TIM_AF_LF_INVALID;
 
-	lf = rvu_get_lf(rvu, &rvu->hw->block[BLKTYPE_TIM], pcifunc, req->ring);
+	lf = rvu_get_lf(rvu, &rvu->hw->block[blkaddr], pcifunc, req->ring);
 	if (lf < 0)
 		return TIM_AF_LF_INVALID;
 
