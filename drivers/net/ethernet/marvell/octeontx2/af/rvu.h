@@ -672,6 +672,7 @@ void rvu_cpt_unregister_interrupts(struct rvu *rvu);
 
 /* TIM APIs */
 int rvu_tim_init(struct rvu *rvu);
+int rvu_tim_lf_teardown(struct rvu *rvu, u16 pcifunc, int lf, int slot);
 
 /* HW workarounds/fixes */
 #include "npc.h"
