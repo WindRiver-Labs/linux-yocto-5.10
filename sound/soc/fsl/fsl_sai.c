@@ -994,9 +994,6 @@ static int fsl_sai_startup(struct snd_pcm_substream *substream,
 	else
 		sai->is_stream_opened[tx] = true;
 
-	regmap_update_bits(sai->regmap, FSL_SAI_xCR3(tx, offset), FSL_SAI_CR3_TRCE0|FSL_SAI_CR3_TRCE1,
-				FSL_SAI_CR3_TRCE(sai->dataline[tx]));
-
 	/* EDMA engine needs periods of size multiple of tx/rx maxburst */
 	if (sai->soc->constrain_period_size)
 			snd_pcm_hw_constraint_step(substream->runtime, 0,
@@ -1008,6 +1005,16 @@ static int fsl_sai_startup(struct snd_pcm_substream *substream,
 			SNDRV_PCM_HW_PARAM_RATE, &fsl_sai_rate_constraints);
 
 	return ret;
+}
+
+static void fsl_sai_shutdown(struct snd_pcm_substream *substream,
+                struct snd_soc_dai *cpu_dai)
+{
+        struct fsl_sai *sai = snd_soc_dai_get_drvdata(cpu_dai);
+        bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
+
+        if (sai->is_stream_opened[tx])
+                sai->is_stream_opened[tx] = false;
 }
 
 static const struct snd_soc_dai_ops fsl_sai_pcm_dai_ops = {
