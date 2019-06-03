@@ -344,6 +344,8 @@ static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool p2p_in, bool p2
 	int pre_proc, post_proc;
 	struct clk *clk;
 	bool ideal;
+	enum asrc_word_width input_word_width;
+	enum asrc_word_width output_word_width;
 
 	if (!config) {
 		pair_err("invalid pair config\n");

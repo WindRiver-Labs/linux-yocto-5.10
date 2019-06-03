@@ -10,10 +10,13 @@
 #ifndef _FSL_ASRC_H
 #define _FSL_ASRC_H
 
+#include <sound/asound.h>
 #include <uapi/linux/mxc_asrc.h>
 #include <linux/miscdevice.h>
 
 #include  "fsl_asrc_common.h"
+
+#define ASRC_PAIR_MAX_NUM      (ASRC_PAIR_C + 1)
 
 #define ASRC_DMA_BUFFER_NUM		2
 #define ASRC_INPUTFIFO_THRESHOLD	32
@@ -292,6 +295,12 @@
 #define DMA_SDMA 0
 #define DMA_EDMA 1
 
+enum asrc_word_width {
+	ASRC_WIDTH_24_BIT = 0,
+	ASRC_WIDTH_16_BIT = 1,
+	ASRC_WIDTH_8_BIT  = 2,
+};
+
 struct dma_block {
 	void *dma_vaddr;
 	unsigned int length;
@@ -314,7 +323,7 @@ struct fsl_asrc_soc_data {
  * @config: configuration profile
  */
 struct fsl_asrc_pair_priv {
-	struct asrc_config *config;
+        struct asrc_config *config;
 };
 
 /**
@@ -326,11 +335,30 @@ struct fsl_asrc_pair_priv {
  * @regcache_cfg: store register value of REG_ASRCFG
  */
 struct fsl_asrc_priv {
-	struct clk *asrck_clk[ASRC_CLK_MAX_NUM];
 	const struct fsl_asrc_soc_data *soc;
-	unsigned char *clk_map[2];
+        struct snd_dmaengine_dai_dma_data dma_params_rx;
+        struct snd_dmaengine_dai_dma_data dma_params_tx;
+        struct platform_device *pdev;
+        struct regmap *regmap;
+        unsigned long paddr;
+        struct clk *mem_clk;
+        struct clk *ipg_clk;
+        struct clk *spba_clk;
+        struct clk *asrck_clk[ASRC_CLK_MAX_NUM];
+        unsigned char *clk_map[2];
+        spinlock_t lock;
 
-	u32 regcache_cfg;
+        struct fsl_asrc_pair *pair[ASRC_PAIR_MAX_NUM];
+        struct miscdevice asrc_miscdev;
+        unsigned int channel_bits;
+        unsigned int channel_avail;
+
+        int asrc_rate;
+        int asrc_width;
+        int dma_type;  /* 0 is sdma, 1 is edma */
+
+        u32 regcache_cfg;
+        char name[20];
 };
 
 int fsl_asrc_request_pair(int channels, struct fsl_asrc_pair *pair);
