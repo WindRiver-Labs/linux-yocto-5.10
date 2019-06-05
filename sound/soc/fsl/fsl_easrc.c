@@ -1749,6 +1749,8 @@ static const struct regmap_config fsl_easrc_regmap_config = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
+#include "fsl_easrc_m2m.c"
+
 #ifdef DEBUG
 static void fsl_easrc_dump_firmware(struct fsl_asrc *easrc)
 {

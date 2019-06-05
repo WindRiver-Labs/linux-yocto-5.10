@@ -552,27 +552,6 @@ struct dma_block {
 	unsigned int max_buf_size;
 };
 
-struct fsl_easrc_data_fmt {
-	unsigned int width : 2;
-	unsigned int endianness : 1;
-	unsigned int unsign : 1;
-	unsigned int floating_point : 1;
-	unsigned int iec958: 1;
-	unsigned int sample_pos: 5;
-	unsigned int addexp;
-};
-
-struct fsl_easrc_io_params {
-	struct fsl_easrc_data_fmt fmt;
-	unsigned int group_len;
-	unsigned int iterations;
-	unsigned int access_len;
-	unsigned int fifo_wtmk;
-	unsigned int sample_rate;
-	unsigned int sample_format;
-	unsigned int norm_rate;
-};
-
 struct fsl_easrc_slot {
 	bool busy;
 	int ctx_index;
@@ -581,6 +560,84 @@ struct fsl_easrc_slot {
 	int min_channel;
 	int max_channel;
 	int pf_mem_used;
+};
+
+struct fsl_easrc_context {
+        enum asrc_pair_index index;
+        struct fsl_easrc *easrc;
+        struct dma_chan *dma_chan[2];
+        struct dma_async_tx_descriptor *desc[2];
+        struct fsl_easrc_io_params in_params;
+        struct fsl_easrc_io_params out_params;
+        struct imx_dma_data dma_data;
+        unsigned int channels;
+        unsigned int st1_num_taps;
+        unsigned int st2_num_taps;
+        unsigned int st1_num_exp;
+        unsigned int pf_init_mode;
+        unsigned int rs_init_mode;
+        unsigned int ctx_streams;
+        unsigned int pos;
+        u64 rs_ratio;
+        u64 *st1_coeff;
+        u64 *st2_coeff;
+        int in_filled_sample;
+        int out_missed_sample;
+        int st1_addexp;
+        int st2_addexp;
+        void *private_data;
+};
+
+/**
+ * fsl_easrc: EASRC private data
+ *
+ * name : name of EASRC device
+ * @pdev: platform device pointer
+ * @regmap: regmap handler
+ * @dma_params_rx: DMA parameters for receive channel
+ * @dma_params_tx: DMA parameters for transmit channel
+ * @ctx:  context pointer
+ * @slot: slot setting
+ * @mem_clk: clock source to access register
+ * @firmware_hdr:  the header of firmware
+ * @interp: pointer to interpolation filter coeff
+ * @prefil: pointer to prefilter coeff
+ * @fw: firmware of coeff table
+ * @fw_name: firmware name
+ * @paddr: physical address to the base address of registers
+ * @rs_num_taps:  resample filter taps, 32, 64, or 128
+ * @bps_i2c958: bits per sample of iec958
+ * @chn_avail: available channels, maximum 32
+ * @lock: spin lock for resource protection
+ * @easrc_rate: default sample rate for ASoC Back-Ends
+ * @easrc_format: default sample format for ASoC Back-Ends
+ */
+
+struct fsl_easrc {
+        char name[32];
+        struct platform_device *pdev;
+        struct regmap *regmap;
+        struct miscdevice easrc_miscdev;
+        struct snd_dmaengine_dai_dma_data dma_params_rx;
+        struct snd_dmaengine_dai_dma_data dma_params_tx;
+        struct fsl_easrc_context *ctx[EASRC_CTX_MAX_NUM];
+        struct fsl_easrc_slot slot[EASRC_CTX_MAX_NUM][2];
+        struct clk *mem_clk;
+        struct asrc_firmware_hdr *firmware_hdr;
+        struct interp_params *interp;
+        struct prefil_params *prefil;
+        const struct firmware *fw;
+        const char *fw_name;
+        unsigned long paddr;
+        unsigned int rs_num_taps;
+        unsigned int bps_iec958[EASRC_CTX_MAX_NUM];
+        unsigned int chn_avail;
+        u64 *rs_coeff;
+        u64 const_coeff;
+        int firmware_loaded;
+        spinlock_t lock;  /* spin lock for resource protection */
+        int easrc_rate;
+        int easrc_format;
 };
 
 /**
@@ -648,4 +705,10 @@ struct fsl_easrc_priv {
 	u64 const_coeff;
 	int firmware_loaded;
 };
+
+struct dma_chan *fsl_easrc_get_dma_channel(struct fsl_asrc_pair *ctx,
+                                                  bool dir);
+int fsl_easrc_request_context(int channels, struct fsl_asrc_pair *ctx);
+void fsl_easrc_release_context(struct fsl_asrc_pair *ctx);
+
 #endif /* _FSL_EASRC_H */
