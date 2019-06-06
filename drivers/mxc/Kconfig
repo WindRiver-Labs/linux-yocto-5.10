@@ -4,8 +4,10 @@ if ARCH_MXC
 
 menu "MXC support drivers"
 
+if ARM64
 source "drivers/mxc/hantro/Kconfig"
 source "drivers/mxc/gpu-viv/Kconfig"
+endif
 
 endmenu
 
