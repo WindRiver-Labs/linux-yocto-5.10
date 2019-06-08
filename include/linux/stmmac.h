@@ -266,6 +266,7 @@ struct plat_stmmacenet_data {
 	int int_snapshot_num;
 	int ext_snapshot_num;
 	bool ext_snapshot_en;
+	bool has_safety_feat;
 	bool multi_msi_en;
 	int msi_mac_vec;
 	int msi_wol_vec;
