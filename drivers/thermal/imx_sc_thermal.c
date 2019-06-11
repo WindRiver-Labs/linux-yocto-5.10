@@ -62,6 +62,7 @@ static int imx_sc_thermal_get_temp(void *data, int *temp)
 	if (ret) {
 		dev_err(&sensor->tzd->device, "read temp sensor %d failed, ret %d\n",
 			sensor->resource_id, ret);
+		*temp = 0;
 		return ret;
 	}
 
@@ -133,6 +134,7 @@ static int imx_sc_thermal_remove(struct platform_device *pdev)
 
 static const struct of_device_id imx_sc_thermal_table[] = {
 	{ .compatible = "fsl,imx-sc-thermal", },
+	{ .compatible = "fsl,imx8qm-sc-thermal", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, imx_sc_thermal_table);
