@@ -273,5 +273,8 @@ struct plat_stmmacenet_data {
 	int msi_rx_base_vec;
 	int msi_tx_base_vec;
 	bool use_phy_wol;
+	u32 ptov;
+	u32 ctov;
+	u32 tils;
 };
 #endif
