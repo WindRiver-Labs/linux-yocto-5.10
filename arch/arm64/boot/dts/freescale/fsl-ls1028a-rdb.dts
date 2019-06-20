@@ -227,6 +227,27 @@
 	};
 };
 
+/* l2switch ports */
+&switch_port0 {
+	phy-handle = <&qsgmii_phy1>;
+	phy-connection-type = "qsgmii";
+};
+
+&switch_port1 {
+	phy-handle = <&qsgmii_phy2>;
+	phy-connection-type = "qsgmii";
+};
+
+&switch_port2 {
+	phy-handle = <&qsgmii_phy3>;
+	phy-connection-type = "qsgmii";
+};
+
+&switch_port3 {
+	phy-handle = <&qsgmii_phy4>;
+	phy-connection-type = "qsgmii";
+};
+
 &enetc_port0 {
 	phy-handle = <&sgmii_phy0>;
 	phy-connection-type = "sgmii";
