@@ -29,6 +29,7 @@
 #define NPC_HW_TSTAMP_OFFSET		8
 
 #define NPC_KEX_CHAN_MASK	0xFFFULL
+#define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
 
 static const char def_pfl_name[] = "default";
 
@@ -37,11 +38,33 @@ static void npc_mcam_free_all_entries(struct rvu *rvu, struct npc_mcam *mcam,
 static void npc_mcam_free_all_counters(struct rvu *rvu, struct npc_mcam *mcam,
 				       u16 pcifunc);
 
+int npc_mcam_verify_pf_func(struct rvu *rvu, struct mcam_entry *entry_data,
+			    u8 intf, u16 pcifunc)
+{
+	u16 pf_func, pf_func_mask;
+
+	if (intf == NIX_INTF_RX)
+		return 0;
+
+	pf_func_mask = (entry_data->kw_mask[0] >> 32) &
+		NPC_KEX_PF_FUNC_MASK;
+	pf_func = (entry_data->kw[0] >> 32) & NPC_KEX_PF_FUNC_MASK;
+
+	pf_func = htons(pf_func);
+	if (pf_func_mask != NPC_KEX_PF_FUNC_MASK || pf_func != pcifunc)
+		return -EINVAL;
+
+	return 0;
+}
+
 int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel)
 {
 	int pf = rvu_get_pf(pcifunc);
 	u8 cgx_id, lmac_id;
 	int base = 0, end;
+
+	if (intf == NIX_INTF_TX)
+		return 0;
 
 	if (is_afvf(pcifunc)) {
 		end = rvu_get_num_lbk_chans();
@@ -1994,6 +2017,12 @@ int rvu_mbox_handler_npc_mcam_write_entry(struct rvu *rvu,
 		goto exit;
 	}
 
+	if (npc_mcam_verify_pf_func(rvu, &req->entry_data, req->intf,
+				    pcifunc)) {
+		rc = NPC_MCAM_INVALID_REQ;
+		goto exit;
+	}
+
 	npc_config_mcam_entry(rvu, mcam, blkaddr, req->entry, req->intf,
 			      &req->entry_data, req->enable_entry);
 
@@ -2346,6 +2375,10 @@ int rvu_mbox_handler_npc_mcam_alloc_and_write_entry(struct rvu *rvu,
 	channel &= chan_mask;
 
 	if (npc_mcam_verify_channel(rvu, req->hdr.pcifunc, req->intf, channel))
+		return NPC_MCAM_INVALID_REQ;
+
+	if (npc_mcam_verify_pf_func(rvu, &req->entry_data, req->intf,
+				    req->hdr.pcifunc))
 		return NPC_MCAM_INVALID_REQ;
 
 	/* Try to allocate a MCAM entry */
