@@ -67,6 +67,7 @@
 		serial4 = &lpuart4;
 		serial5 = &lpuart5;
 		sysclk = &sysclk;
+		rtc1 = &ftm_alarm0;
 	};
 
 	cpus {
@@ -600,16 +601,6 @@
 				<&clockgen 4 1>, <&clockgen 4 1>;
 			big-endian;
 			status = "disabled";
-		};
-
-		ftm0: ftm0@29d0000 {
-			compatible = "fsl,ftm-alarm";
-			reg = <0x0 0x29d0000 0x0 0x10000>,
-			      <0x0 0x1ee2140 0x0 0x4>;
-			reg-names = "ftm", "FlexTimer1";
-			interrupts = <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>;
-			big-endian;
-			status = "okay";
 		};
 
 		pwm1: pwm@29e0000 {
