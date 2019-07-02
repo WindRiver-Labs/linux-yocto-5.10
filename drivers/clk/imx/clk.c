@@ -153,7 +153,7 @@ void imx_cscmr1_fixup(u32 *val)
 static bool imx_keep_uart_clocks;
 static int imx_enabled_uart_clocks;
 static struct clk **imx_uart_clocks;
-static int earlycon_bits __initdata;
+static int earlycon_bits;
 
 static int __init imx_keep_uart_clocks_param(char *str)
 {
