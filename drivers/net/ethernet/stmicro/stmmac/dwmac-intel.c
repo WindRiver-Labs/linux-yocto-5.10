@@ -5,6 +5,8 @@
 #include <linux/clk-provider.h>
 #include <linux/pci.h>
 #include <linux/dmi.h>
+#include <linux/phy.h>
+#include <linux/dwxpcs.h>
 #include "dwmac-intel.h"
 #include "dwmac4.h"
 #include "stmmac.h"
@@ -445,6 +447,43 @@ static void common_default_data(struct plat_stmmacenet_data *plat)
 	plat->rx_queues_cfg[0].pkt_route = 0x0;
 }
 
+static struct dwxpcs_platform_data intel_mgbe_pdata = {
+	.mode = DWXPCS_MODE_SGMII_AN,
+};
+
+static struct mdio_board_info intel_mgbe_bdinfo = {
+	.bus_id = "stmmac-1",
+	.modalias = "dwxpcs",
+	.mdio_addr = 0x16,
+	.platform_data = &intel_mgbe_pdata,
+};
+
+static int setup_intel_mgbe_phy_conv(struct mii_bus *bus, int irq,
+				     int phy_addr)
+{
+	struct dwxpcs_platform_data *pdata = &intel_mgbe_pdata;
+
+	pdata->irq = irq;
+	pdata->ext_phy_addr = phy_addr;
+
+	return mdiobus_create_device(bus, &intel_mgbe_bdinfo);
+}
+
+static int remove_intel_mgbe_phy_conv(struct mii_bus *bus)
+{
+	struct mdio_board_info *bdinfo = &intel_mgbe_bdinfo;
+	struct mdio_device *mdiodev;
+
+	mdiodev = mdiobus_get_mdio_device(bus, bdinfo->mdio_addr);
+
+	if (!mdiodev)
+		return -1;
+
+	mdio_device_remove(mdiodev);
+
+	return 0;
+}
+
 static int intel_mgbe_common_data(struct pci_dev *pdev,
 				  struct plat_stmmacenet_data *plat)
 {
@@ -578,7 +617,13 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->has_crossts = true;
 	plat->crosststamp = intel_crosststamp;
 
+	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
+		plat->setup_phy_conv = setup_intel_mgbe_phy_conv;
+		plat->remove_phy_conv = remove_intel_mgbe_phy_conv;
+	}
+
 	/* Setup MSI vector offset specific to Intel mGbE controller */
+	plat->msi_phy_conv_vec = 30;
 	plat->msi_mac_vec = 29;
 	plat->msi_lpi_vec = 28;
 	plat->msi_sfty_ce_vec = 27;
@@ -914,6 +959,7 @@ static int stmmac_config_single_msi(struct pci_dev *pdev,
 
 	res->irq = pci_irq_vector(pdev, 0);
 	res->wol_irq = res->irq;
+	res->phy_conv_irq = res->irq;
 	plat->multi_msi_en = 0;
 	dev_info(&pdev->dev, "%s: Single IRQ enablement successful\n",
 		 __func__);
@@ -961,6 +1007,9 @@ static int stmmac_config_multi_msi(struct pci_dev *pdev,
 		res->wol_irq = pci_irq_vector(pdev, plat->msi_wol_vec);
 	if (plat->msi_lpi_vec < STMMAC_MSI_VEC_MAX)
 		res->lpi_irq = pci_irq_vector(pdev, plat->msi_lpi_vec);
+	if (plat->msi_phy_conv_vec < STMMAC_MSI_VEC_MAX)
+		res->phy_conv_irq = pci_irq_vector(pdev,
+						   plat->msi_phy_conv_vec);
 	if (plat->msi_sfty_ce_vec < STMMAC_MSI_VEC_MAX)
 		res->sfty_ce_irq = pci_irq_vector(pdev, plat->msi_sfty_ce_vec);
 	if (plat->msi_sfty_ue_vec < STMMAC_MSI_VEC_MAX)
@@ -1043,6 +1092,7 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	plat->msi_mac_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_wol_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_lpi_vec = STMMAC_MSI_VEC_MAX;
+	plat->msi_phy_conv_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_sfty_ce_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_sfty_ue_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_rx_base_vec = STMMAC_MSI_VEC_MAX;

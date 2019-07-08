@@ -10,9 +10,10 @@
 *******************************************************************************/
 
 #include <linux/clk-provider.h>
+#include <linux/phy.h>
 #include <linux/pci.h>
 #include <linux/dmi.h>
-
+#include <linux/dwxpcs.h>
 #include "stmmac.h"
 
 struct stmmac_pci_info {
