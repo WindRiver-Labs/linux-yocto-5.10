@@ -229,6 +229,9 @@ struct plat_stmmacenet_data {
 	int (*init)(struct platform_device *pdev, void *priv);
 	void (*exit)(struct platform_device *pdev, void *priv);
 	struct mac_device_info *(*setup)(void *priv);
+	int (*setup_phy_conv)(struct mii_bus *bus, int irq,
+	     int phy_addr);
+	int (*remove_phy_conv)(struct mii_bus *bus);
 	int (*clks_config)(void *priv, bool enabled);
 	int (*crosststamp)(ktime_t *device, struct system_counterval_t *system,
 			   void *ctx);
@@ -263,6 +266,7 @@ struct plat_stmmacenet_data {
 	int msi_mac_vec;
 	int msi_wol_vec;
 	int msi_lpi_vec;
+	int msi_phy_conv_vec;
 	int msi_sfty_ce_vec;
 	int msi_sfty_ue_vec;
 	int msi_rx_base_vec;
