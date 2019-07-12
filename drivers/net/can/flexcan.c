@@ -1490,6 +1490,7 @@ static int flexcan_chip_start(struct net_device *dev)
 		reg_fdctrl = priv->read(&regs->fdctrl) & ~FLEXCAN_FDCTRL_FDRATE;
 		reg_fdctrl &= ~(FLEXCAN_FDCTRL_MBDSR1(0x3) | FLEXCAN_FDCTRL_MBDSR0(0x3));
 		reg_mcr = priv->read(&regs->mcr) & ~FLEXCAN_MCR_FDEN;
+		reg_ctrl2 = priv->read(&regs->ctrl2) & ~FLEXCAN_CTRL2_ISOCANFDEN;
 
 		/* support BRS when set CAN FD mode
 		 * 64 bytes payload per MB and 7 MBs per RAM block by default
@@ -1499,10 +1500,14 @@ static int flexcan_chip_start(struct net_device *dev)
 			reg_fdctrl |= FLEXCAN_FDCTRL_FDRATE;
 			reg_fdctrl |= FLEXCAN_FDCTRL_MBDSR1(0x3) | FLEXCAN_FDCTRL_MBDSR0(0x3);
 			reg_mcr |= FLEXCAN_MCR_FDEN;
+
+			if (!(priv->can.ctrlmode & CAN_CTRLMODE_FD_NON_ISO))
+				reg_ctrl2 |= FLEXCAN_CTRL2_ISOCANFDEN;
 		}
 
 		priv->write(reg_fdctrl, &regs->fdctrl);
 		priv->write(reg_mcr, &regs->mcr);
+		priv->write(reg_ctrl2, &regs->ctrl2);
 	}
 
 	if ((priv->devtype_data->quirks & FLEXCAN_QUIRK_ENABLE_EACEN_RRS)) {
