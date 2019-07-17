@@ -16,6 +16,7 @@
 #include "rvu.h"
 #include "npc.h"
 #include "cgx.h"
+#include "rvu_fixes.h"
 
 static void nix_free_tx_vtag_entries(struct rvu *rvu, u16 pcifunc);
 static int rvu_nix_get_bpid(struct rvu *rvu, struct nix_bp_cfg_req *req,
@@ -1605,6 +1606,8 @@ static void nix_smq_flush(struct rvu *rvu, int blkaddr,
 	 * otherwise SMQ flush may stall.
 	 */
 	rvu_cgx_enadis_rx_bp(rvu, pf, false);
+
+	rvu_smqvf_xmit(rvu);
 
 	/* Wait for flush to complete */
 	err = rvu_poll_reg(rvu, blkaddr,
