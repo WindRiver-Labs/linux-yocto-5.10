@@ -1169,6 +1169,43 @@ fec_restart(struct net_device *ndev)
 
 }
 
+#ifdef CONFIG_IMX_SCU_SOC
+static int fec_enet_ipc_handle_init(struct fec_enet_private *fep)
+{
+        if (!(of_machine_is_compatible("fsl,imx8qm") ||
+            of_machine_is_compatible("fsl,imx8qxp") ||
+            of_machine_is_compatible("fsl,imx8dxl")))
+                return 0;
+
+        return imx_scu_get_handle(&fep->ipc_handle);
+}
+
+static void fec_enet_ipg_stop_set(struct fec_enet_private *fep, bool enabled)
+{
+        struct device_node *np = fep->pdev->dev.of_node;
+        u32 rsrc_id, val;
+        int idx;
+
+        if (!np || !fep->ipc_handle)
+                return;
+
+        idx = of_alias_get_id(np, "ethernet");
+        if (idx < 0)
+                idx = 0;
+        rsrc_id = idx ? IMX_SC_R_ENET_1 : IMX_SC_R_ENET_0;
+
+        val = enabled ? 1 : 0;
+        imx_sc_misc_set_control(fep->ipc_handle, rsrc_id, IMX_SC_C_IPG_STOP, val);
+}
+#else
+static int fec_enet_ipc_handle_init(struct fec_enet_private *fep)
+{
+        return 0;
+}
+
+static void fec_enet_ipg_stop_set(struct fec_enet_private *fep, bool enabled) {}
+#endif
+
 static void fec_enet_stop_mode(struct fec_enet_private *fep, bool enabled)
 {
 	struct fec_platform_data *pdata = fep->pdev->dev.platform_data;
