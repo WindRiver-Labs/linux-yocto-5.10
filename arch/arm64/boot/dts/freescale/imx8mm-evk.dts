@@ -77,6 +77,13 @@
 		>;
 	};
 
+	pinctrl_i2c2: i2c2grp {
+                fsl,pins = <
+                        MX8MM_IOMUXC_I2C2_SCL_I2C2_SCL                  0x400001c3
+                        MX8MM_IOMUXC_I2C2_SDA_I2C2_SDA                  0x400001c3
+                >;
+        };
+
 	pinctrl_usdhc3: usdhc3grp {
 		fsl,pins = <
 			MX8MM_IOMUXC_NAND_WE_B_USDHC3_CLK               0x190
@@ -124,5 +131,73 @@
 			MX8MM_IOMUXC_NAND_CLE_USDHC3_DATA7              0x1d6
 			MX8MM_IOMUXC_NAND_CE1_B_USDHC3_STROBE           0x196
 		>;
+	};
+};
+
+&i2c2 {
+        clock-frequency = <400000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_i2c2>;
+        status = "okay";
+
+        adv_bridge: adv7535@3d {
+                compatible = "adi,adv7533";
+                reg = <0x3d>;
+                adi,addr-cec = <0x3b>;
+                adi,dsi-lanes = <4>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&pinctrl_i2c2_synaptics_dsx_io>;
+                interrupt-parent = <&gpio1>;
+                interrupts = <9 IRQ_TYPE_LEVEL_LOW>;
+                status = "okay";
+
+                port {
+                        adv7535_from_dsim: endpoint {
+                                remote-endpoint = <&dsim_to_adv7535>;
+                        };
+                };
+        };
+
+        ptn5110: tcpc@50 {
+                compatible = "nxp,ptn5110";
+                pinctrl-names = "default";
+                pinctrl-0 = <&pinctrl_typec1>;
+                reg = <0x50>;
+                interrupt-parent = <&gpio2>;
+                interrupts = <11 8>;
+                status = "okay";
+
+                port {
+                        typec1_dr_sw: endpoint {
+                                remote-endpoint = <&usb1_drd_sw>;
+                        };
+                };
+
+                typec1_con: connector {
+                        compatible = "usb-c-connector";
+                        label = "USB-C";
+                        power-role = "dual";
+                        data-role = "dual";
+                        try-power-role = "sink";
+                        source-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
+                        sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)
+                                     PDO_VAR(5000, 20000, 3000)>;
+                        op-sink-microwatt = <15000000>;
+                        self-powered;
+                };
+        };
+};
+
+&lcdif {
+	status = "okay";
+};
+
+&mipi_dsi {
+	status = "okay";
+
+	port@1 {
+		dsim_to_adv7535: endpoint {
+			remote-endpoint = <&adv7535_from_dsim>;
+		};
 	};
 };
