@@ -948,13 +948,7 @@ static void npc_load_mkex_profile(struct rvu *rvu, int blkaddr,
 		/* Compare with mkex mod_param name string */
 		if (mcam_kex->mkex_sign == MKEX_SIGN &&
 		    !strncmp(mcam_kex->name, mkex_profile, MKEX_NAME_LEN)) {
-			/* Due to an errata (35786) in A0/B0 pass silicon,
-			 * parse nibble enable configuration has to be
-			 * identical for both Rx and Tx interfaces.
-			 */
-			if (!is_rvu_96xx_B0(rvu) ||
-			    mcam_kex->keyx_cfg[NIX_INTF_RX] == mcam_kex->keyx_cfg[NIX_INTF_TX])
-				rvu->kpu.mkex = mcam_kex;
+			if (!is_parse_nibble_config_valid(rvu, mcam_kex))
 			goto program_mkex;
 		}
 
@@ -1330,13 +1324,11 @@ int rvu_npc_init(struct rvu *rvu)
 	tx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_TX];
 	nibble_ena = FIELD_GET(NPC_PARSE_NIBBLE, rx_kex);
 	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX), rx_kex);
-	/* Due to an errata (35786) in A0 pass silicon, parse nibble enable
-	 * configuration has to be identical for both Rx and Tx interfaces.
-	 */
-	if (is_rvu_96xx_B0(rvu)) {
-		tx_kex &= ~NPC_PARSE_NIBBLE;
-		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
-	}
+
+	/* Extract Ltypes LID_LA to LID_LE */
+	nibble_ena = rvu_npc_get_tx_nibble_cfg(rvu, nibble_ena);
+	if (!nibble_ena)
+		nibble_ena = 0x249200;
 	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX), tx_kex);
 
 	err = npc_mcam_rsrcs_init(rvu, blkaddr);
