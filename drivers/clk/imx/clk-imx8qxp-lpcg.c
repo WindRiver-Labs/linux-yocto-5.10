@@ -14,11 +14,12 @@
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
+#include <dt-bindings/clock/imx8-clock.h>
 
 #include "clk-scu.h"
 #include "clk-imx8qxp-lpcg.h"
 
-#include <dt-bindings/clock/imx8-clock.h>
+#define IMX_LPCG_MAX_CLKS	8
 
 /*
  * struct imx8qxp_lpcg_data - Description of one LPCG clock
@@ -33,13 +34,13 @@
  * This structure describes one LPCG clock
  */
 struct imx8qxp_lpcg_data {
-	int id;
-	char *name;
-	char *parent;
-	unsigned long flags;
-	u32 offset;
-	u8 bit_idx;
-	bool hw_gate;
+        int id;
+        char *name;
+        char *parent;
+        unsigned long flags;
+        u32 offset;
+        u8 bit_idx;
+        bool hw_gate;
 };
 
 /*
@@ -52,419 +53,240 @@ struct imx8qxp_lpcg_data {
  * which then will be used to create respective LPCGs clocks
  */
 struct imx8qxp_ss_lpcg {
-	const struct imx8qxp_lpcg_data *lpcg;
-	u8 num_lpcg;
-	u8 num_max;
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_cm40[] = {
-	{ IMX_CM40_LPCG_I2C_IPG_CLK, "cm40_lpcg_i2c_ipg_clk", "cm40_ipg_clk_root", 0, CM40_I2C_LPCG, 16, 0, },
-	{ IMX_CM40_LPCG_I2C_CLK, "cm40_lpcg_i2c_clk", "cm40_i2c_div", 0, CM40_I2C_LPCG, 0, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_cm40 = {
-	.lpcg = imx8qxp_lpcg_cm40,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_cm40),
-	.num_max = IMX_CM40_LPCG_CLK_END,
+        const struct imx8qxp_lpcg_data *lpcg;
+        u8 num_lpcg;
+        u8 num_max;
 };
 
 static const struct imx8qxp_lpcg_data imx8qxp_lpcg_adma[] = {
-	{ IMX_ADMA_LPCG_SPI0_IPG_CLK, "spi0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPSPI_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SPI0_CLK, "spi0_lpcg_clk", "spi0_clk", 0, ADMA_LPSPI_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SPI2_IPG_CLK, "spi2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPSPI_2_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SPI2_CLK, "spi2_lpcg_clk", "spi2_clk", 0, ADMA_LPSPI_2_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_UART0_IPG_CLK, "uart0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_UART0_BAUD_CLK, "uart0_lpcg_baud_clk", "uart0_clk", 0, ADMA_LPUART_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_UART1_IPG_CLK, "uart1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_1_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_UART1_BAUD_CLK, "uart1_lpcg_baud_clk", "uart1_clk", 0, ADMA_LPUART_1_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_UART2_IPG_CLK, "uart2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_2_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_UART2_BAUD_CLK, "uart2_lpcg_baud_clk", "uart2_clk", 0, ADMA_LPUART_2_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_UART3_IPG_CLK, "uart3_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_3_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_UART3_BAUD_CLK, "uart3_lpcg_baud_clk", "uart3_clk", 0, ADMA_LPUART_3_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_I2C0_IPG_CLK, "i2c0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_I2C0_CLK, "i2c0_lpcg_clk", "i2c0_clk", 0, ADMA_LPI2C_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_I2C1_IPG_CLK, "i2c1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_1_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_I2C1_CLK, "i2c1_lpcg_clk", "i2c1_clk", 0, ADMA_LPI2C_1_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_I2C2_IPG_CLK, "i2c2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_2_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_I2C2_CLK, "i2c2_lpcg_clk", "i2c2_clk", 0, ADMA_LPI2C_2_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_I2C3_IPG_CLK, "i2c3_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_3_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_I2C3_CLK, "i2c3_lpcg_clk", "i2c3_clk", 0, ADMA_LPI2C_3_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_CAN0_IPG_CHI_CLK, "can0_lpcg_chi_clk", "dma_ipg_clk_root", 0, ADMA_FLEXCAN_0_LPCG, 20, 0, },
-	{ IMX_ADMA_LPCG_CAN0_IPG_CLK, "can0_lpcg_ipg_clk", "can0_lpcg_chi_clk", 0, ADMA_FLEXCAN_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_CAN0_IPG_PE_CLK, "can0_lpcg_pe_clk", "can0_clk", 0, ADMA_FLEXCAN_0_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_UART0_IPG_CLK, "uart0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_0_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_UART0_BAUD_CLK, "uart0_lpcg_baud_clk", "uart0_clk", 0, ADMA_LPUART_0_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_UART1_IPG_CLK, "uart1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_1_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_UART1_BAUD_CLK, "uart1_lpcg_baud_clk", "uart1_clk", 0, ADMA_LPUART_1_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_UART2_IPG_CLK, "uart2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_2_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_UART2_BAUD_CLK, "uart2_lpcg_baud_clk", "uart2_clk", 0, ADMA_LPUART_2_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_UART3_IPG_CLK, "uart3_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPUART_3_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_UART3_BAUD_CLK, "uart3_lpcg_baud_clk", "uart3_clk", 0, ADMA_LPUART_3_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_I2C0_IPG_CLK, "i2c0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_0_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_I2C0_CLK, "i2c0_lpcg_clk", "i2c0_clk", 0, ADMA_LPI2C_0_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_I2C1_IPG_CLK, "i2c1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_1_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_I2C1_CLK, "i2c1_lpcg_clk", "i2c1_clk", 0, ADMA_LPI2C_1_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_I2C2_IPG_CLK, "i2c2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_2_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_I2C2_CLK, "i2c2_lpcg_clk", "i2c2_clk", 0, ADMA_LPI2C_2_LPCG, 0, 0, },
+        { IMX_ADMA_LPCG_I2C3_IPG_CLK, "i2c3_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_LPI2C_3_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_I2C3_CLK, "i2c3_lpcg_clk", "i2c3_clk", 0, ADMA_LPI2C_3_LPCG, 0, 0, },
 
-	{ IMX_ADMA_LPCG_DSP_CORE_CLK, "dsp_lpcg_core_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 28, 0, },
-	{ IMX_ADMA_LPCG_DSP_IPG_CLK, "dsp_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 20, 0, },
-	{ IMX_ADMA_LPCG_DSP_ADB_CLK, "dsp_lpcg_adb_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_OCRAM_IPG_CLK, "ocram_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_OCRAM_LPCG, 16, 0, },
-
-	{ IMX_ADMA_LPCG_AUD_PLL_DIV_CLK0_CLK, "aud_pll_div_clk0_lpcg_clk", "audio_pll_div_clk0_clk", 0, ADMA_PLL_CLK0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_AUD_PLL_DIV_CLK1_CLK, "aud_pll_div_clk1_lpcg_clk", "audio_pll_div_clk1_clk", 0, ADMA_PLL_CLK1_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_AUD_REC_CLK0_CLK, "aud_rec_clk0_lpcg_clk", "audio_rec_clk0_clk", 0, ADMA_REC_CLK0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_AUD_REC_CLK1_CLK, "aud_rec_clk1_lpcg_clk", "audio_rec_clk1_clk", 0, ADMA_REC_CLK1_LPCG, 0, 0, },
-
-	{ IMX_ADMA_LPCG_AMIX_IPG_CLK, "amix_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_AMIX_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_ESAI_0_IPG_CLK, "esai0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_ESAI_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_ESAI_0_EXTAL_CLK, "esai0_lpcg_extal_clk", "acm_esai0_mclk_sel", 0, ADMA_ESAI_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_0_IPG_CLK, "sai0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_0_MCLK, "sai0_lpcg_mclk", "acm_sai0_mclk_sel", 0, ADMA_SAI_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_1_IPG_CLK, "sai1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_1_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_1_MCLK, "sai1_lpcg_mclk", "acm_sai1_mclk_sel", 0, ADMA_SAI_1_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_2_IPG_CLK, "sai2_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_2_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_3_MCLK, "sai2_lpcg_mclk", "acm_sai2_mclk_sel", 0, ADMA_SAI_2_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_3_IPG_CLK, "sai3_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_3_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_3_MCLK, "sai3_lpcg_mclk", "acm_sai3_mclk_sel", 0, ADMA_SAI_3_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_4_IPG_CLK, "sai4_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_4_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_4_MCLK, "sai4_lpcg_mclk", "acm_sai4_mclk_sel", 0, ADMA_SAI_4_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SAI_5_IPG_CLK, "sai5_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_SAI_5_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SAI_5_MCLK, "sai5_lpcg_mclk", "acm_sai5_mclk_sel", 0, ADMA_SAI_5_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_MQS_IPG_CLK, "mqs_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_MQS_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_MQS_MCLK, "mqs_lpcg_mclk", "acm_mqs_mclk_sel", 0, ADMA_MQS_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT5_IPG_CLK, "gpt5_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_5_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT5_CLKIN, "gpt5_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_5_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT6_IPG_CLK, "gpt6_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_6_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT6_CLKIN, "gpt6_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_6_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT7_IPG_CLK, "gpt7_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_7_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT7_CLKIN, "gpt7_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_7_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT8_IPG_CLK, "gpt8_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_8_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT8_CLKIN, "gpt8_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_8_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT9_IPG_CLK, "gpt9_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_9_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT9_CLKIN, "gpt9_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_9_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_GPT10_IPG_CLK, "gpt10_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_GPT_10_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_GPT10_CLKIN, "gpt10_lpcg_clkin", "dma_ipg_clk_root", 0, ADMA_GPT_10_LPCG, 0, 0, },
-
-	{ IMX_ADMA_LPCG_MCLKOUT0, "mclkout0_lpcg", "acm_mclkout0_sel", 0, ADMA_MCLKOUT0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_MCLKOUT1, "mclkout1_lpcg", "acm_mclkout1_sel", 0, ADMA_MCLKOUT1_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_SPDIF_0_GCLKW, "spdif0_lpcg_gclkw", "dma_ipg_clk_root", 0, ADMA_SPDIF_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_SPDIF_0_TX_CLK, "spdif0_lpcg_tx_clk", "acm_spdif0_mclk_sel", 0, ADMA_SPDIF_0_LPCG, 0, 0, },
-	{ IMX_ADMA_LPCG_ASRC_0_IPG_CLK, "asrc0_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_ASRC_0_LPCG, 16, 0, },
-	{ IMX_ADMA_LPCG_ASRC_1_IPG_CLK, "asrc1_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_ASRC_1_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_DSP_CORE_CLK, "dsp_lpcg_core_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 28, 0, },
+        { IMX_ADMA_LPCG_DSP_IPG_CLK, "dsp_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 20, 0, },
+        { IMX_ADMA_LPCG_DSP_ADB_CLK, "dsp_lpcg_adb_clk", "dma_ipg_clk_root", 0, ADMA_HIFI_LPCG, 16, 0, },
+        { IMX_ADMA_LPCG_OCRAM_IPG_CLK, "ocram_lpcg_ipg_clk", "dma_ipg_clk_root", 0, ADMA_OCRAM_LPCG, 16, 0, },
 };
 
 static const struct imx8qxp_ss_lpcg imx8qxp_ss_adma = {
-	.lpcg = imx8qxp_lpcg_adma,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_adma),
-	.num_max = IMX_ADMA_LPCG_CLK_END,
+        .lpcg = imx8qxp_lpcg_adma,
+        .num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_adma),
+        .num_max = IMX_ADMA_ACM_CLK_END,
 };
 
 static const struct imx8qxp_lpcg_data imx8qxp_lpcg_conn[] = {
-	{ IMX_CONN_LPCG_SDHC0_PER_CLK, "sdhc0_lpcg_per_clk", "sdhc0_clk", 0, CONN_USDHC_0_LPCG, 0, 0, },
-	{ IMX_CONN_LPCG_SDHC0_IPG_CLK, "sdhc0_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_0_LPCG, 16, 0, },
-	{ IMX_CONN_LPCG_SDHC0_HCLK, "sdhc0_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_0_LPCG, 20, 0, },
-	{ IMX_CONN_LPCG_SDHC1_PER_CLK, "sdhc1_lpcg_per_clk", "sdhc1_clk", 0, CONN_USDHC_1_LPCG, 0, 0, },
-	{ IMX_CONN_LPCG_SDHC1_IPG_CLK, "sdhc1_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_1_LPCG, 16, 0, },
-	{ IMX_CONN_LPCG_SDHC1_HCLK, "sdhc1_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_1_LPCG, 20, 0, },
-	{ IMX_CONN_LPCG_SDHC2_PER_CLK, "sdhc2_lpcg_per_clk", "sdhc2_clk", 0, CONN_USDHC_2_LPCG, 0, 0, },
-	{ IMX_CONN_LPCG_SDHC2_IPG_CLK, "sdhc2_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_2_LPCG, 16, 0, },
-	{ IMX_CONN_LPCG_SDHC2_HCLK, "sdhc2_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_2_LPCG, 20, 0, },
-	{ IMX_CONN_LPCG_ENET0_TIMER_CLK, "enet0_timer_clk", "enet0_root_clk", 0, CONN_ENET_0_LPCG, 0, 0, },
-	{ IMX_CONN_LPCG_ENET0_TXC_SAMPLING_CLK, "enet0_txc_sampling_clk", "enet0_root_clk", 0, CONN_ENET_0_LPCG, 4, 0, },
-	{ IMX_CONN_LPCG_ENET0_RGMII_TXC_CLK, "enet0_rgmii_txc_clk", "enet0_rgmii_txc_sel", 0, CONN_ENET_0_LPCG, 12, 0, },
-	{ IMX_CONN_LPCG_ENET0_AHB_CLK, "enet0_ahb_clk", "conn_axi_clk_root", 0, CONN_ENET_0_LPCG, 8, 0, },
-	{ IMX_CONN_LPCG_ENET0_IPG_S_CLK, "enet0_ipg_s_clk", "conn_ipg_clk_root", 0, CONN_ENET_0_LPCG, 20, 0, },
-	{ IMX_CONN_LPCG_ENET0_IPG_CLK, "enet0_ipg_clk", "enet0_ipg_s_clk", 0, CONN_ENET_0_LPCG, 16, 0, },
-	{ IMX_CONN_LPCG_ENET1_TIMER_CLK, "enet1_timer_clk", "enet1_root_clk", 0, CONN_ENET_1_LPCG, 0, 0, },
-	{ IMX_CONN_LPCG_ENET1_TXC_SAMPLING_CLK, "enet1_txc_sampling_clk", "enet1_root_clk", 0, CONN_ENET_1_LPCG, 4, 0, },
-	{ IMX_CONN_LPCG_ENET1_RGMII_TXC_CLK, "enet1_rgmii_txc_clk", "enet1_rgmii_txc_sel", 0, CONN_ENET_1_LPCG, 12, 0, },
-	{ IMX_CONN_LPCG_ENET1_AHB_CLK, "enet1_ahb_clk", "conn_axi_clk_root", 0, CONN_ENET_1_LPCG, 8, 0, },
-	{ IMX_CONN_LPCG_ENET1_IPG_S_CLK, "enet1_ipg_s_clk", "conn_ipg_clk_root", 0, CONN_ENET_1_LPCG, 20, 0, },
-	{ IMX_CONN_LPCG_ENET1_IPG_CLK, "enet1_ipg_clk", "enet1_ipg_s_clk", 0, CONN_ENET_1_LPCG, 16, 0, },
-	{ IMX_CONN_LPCG_USB2_PHY_IPG_CLK, "usboh3_phy_ipg_clk", "conn_ipg_clk_root", 0, CONN_USB_2_LPCG, 28, 0, },
-	{ IMX_CONN_LPCG_USB2_AHB_CLK, "usboh3_ahb_clk", "conn_ahb_clk_root", 0, CONN_USB_2_LPCG, 24, 0, },
+        { IMX_CONN_LPCG_SDHC0_PER_CLK, "sdhc0_lpcg_per_clk", "sdhc0_clk", 0, CONN_USDHC_0_LPCG, 0, 0, },
+        { IMX_CONN_LPCG_SDHC0_IPG_CLK, "sdhc0_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_0_LPCG, 16, 0, },
+        { IMX_CONN_LPCG_SDHC0_HCLK, "sdhc0_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_0_LPCG, 20, 0, },
+        { IMX_CONN_LPCG_SDHC1_PER_CLK, "sdhc1_lpcg_per_clk", "sdhc1_clk", 0, CONN_USDHC_1_LPCG, 0, 0, },
+        { IMX_CONN_LPCG_SDHC1_IPG_CLK, "sdhc1_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_1_LPCG, 16, 0, },
+        { IMX_CONN_LPCG_SDHC1_HCLK, "sdhc1_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_1_LPCG, 20, 0, },
+        { IMX_CONN_LPCG_SDHC2_PER_CLK, "sdhc2_lpcg_per_clk", "sdhc2_clk", 0, CONN_USDHC_2_LPCG, 0, 0, },
+        { IMX_CONN_LPCG_SDHC2_IPG_CLK, "sdhc2_lpcg_ipg_clk", "conn_ipg_clk_root", 0, CONN_USDHC_2_LPCG, 16, 0, },
+        { IMX_CONN_LPCG_SDHC2_HCLK, "sdhc2_lpcg_ahb_clk", "conn_axi_clk_root", 0, CONN_USDHC_2_LPCG, 20, 0, },
+        { IMX_CONN_LPCG_ENET0_ROOT_CLK, "enet0_ipg_root_clk", "enet0_clk", 0, CONN_ENET_0_LPCG, 0, 0, },
+        { IMX_CONN_LPCG_ENET0_TX_CLK, "enet0_tx_clk", "enet0_clk", 0, CONN_ENET_0_LPCG, 4, 0, },
+        { IMX_CONN_LPCG_ENET0_AHB_CLK, "enet0_ahb_clk", "conn_axi_clk_root", 0, CONN_ENET_0_LPCG, 8, 0, },
+        { IMX_CONN_LPCG_ENET0_IPG_S_CLK, "enet0_ipg_s_clk", "conn_ipg_clk_root", 0, CONN_ENET_0_LPCG, 20, 0, },
+        { IMX_CONN_LPCG_ENET0_IPG_CLK, "enet0_ipg_clk", "enet0_ipg_s_clk", 0, CONN_ENET_0_LPCG, 16, 0, },
+        { IMX_CONN_LPCG_ENET1_ROOT_CLK, "enet1_ipg_root_clk", "enet1_clk", 0, CONN_ENET_1_LPCG, 0, 0, },
+        { IMX_CONN_LPCG_ENET1_TX_CLK, "enet1_tx_clk", "enet1_clk", 0, CONN_ENET_1_LPCG, 4, 0, },
+        { IMX_CONN_LPCG_ENET1_AHB_CLK, "enet1_ahb_clk", "conn_axi_clk_root", 0, CONN_ENET_1_LPCG, 8, 0, },
+        { IMX_CONN_LPCG_ENET1_IPG_S_CLK, "enet1_ipg_s_clk", "conn_ipg_clk_root", 0, CONN_ENET_1_LPCG, 20, 0, },
+        { IMX_CONN_LPCG_ENET1_IPG_CLK, "enet1_ipg_clk", "enet0_ipg_s_clk", 0, CONN_ENET_1_LPCG, 16, 0, },
 };
 
 static const struct imx8qxp_ss_lpcg imx8qxp_ss_conn = {
-	.lpcg = imx8qxp_lpcg_conn,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_conn),
-	.num_max = IMX_CONN_LPCG_CLK_END,
+        .lpcg = imx8qxp_lpcg_conn,
+        .num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_conn),
+        .num_max = IMX_CONN_LPCG_CLK_END,
 };
 
 static const struct imx8qxp_lpcg_data imx8qxp_lpcg_lsio[] = {
-	{ IMX_LSIO_LPCG_PWM0_IPG_CLK, "pwm0_lpcg_ipg_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM0_IPG_HF_CLK, "pwm0_lpcg_ipg_hf_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM0_IPG_S_CLK, "pwm0_lpcg_ipg_s_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM0_IPG_SLV_CLK, "pwm0_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_0_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM0_IPG_MSTR_CLK, "pwm0_lpcg_ipg_mstr_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM1_IPG_CLK, "pwm1_lpcg_ipg_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM1_IPG_HF_CLK, "pwm1_lpcg_ipg_hf_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM1_IPG_S_CLK, "pwm1_lpcg_ipg_s_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM1_IPG_SLV_CLK, "pwm1_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_1_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM1_IPG_MSTR_CLK, "pwm1_lpcg_ipg_mstr_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM2_IPG_CLK, "pwm2_lpcg_ipg_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM2_IPG_HF_CLK, "pwm2_lpcg_ipg_hf_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM2_IPG_S_CLK, "pwm2_lpcg_ipg_s_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM2_IPG_SLV_CLK, "pwm2_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_2_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM2_IPG_MSTR_CLK, "pwm2_lpcg_ipg_mstr_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM3_IPG_CLK, "pwm3_lpcg_ipg_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM3_IPG_HF_CLK, "pwm3_lpcg_ipg_hf_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM3_IPG_S_CLK, "pwm3_lpcg_ipg_s_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM3_IPG_SLV_CLK, "pwm3_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_3_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM3_IPG_MSTR_CLK, "pwm3_lpcg_ipg_mstr_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM4_IPG_CLK, "pwm4_lpcg_ipg_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM4_IPG_HF_CLK, "pwm4_lpcg_ipg_hf_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM4_IPG_S_CLK, "pwm4_lpcg_ipg_s_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM4_IPG_SLV_CLK, "pwm4_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_4_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM4_IPG_MSTR_CLK, "pwm4_lpcg_ipg_mstr_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM5_IPG_CLK, "pwm5_lpcg_ipg_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM5_IPG_HF_CLK, "pwm5_lpcg_ipg_hf_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM5_IPG_S_CLK, "pwm5_lpcg_ipg_s_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM5_IPG_SLV_CLK, "pwm5_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_5_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM5_IPG_MSTR_CLK, "pwm5_lpcg_ipg_mstr_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 24, 0, },
-	{ IMX_LSIO_LPCG_PWM6_IPG_CLK, "pwm6_lpcg_ipg_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 0, 0, },
-	{ IMX_LSIO_LPCG_PWM6_IPG_HF_CLK, "pwm6_lpcg_ipg_hf_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 4, 0, },
-	{ IMX_LSIO_LPCG_PWM6_IPG_S_CLK, "pwm6_lpcg_ipg_s_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 16, 0, },
-	{ IMX_LSIO_LPCG_PWM6_IPG_SLV_CLK, "pwm6_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_6_LPCG, 20, 0, },
-	{ IMX_LSIO_LPCG_PWM6_IPG_MSTR_CLK, "pwm6_lpcg_ipg_mstr_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM0_IPG_CLK, "pwm0_lpcg_ipg_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM0_IPG_HF_CLK, "pwm0_lpcg_ipg_hf_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM0_IPG_S_CLK, "pwm0_lpcg_ipg_s_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM0_IPG_SLV_CLK, "pwm0_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_0_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM0_IPG_MSTR_CLK, "pwm0_lpcg_ipg_mstr_clk", "pwm0_clk", 0, LSIO_PWM_0_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM1_IPG_CLK, "pwm1_lpcg_ipg_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM1_IPG_HF_CLK, "pwm1_lpcg_ipg_hf_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM1_IPG_S_CLK, "pwm1_lpcg_ipg_s_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM1_IPG_SLV_CLK, "pwm1_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_1_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM1_IPG_MSTR_CLK, "pwm1_lpcg_ipg_mstr_clk", "pwm1_clk", 0, LSIO_PWM_1_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM2_IPG_CLK, "pwm2_lpcg_ipg_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM2_IPG_HF_CLK, "pwm2_lpcg_ipg_hf_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM2_IPG_S_CLK, "pwm2_lpcg_ipg_s_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM2_IPG_SLV_CLK, "pwm2_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_2_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM2_IPG_MSTR_CLK, "pwm2_lpcg_ipg_mstr_clk", "pwm2_clk", 0, LSIO_PWM_2_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM3_IPG_CLK, "pwm3_lpcg_ipg_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM3_IPG_HF_CLK, "pwm3_lpcg_ipg_hf_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM3_IPG_S_CLK, "pwm3_lpcg_ipg_s_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM3_IPG_SLV_CLK, "pwm3_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_3_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM3_IPG_MSTR_CLK, "pwm3_lpcg_ipg_mstr_clk", "pwm3_clk", 0, LSIO_PWM_3_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM4_IPG_CLK, "pwm4_lpcg_ipg_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM4_IPG_HF_CLK, "pwm4_lpcg_ipg_hf_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM4_IPG_S_CLK, "pwm4_lpcg_ipg_s_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM4_IPG_SLV_CLK, "pwm4_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_4_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM4_IPG_MSTR_CLK, "pwm4_lpcg_ipg_mstr_clk", "pwm4_clk", 0, LSIO_PWM_4_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM5_IPG_CLK, "pwm5_lpcg_ipg_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM5_IPG_HF_CLK, "pwm5_lpcg_ipg_hf_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM5_IPG_S_CLK, "pwm5_lpcg_ipg_s_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM5_IPG_SLV_CLK, "pwm5_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_5_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM5_IPG_MSTR_CLK, "pwm5_lpcg_ipg_mstr_clk", "pwm5_clk", 0, LSIO_PWM_5_LPCG, 24, 0, },
+        { IMX_LSIO_LPCG_PWM6_IPG_CLK, "pwm6_lpcg_ipg_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 0, 0, },
+        { IMX_LSIO_LPCG_PWM6_IPG_HF_CLK, "pwm6_lpcg_ipg_hf_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 4, 0, },
+        { IMX_LSIO_LPCG_PWM6_IPG_S_CLK, "pwm6_lpcg_ipg_s_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 16, 0, },
+        { IMX_LSIO_LPCG_PWM6_IPG_SLV_CLK, "pwm6_lpcg_ipg_slv_clk", "lsio_bus_clk_root", 0, LSIO_PWM_6_LPCG, 20, 0, },
+        { IMX_LSIO_LPCG_PWM6_IPG_MSTR_CLK, "pwm6_lpcg_ipg_mstr_clk", "pwm6_clk", 0, LSIO_PWM_6_LPCG, 24, 0, },
 };
 
 static const struct imx8qxp_ss_lpcg imx8qxp_ss_lsio = {
-	.lpcg = imx8qxp_lpcg_lsio,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_lsio),
-	.num_max = IMX_LSIO_LPCG_CLK_END,
+        .lpcg = imx8qxp_lpcg_lsio,
+        .num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_lsio),
+        .num_max = IMX_LSIO_LPCG_CLK_END,
 };
 
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_hsio[] = {
-	{ IMX_HSIO_LPCG_PCIEB_MSTR_AXI_CLK, "hsio_pcie_mstr_axi_clk", "hsio_axi_clk_root", 0, HSIO_PCIEB_LPCG, 16, 0, },
-	{ IMX_HSIO_LPCG_PCIEB_SLV_AXI_CLK, "hsio_pcie_slv_axi_clk", "hsio_axi_clk_root", 0, HSIO_PCIEB_LPCG, 20, 0, },
-	{ IMX_HSIO_LPCG_PCIEB_DBI_AXI_CLK, "hsio_pcie_dbi_axi_clk", "hsio_axi_clk_root", 0, HSIO_PCIEB_LPCG, 24, 0, },
-	{ IMX_HSIO_LPCG_PHYX1_PCLK, "hsio_pcie_phyx1_pclk", "dummy", 0, HSIO_PHYX1_LPCG, 0, 0, },
-	{ IMX_HSIO_LPCG_PHYX1_APB_CLK, "hsio_pcie_phyx1_apb_clk", "hsio_per_clk_root", 0, HSIO_PHYX1_LPCG, 16, 0, },
-	{ IMX_HSIO_LPCG_PHYX1_PER_CLK, "hsio_phyx1_per_clk", "hsio_per_clk_root", 0, HSIO_CRR_1_LPCG, 16, 0, },
-	{ IMX_HSIO_LPCG_PCIEB_PER_CLK, "hsio_pcieb_per_clk", "hsio_per_clk_root", 0, HSIO_CRR_3_LPCG, 16, 0, },
-	{ IMX_HSIO_LPCG_MISC_PER_CLK, "hsio_misc_per_clk", "hsio_per_clk_root", 0, HSIO_CRR_5_LPCG, 16, 0, },
-	{ IMX_HSIO_LPCG_GPIO_PER_CLK, "hsio_gpio_per_clk", "hsio_per_clk_root", 0, HSIO_GPIO_LPCG, 16, 0, },
-};
+#define IMX_LPCG_MAX_CLKS       8
 
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_hsio = {
-	.lpcg = imx8qxp_lpcg_hsio,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_hsio),
-	.num_max = IMX_HSIO_LPCG_CLK_END,
-};
+static struct clk_hw *imx_lpcg_of_clk_src_get(struct of_phandle_args *clkspec,
+                                              void *data)
+{
+        struct clk_hw_onecell_data *hw_data = data;
+        unsigned int idx = clkspec->args[0] / 4;
 
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_img[] = {
-	{ IMX_IMG_LPCG_PDMA0_CLK, "img_lpcg_pdma0_clk", "img_pxl_clk_root", 0, IMG_PDMA0_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA1_CLK, "img_lpcg_pdma1_clk", "img_pxl_clk_root", 0, IMG_PDMA1_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA2_CLK, "img_lpcg_pdma2_clk", "img_pxl_clk_root", 0, IMG_PDMA2_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA3_CLK, "img_lpcg_pdma3_clk", "img_pxl_clk_root", 0, IMG_PDMA3_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA4_CLK, "img_lpcg_pdma4_clk", "img_pxl_clk_root", 0, IMG_PDMA4_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA5_CLK, "img_lpcg_pdma5_clk", "img_pxl_clk_root", 0, IMG_PDMA5_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA6_CLK, "img_lpcg_pdma6_clk", "img_pxl_clk_root", 0, IMG_PDMA6_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_PDMA7_CLK, "img_lpcg_pdma7_clk", "img_pxl_clk_root", 0, IMG_PDMA7_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_CSI0_PXL_LINK_CLK, "img_lpcg_csi0_pxl_link_clk", "img_pxl_clk_root", 0, IMG_MIPI_CSI0_LPCG, 0, 0, },
-	{ IMX_IMG_LPCG_CSI1_PXL_LINK_CLK, "img_lpcg_csi1_pxl_link_clk", "img_pxl_clk_root", 0, IMG_MIPI_CSI1_LPCG, 0, 0, },
-};
+        if (idx >= hw_data->num) {
+                pr_err("%s: invalid index %u\n", __func__, idx);
+                return ERR_PTR(-EINVAL);
+        }
 
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_img = {
-	.lpcg = imx8qxp_lpcg_img,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_img),
-	.num_max = IMX_IMG_LPCG_CLK_END,
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_csi0[] = {
-	{ IMX_CSI_LPCG_CSI0_CORE_CLK, "csi_lpcg_csi0_core_clk", "mipi_csi0_core_clk", 0, CSI_CSI0_CORE_LPCG, 16, 0, },
-	{ IMX_CSI_LPCG_CSI0_ESC_CLK, "csi_lpcg_csi0_esc_clk", "mipi_csi0_esc_clk", 0, CSI_CSI0_ESC_LPCG, 16, 0, },
-	{ IMX_CSI_LPCG_CSI0_I2C0_CLK, "csi_lpcg_csi0_i2c0_clk", "mipi_csi0_i2c0_clk", 0, CSI_CSI0_I2C0_LPCG, 0, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_csi0 = {
-	.lpcg = imx8qxp_lpcg_csi0,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_csi0),
-	.num_max = IMX_CSI_LPCG_CSI0_CLK_END,
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_csi1[] = {
-	{ IMX_CSI_LPCG_CSI1_CORE_CLK, "csi_lpcg_csi1_core_clk", "mipi_csi1_core_clk", 0, CSI_CSI1_CORE_LPCG, 16, 0, },
-	{ IMX_CSI_LPCG_CSI1_ESC_CLK, "csi_lpcg_csi1_esc_clk", "mipi_csi1_esc_clk", 0, CSI_CSI1_ESC_LPCG, 16, 0, },
-	{ IMX_CSI_LPCG_CSI1_I2C0_CLK, "csi_lpcg_csi1_i2c0_clk", "mipi_csi1_i2c0_clk", 0, CSI_CSI1_I2C0_LPCG, 0, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_csi1 = {
-	.lpcg = imx8qxp_lpcg_csi1,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_csi1),
-	.num_max = IMX_CSI_LPCG_CSI1_CLK_END,
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_pi[] = {
-	{ IMX_PI_LPCG_PI0_PIXEL_CLK, "pi_lpcg_pi0_pixel_clk", "pi_per_div_clk", 0, PI_PI0_PIXEL_LPCG, 0, 0, },
-	{ IMX_PI_LPCG_PI0_IPG_CLK, "pi_lpcg_pi0_ipg_clk", "pi_per_div_clk", 0, PI_PI0_IPG_LPCG, 16, 0, },
-	{ IMX_PI_LPCG_PI0_MISC_CLK, "pi_lpcg_pi0_misc_clk", "pi_mclk_div_clk", 0, PI_PI0_MISC_LPCG, 0, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_pi = {
-	.lpcg = imx8qxp_lpcg_pi,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_pi),
-	.num_max = IMX_PI_LPCG_CLK_END,
-};
-
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_dc[] = {
-	{ IMX_DC0_LPCG_PRG0_RTRAM_CLK, "dc0_lpcg_prg0_rtram_clk", "dc_axi_ext_clk_root", 0, 0x20, 0, 0, },
-	{ IMX_DC0_LPCG_PRG0_APB_CLK, "dc0_lpcg_prg0_apb_clk", "dc_cfg_clk_root", 0, 0x20, 16, 0, },
-	{ IMX_DC0_LPCG_PRG1_RTRAM_CLK, "dc0_lpcg_prg1_rtram_clk", "dc_axi_ext_clk_root", 0, 0x24, 0, 0, },
-	{ IMX_DC0_LPCG_PRG1_APB_CLK, "dc0_lpcg_prg1_apb_clk", "dc_cfg_clk_root", 0, 0x24, 16, 0, },
-	{ IMX_DC0_LPCG_PRG2_RTRAM_CLK, "dc0_lpcg_prg2_rtram_clk", "dc_axi_ext_clk_root", 0, 0x28, 0, 0, },
-	{ IMX_DC0_LPCG_PRG2_APB_CLK, "dc0_lpcg_prg2_apb_clk", "dc_cfg_clk_root", 0, 0x28, 16, 0, },
-	{ IMX_DC0_LPCG_PRG3_RTRAM_CLK, "dc0_lpcg_prg3_rtram_clk", "dc_axi_ext_clk_root", 0, 0x34, 0, 0, },
-	{ IMX_DC0_LPCG_PRG3_APB_CLK, "dc0_lpcg_prg3_apb_clk", "dc_cfg_clk_root", 0, 0x34, 16, 0, },
-	{ IMX_DC0_LPCG_PRG4_RTRAM_CLK, "dc0_lpcg_prg4_rtram_clk", "dc_axi_ext_clk_root", 0, 0x38, 0, 0, },
-	{ IMX_DC0_LPCG_PRG4_APB_CLK, "dc0_lpcg_prg4_apb_clk", "dc_cfg_clk_root", 0, 0x38, 16, 0, },
-	{ IMX_DC0_LPCG_PRG5_RTRAM_CLK, "dc0_lpcg_prg5_rtram_clk", "dc_axi_ext_clk_root", 0, 0x3c, 0, 0, },
-	{ IMX_DC0_LPCG_PRG5_APB_CLK, "dc0_lpcg_prg5_apb_clk", "dc_cfg_clk_root", 0, 0x3c, 16, 0, },
-	{ IMX_DC0_LPCG_PRG6_RTRAM_CLK, "dc0_lpcg_prg6_rtram_clk", "dc_axi_ext_clk_root", 0, 0x40, 0, 0, },
-	{ IMX_DC0_LPCG_PRG6_APB_CLK, "dc0_lpcg_prg6_apb_clk", "dc_cfg_clk_root", 0, 0x40, 16, 0, },
-	{ IMX_DC0_LPCG_PRG7_RTRAM_CLK, "dc0_lpcg_prg7_rtram_clk", "dc_axi_ext_clk_root", 0, 0x44, 0, 0, },
-	{ IMX_DC0_LPCG_PRG7_APB_CLK, "dc0_lpcg_prg7_apb_clk", "dc_cfg_clk_root", 0, 0x44, 16, 0, },
-	{ IMX_DC0_LPCG_PRG8_RTRAM_CLK, "dc0_lpcg_prg8_rtram_clk", "dc_axi_ext_clk_root", 0, 0x48, 0, 0, },
-	{ IMX_DC0_LPCG_PRG8_APB_CLK, "dc0_lpcg_prg8_apb_clk", "dc_cfg_clk_root", 0, 0x48, 16, 0, },
-
-	{ IMX_DC0_LPCG_DPR0_APB_CLK, "dc0_lpcg_dpr0_apb_clk", "dc_cfg_clk_root", 0, 0x18, 16, 0, },
-	{ IMX_DC0_LPCG_DPR0_B_CLK, "dc0_lpcg_drp0_b_clk", "dc_axi_ext_clk_root", 0, 0x18, 20, 0, },
-	{ IMX_DC0_LPCG_RTRAM0_CLK, "dc0_lpcg_rtram0_clk", "dc_axi_int_clk_root", 0, 0x1c, 0, 0, },
-	{ IMX_DC0_LPCG_DPR1_APB_CLK, "dc0_lpcg_dpr1_apb_clk", "dc_cfg_clk_root", 0, 0x2c, 16, 0, },
-	{ IMX_DC0_LPCG_DPR1_B_CLK, "dc0_lpcg_drp1_b_clk", "dc_axi_ext_clk_root", 0, 0x2c, 20, 0, },
-	{ IMX_DC0_LPCG_RTRAM1_CLK, "dc0_lpcg_rtram1_clk", "dc_axi_int_clk_root", 0, 0x30, 0, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_dc = {
-	.lpcg = imx8qxp_lpcg_dc,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_dc),
-	.num_max = IMX_DC0_LPCG_CLK_END,
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_mipi0[] = {
-	{ IMX_MIPI0_LPCG_I2C0_CLK, "mipi0_lpcg_i2c0_clk", "mipi0_i2c0_clk", 0, 0x14, 0, 0, },
-	{ IMX_MIPI0_LPCG_I2C1_CLK, "mipi0_lpcg_i2c1_clk", "mipi0_i2c1_clk", 0, 0x14, 0, 0, }, //FIXME: same LPCG offset as I2C0
-	{ IMX_MIPI0_LPCG_I2C0_IPG_S_CLK, "mipi0_lpcg_i2c0_ipg_s", "mipi_ipg_clk_root", 0, 0x10, 0, 0, },
-	{ IMX_MIPI0_LPCG_I2C0_IPG_CLK, "mipi0_lpcg_i2c0_ipg_clk", "mipi0_lpcg_i2c0_ipg_s", 0, 0, 0, 0, },
-	{ IMX_MIPI0_LPCG_I2C1_IPG_S_CLK, "mipi0_lpcg_i2c1_ipg_s", "mipi_ipg_clk_root", 0, 0x14, 0, 0, },
-	{ IMX_MIPI0_LPCG_I2C1_IPG_CLK, "mipi0_lpcg_i2c1_ipg_clk", "mipi0_lpcg_i2c1_ipg_s", 0, 0, 0, 0, }, //FIXME: same LPCG offset as I2C0
-	{ IMX_MIPI0_LPCG_PWM_IPG_S_CLK, "mipi0_lpcg_pwm_ipg_s", "mipi_ipg_clk_root", 0, 0xc, 16, 0, },
-	{ IMX_MIPI0_LPCG_PWM_IPG_CLK, "mipi0_lpcg_pwm_ipg_cl", "mipi0_lpcg_pwm_ipg_s", 0, 0xc, 16, 0, }, //FIXME: same LPCG offset as IPG_S
-	{ IMX_MIPI0_LPCG_PWM_32K_CLK, "mipi0_lpcg_pwm_32K_clk", "xtal_32KHz", 0, 0xc, 0, 0, },
-	{ IMX_MIPI0_LPCG_PWM_CLK, "mipi0_lpcg_pwm_clk", "mipi0_pwm_clk", 0, 0xc, 0, 0, }, //FIXME: same LPCG offset as 32K_CLK
-	{ IMX_MIPI0_LPCG_GPIO_IPG_CLK, "mipi0_lpcg_gpio_ipg_clk", "mipi_ipg_clk_root", 0, 0x8, 0, 0, },
-	{ IMX_MIPI0_LPCG_LIS_IPG_CLK, "mipi0_lis_ipg_clk", "mipi_ipg_clk_root", 0, 0, 16, 0, },
-};
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_mipi0 = {
-	.lpcg = imx8qxp_lpcg_mipi0,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_mipi0),
-	.num_max = IMX_MIPI0_LPCG_CLK_END,
-};
-
-static const struct imx8qxp_lpcg_data imx8qxp_lpcg_mipi1[] = {
-	{ IMX_MIPI1_LPCG_I2C0_CLK, "mipi1_lpcg_i2c0_clk", "mipi1_i2c0_clk", 0, 0x14, 0, 0, },
-	{ IMX_MIPI1_LPCG_I2C1_CLK, "mipi1_lpcg_i2c1_clk", "mipi1_i2c1_clk", 0, 0x14, 0, 0, }, //FIXME: same LPCG offset as I2C0
-	{ IMX_MIPI1_LPCG_I2C0_IPG_S_CLK, "mipi1_lpcg_i2c0_ipg_s", "mipi_ipg_clk_root", 0, 0x10, 0, 0, },
-	{ IMX_MIPI1_LPCG_I2C0_IPG_CLK, "mipi1_lpcg_i2c0_ipg_clk", "mipi1_lpcg_i2c0_ipg_s", 0, 0, 0, 0, },
-	{ IMX_MIPI1_LPCG_I2C1_IPG_S_CLK, "mipi1_lpcg_i2c1_ipg_s", "mipi_ipg_clk_root", 0, 0x14, 0, 0, },
-	{ IMX_MIPI1_LPCG_I2C1_IPG_CLK, "mipi1_lpcg_i2c1_ipg_clk", "mipi1_lpcg_i2c1_ipg_s", 0, 0, 0, 0, }, //FIXME: same LPCG offset as I2C0
-	{ IMX_MIPI1_LPCG_PWM_IPG_S_CLK, "mipi1_lpcg_pwm_ipg_s", "mipi_ipg_clk_root", 0, 0xc, 16, 0, },
-	{ IMX_MIPI1_LPCG_PWM_IPG_CLK, "mipi1_lpcg_pwm_ipg_clk", "mipi1_lpcg_pwm_ipg_s", 0, 0xc, 16, 0, }, //FIXME: same LPCG offset as IPG_S
-	{ IMX_MIPI1_LPCG_PWM_32K_CLK, "mipi1_lpcg_pwm_32K_clk", "xtal_32KHz", 0, 0xc, 0, 0, },
-	{ IMX_MIPI1_LPCG_PWM_CLK, "mipi1_lpcg_pwm_clk", "mipi1_pwm_clk", 0, 0xc, 0, 0, }, //FIXME: same LPCG offset as 32K_CLK
-	{ IMX_MIPI1_LPCG_GPIO_IPG_CLK, "mipi1_lpcg_gpio_ipg_clk", "mipi_ipg_clk_root", 0, 0x8, 0, 0, },
-	{ IMX_MIPI1_LPCG_LIS_IPG_CLK, "mipi1_lis_ipg_clk", "mipi_ipg_clk_root", 0, 0, 16, 0, },
-};
-
-
-static const struct imx8qxp_ss_lpcg imx8qxp_ss_mipi1 = {
-	.lpcg = imx8qxp_lpcg_mipi1,
-	.num_lpcg = ARRAY_SIZE(imx8qxp_lpcg_mipi1),
-	.num_max = IMX_MIPI1_LPCG_CLK_END,
-};
-
-#define IMX_LPCG_MAX_CLKS	8
+        return hw_data->hws[idx];
+}
 
 static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
-				       struct device_node *np)
+                                       struct device_node *np)
 {
-	const char *output_names[IMX_LPCG_MAX_CLKS];
-	const char *parent_names[IMX_LPCG_MAX_CLKS];
-	unsigned int bit_offset[IMX_LPCG_MAX_CLKS];
-	struct clk_hw_onecell_data *clk_data;
-	struct clk_hw **clk_hws;
-	struct resource *res;
-	void __iomem *base;
-	bool autogate;
-	int count;
-	int ret;
-	int i;
+        const char *output_names[IMX_LPCG_MAX_CLKS];
+        const char *parent_names[IMX_LPCG_MAX_CLKS];
+        unsigned int bit_offset[IMX_LPCG_MAX_CLKS];
+        struct clk_hw_onecell_data *clk_data;
+        struct clk_hw **clk_hws;
+        struct resource *res;
+        void __iomem *base;
+        int count;
+        int idx;
+        int ret;
+        int i;
 
-	if (!of_device_is_compatible(np, "fsl,imx8qxp-lpcg"))
-		return -EINVAL;
+        if (!of_device_is_compatible(np, "fsl,imx8qxp-lpcg"))
+                return -EINVAL;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(base))
-		return PTR_ERR(base);
+        res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+        base = devm_ioremap_resource(&pdev->dev, res);
+        if (IS_ERR(base))
+                return PTR_ERR(base);
 
-	count = of_property_count_u32_elems(np, "bit-offset");
-	if (count < 0) {
+        count = of_property_count_u32_elems(np, "clock-indices");
+        if (count < 0) {
 		dev_err(&pdev->dev, "failed to count clocks\n");
 		return -EINVAL;
-	}
+        }
 
-	clk_data = devm_kzalloc(&pdev->dev, struct_size(clk_data, hws, count),
-				GFP_KERNEL);
-	if (!clk_data)
-		return -ENOMEM;
+        /*
+         * A trick here is that we set the num of clks to the MAX instead
+         * of the count from clock-indices because one LPCG supports up to
+         * 8 clock outputs which each of them is fixed to 4 bits. Then we can
+         * easily get the clock by clk-indices (bit-offset) / 4.
+         * And the cost is very limited few pointers.
+         */
 
-	clk_data->num = count;
-	clk_hws = clk_data->hws;
+        clk_data = devm_kzalloc(&pdev->dev, struct_size(clk_data, hws,
+                                IMX_LPCG_MAX_CLKS), GFP_KERNEL);
+        if (!clk_data)
+                return -ENOMEM;
+
+        clk_data->num = IMX_LPCG_MAX_CLKS;
+        clk_hws = clk_data->hws;
 
 	ret = of_property_read_u32_array(np, "bit-offset", bit_offset,
-					 clk_data->num);
+					 count);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to read clocks bit-offset\n");
 		return -EINVAL;
 	}
 
-	ret = of_clk_parent_fill(np, parent_names, clk_data->num);
-	if (ret != clk_data->num) {
+	ret = of_clk_parent_fill(np, parent_names, count);
+	if (ret != count) {
 		dev_err(&pdev->dev, "failed to get clock parent names\n");
 		return -EINVAL;
 	}
 
 	ret = of_property_read_string_array(np, "clock-output-names",
-					    output_names, clk_data->num);
-	if (ret != clk_data->num) {
+						output_names, count);
+	if (ret != count) {
 		dev_err(&pdev->dev, "failed to read clock-output-names\n");
 		return -EINVAL;
 	}
 
-	autogate = of_property_read_bool(np, "hw-autogate");
+        pm_runtime_get_noresume(&pdev->dev);
+        pm_runtime_set_active(&pdev->dev);
+        pm_runtime_set_autosuspend_delay(&pdev->dev, 500);
+        pm_runtime_use_autosuspend(&pdev->dev);
+        pm_runtime_enable(&pdev->dev);
 
-	pm_runtime_get_noresume(&pdev->dev);
-	pm_runtime_set_active(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 500);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_enable(&pdev->dev);
+        for (i = 0; i < count; i++) {
+                idx = bit_offset[i] / 4;
+                if (idx > IMX_LPCG_MAX_CLKS) {
+                        dev_warn(&pdev->dev, "invalid bit offset of clock %d\n",
+                                 i);
+                        ret = -EINVAL;
+                        goto unreg;
+                }
 
-	for (i = 0; i < clk_data->num; i++) {
-		if (bit_offset[i] > 31) {
-			dev_warn(&pdev->dev, "invalid bit offset of clock %d\n",
-				 i);
-			return -EINVAL;
-		}
+                clk_hws[idx] = imx_clk_lpcg_scu_dev(&pdev->dev, output_names[i],
+                                                    parent_names[i], 0, base,
+                                                    bit_offset[i], false);
+                if (IS_ERR(clk_hws[idx])) {
+                        dev_warn(&pdev->dev, "failed to register clock %d\n",
+                                 idx);
+                        ret = PTR_ERR(clk_hws[idx]);
+                        goto unreg;
+                }
+        }
 
-		clk_hws[i] = imx_clk_lpcg_scu_dev(&pdev->dev, output_names[i],
-						  parent_names[i], 0, base,
-						  bit_offset[i], autogate);
-		if (IS_ERR(clk_hws[i])) {
-			dev_warn(&pdev->dev, "failed to register clock %d\n",
-				 i);
-			return -EINVAL;
-		}
-	}
+        ret = devm_of_clk_add_hw_provider(&pdev->dev, imx_lpcg_of_clk_src_get,
+                                          clk_data);
+        if (ret)
+                goto unreg;
 
-	ret = devm_of_clk_add_hw_provider(&pdev->dev, of_clk_hw_onecell_get,
-					  clk_data);
+        pm_runtime_mark_last_busy(&pdev->dev);
+        pm_runtime_put_autosuspend(&pdev->dev);
 
-	pm_runtime_mark_last_busy(&pdev->dev);
-	pm_runtime_put_autosuspend(&pdev->dev);
+        return 0;
 
-	return ret;
+unreg:
+        while (--i >= 0) {
+                idx = bit_offset[i] / 4;
+                if (clk_hws[idx])
+                        imx_clk_lpcg_scu_unregister(clk_hws[idx]);
+        }
+
+        pm_runtime_disable(&pdev->dev);
+
+        return ret;
 }
 
 static int imx8qxp_lpcg_clk_probe(struct platform_device *pdev)
@@ -532,18 +354,6 @@ static int imx8qxp_lpcg_clk_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id imx8qxp_lpcg_match[] = {
-	{ .compatible = "fsl,imx8qxp-lpcg-cm40", &imx8qxp_ss_cm40, },
-	{ .compatible = "fsl,imx8qxp-lpcg-adma", &imx8qxp_ss_adma, },
-	{ .compatible = "fsl,imx8qxp-lpcg-conn", &imx8qxp_ss_conn, },
-	{ .compatible = "fsl,imx8qxp-lpcg-lsio", &imx8qxp_ss_lsio, },
-	{ .compatible = "fsl,imx8qxp-lpcg-hsio", &imx8qxp_ss_hsio, },
-	{ .compatible = "fsl,imx8qxp-lpcg-img",  &imx8qxp_ss_img, },
-	{ .compatible = "fsl,imx8qxp-lpcg-csi0",  &imx8qxp_ss_csi0, },
-	{ .compatible = "fsl,imx8qxp-lpcg-csi1",  &imx8qxp_ss_csi1, },
-	{ .compatible = "fsl,imx8qxp-lpcg-pi",  &imx8qxp_ss_pi, },
-	{ .compatible = "fsl,imx8qxp-lpcg-dc",   &imx8qxp_ss_dc, },
-	{ .compatible = "fsl,imx8qxp-lpcg-mipi0",  &imx8qxp_ss_mipi0, },
-	{ .compatible = "fsl,imx8qxp-lpcg-mipi1",  &imx8qxp_ss_mipi1, },
 	{ .compatible = "fsl,imx8qxp-lpcg", NULL },
 	{ /* sentinel */ }
 };
