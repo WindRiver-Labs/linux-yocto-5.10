@@ -358,6 +358,11 @@ struct flexcan_priv {
 	struct regulator *reg_xceiver;
 	struct flexcan_stop_mode stm;
 
+#ifdef CONFIG_IMX_SCU_SOC
+	/* IPC handle when enable stop mode by System Controller firmware(scfw) */
+	struct imx_sc_ipc *sc_ipc_handle;
+#endif
+
 	/* Read and Write APIs */
 	u32 (*read)(void __iomem *addr);
 	void (*write)(u32 val, void __iomem *addr);
@@ -570,6 +575,32 @@ static void flexcan_enable_wakeup_irq(struct flexcan_priv *priv, bool enable)
 	priv->write(reg_mcr, &regs->mcr);
 }
 
+#ifdef CONFIG_IMX_SCU_SOC
+static void flexcan_stop_mode_enable_scfw(struct flexcan_priv *priv, bool enabled)
+{
+	struct device_node *np = priv->dev->of_node;
+	u32 rsrc_id, val;
+	int idx;
+
+	idx = of_alias_get_id(np, "can");
+	if (idx == 0)
+		rsrc_id = IMX_SC_R_CAN_0;
+	else if (idx == 1)
+		rsrc_id = IMX_SC_R_CAN_1;
+	else
+		rsrc_id = IMX_SC_R_CAN_2;
+
+	val = enabled ? 1 : 0;
+	/* stop mode request */
+	imx_sc_misc_set_control(priv->sc_ipc_handle, rsrc_id, IMX_SC_C_IPG_STOP, val);
+}
+#else
+static int flexcan_stop_mode_enable_scfw(struct flexcan_priv *priv, bool enabled)
+{
+	return 0;
+}
+#endif
+
 static inline int flexcan_enter_stop_mode(struct flexcan_priv *priv)
 {
 	struct flexcan_regs __iomem *regs = priv->regs;
@@ -580,8 +611,11 @@ static inline int flexcan_enter_stop_mode(struct flexcan_priv *priv)
 	priv->write(reg_mcr, &regs->mcr);
 
 	/* enable stop request */
-	regmap_update_bits(priv->stm.gpr, priv->stm.req_gpr,
-			   1 << priv->stm.req_bit, 1 << priv->stm.req_bit);
+	if (priv->devtype_data->quirks & FLEXCAN_QUIRK_USE_SCFW)
+		flexcan_stop_mode_enable_scfw(priv, true);
+	else
+		regmap_update_bits(priv->stm.gpr, priv->stm.req_gpr,
+			1 << priv->stm.req_bit, 1 << priv->stm.req_bit);
 
 	return flexcan_low_power_enter_ack(priv);
 }
@@ -592,8 +626,11 @@ static inline int flexcan_exit_stop_mode(struct flexcan_priv *priv)
 	u32 reg_mcr;
 
 	/* remove stop request */
-	regmap_update_bits(priv->stm.gpr, priv->stm.req_gpr,
-			   1 << priv->stm.req_bit, 0);
+	if (priv->devtype_data->quirks & FLEXCAN_QUIRK_USE_SCFW)
+		flexcan_stop_mode_enable_scfw(priv, false);
+	else
+		regmap_update_bits(priv->stm.gpr, priv->stm.req_gpr,
+				   1 << priv->stm.req_bit, 0);
 
 	reg_mcr = priv->read(&regs->mcr);
 	reg_mcr &= ~FLEXCAN_MCR_SLF_WAK;
@@ -1937,17 +1974,36 @@ static int flexcan_setup_stop_mode(struct platform_device *pdev)
 		"gpr %s req_gpr=0x02%x req_bit=%u\n",
 		gpr_np->full_name, priv->stm.req_gpr, priv->stm.req_bit);
 
-	device_set_wakeup_capable(&pdev->dev, true);
-
-	if (of_property_read_bool(np, "wakeup-source"))
-		device_set_wakeup_enable(&pdev->dev, true);
-
 	return 0;
 
 out_put_node:
 	of_node_put(gpr_np);
 	return ret;
 }
+
+#ifdef CONFIG_IMX_SCU_SOC
+static int flexcan_setup_stop_mode_scfw(struct platform_device *pdev)
+{
+	struct net_device *dev = platform_get_drvdata(pdev);
+	struct flexcan_priv *priv;
+	int ret;
+
+	priv = netdev_priv(dev);
+
+	ret = imx_scu_get_handle(&(priv->sc_ipc_handle));
+	if (ret < 0) {
+		dev_err(&pdev->dev, "get ipc handle used by SCU failed\n");
+		return ret;
+	}
+
+	return 0;
+}
+#else
+static int flexcan_setup_stop_mode_scfw(struct platform_device *pdev)
+{
+	return 0;
+}
+#endif
 
 static const struct of_device_id flexcan_of_match[] = {
 	{ .compatible = "fsl,imx8qm-flexcan", .data = &fsl_imx8qm_devtype_data, },
@@ -2098,9 +2154,19 @@ static int flexcan_probe(struct platform_device *pdev)
 	devm_can_led_init(dev);
 
 	if (priv->devtype_data->quirks & FLEXCAN_QUIRK_SETUP_STOP_MODE) {
-		err = flexcan_setup_stop_mode(pdev);
-		if (err)
+		if (priv->devtype_data->quirks & FLEXCAN_QUIRK_USE_SCFW)
+			err = flexcan_setup_stop_mode_scfw(pdev);
+		else
+			err = flexcan_setup_stop_mode(pdev);
+
+		if (err) {
 			dev_dbg(&pdev->dev, "failed to setup stop-mode\n");
+		} else {
+			device_set_wakeup_capable(&pdev->dev, true);
+
+			if (of_property_read_bool(pdev->dev.of_node, "wakeup-source"))
+				device_set_wakeup_enable(&pdev->dev, true);
+		}
 	}
 
 	return 0;
