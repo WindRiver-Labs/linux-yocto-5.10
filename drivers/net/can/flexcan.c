@@ -2141,7 +2141,9 @@ static int __maybe_unused flexcan_suspend(struct device *device)
 			if (err)
 				return err;
 		} else {
-			err = flexcan_chip_stop(dev);
+			flexcan_chip_stop(dev);
+
+			err = pm_runtime_force_suspend(device);
 			if (err)
 				return err;
 
