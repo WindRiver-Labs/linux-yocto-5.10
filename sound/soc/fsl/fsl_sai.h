@@ -189,7 +189,6 @@
 
 struct fsl_sai_soc_data {
 	bool use_imx_pcm;
-	unsigned int fifo_depth;
 	unsigned int reg_offset;
 };
 
