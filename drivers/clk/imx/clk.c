@@ -199,8 +199,7 @@ void imx_register_uart_clocks(unsigned int clk_count)
 		if (!of_stdout)
 			return;
 
-		for (i = 0; (earlycon_bits & BIT(i)) &&
-			imx_uart_clocks[i]; i++) {
+		for (i = 0; imx_uart_clocks[i]; i++) {
 			imx_uart_clocks[imx_enabled_uart_clocks] = of_clk_get(of_stdout, i);
 
 			/* Stop if there are no more of_stdout references */
@@ -223,8 +222,7 @@ static int __init imx_clk_disable_uart(void)
 	if (imx_keep_uart_clocks && imx_enabled_uart_clocks) {
 		int i;
 
-		for (i = 0; (earlycon_bits & BIT(i)) &&
-			imx_uart_clocks[i]; i++) {
+		for (i = 0; imx_uart_clocks[i]; i++) {
 			clk_disable_unprepare(imx_uart_clocks[i]);
 			clk_put(imx_uart_clocks[i]);
 		}
