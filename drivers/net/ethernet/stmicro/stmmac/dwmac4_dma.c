@@ -208,8 +208,12 @@ static void _dwmac4_dump_dma_regs(void __iomem *ioaddr, u32 channel,
 		readl(ioaddr + DMA_CHAN_CUR_TX_DESC(channel));
 	reg_space[DMA_CHAN_CUR_RX_DESC(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_RX_DESC(channel));
+	reg_space[DMA_CHAN_CUR_TX_BUF_HI_ADDR(channel) / 4] =
+		readl(ioaddr + DMA_CHAN_CUR_TX_BUF_HI_ADDR(channel));
 	reg_space[DMA_CHAN_CUR_TX_BUF_ADDR(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_TX_BUF_ADDR(channel));
+	reg_space[DMA_CHAN_CUR_RX_BUF_HI_ADDR(channel) / 4] =
+		readl(ioaddr + DMA_CHAN_CUR_RX_BUF_HI_ADDR(channel));
 	reg_space[DMA_CHAN_CUR_RX_BUF_ADDR(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_RX_BUF_ADDR(channel));
 	reg_space[DMA_CHAN_STATUS(channel) / 4] =
