@@ -3330,6 +3330,8 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 	/* Set HW VLAN stripping mode */
 	stmmac_set_hw_vlan_mode(priv, priv->ioaddr, dev->features);
 
+	stmmac_tsn_hw_setup(priv, priv->hw, priv->dev);
+
 	if (priv->dma_cap.fpesel) {
 		stmmac_fpe_start_wq(priv);
 
@@ -5599,6 +5601,9 @@ static void stmmac_common_interrupt(struct stmmac_priv *priv)
 
 	if (priv->irq_wake)
 		pm_wakeup_hard_event(priv->device);
+
+	if (priv->hw->tsn_info.feat_en[TSN_FEAT_ID_EST])
+		stmmac_est_tsn_irq_status(priv, priv->hw, priv->dev);
 
 	if (priv->dma_cap.estsel)
 		stmmac_est_irq_status(priv, priv->ioaddr, priv->dev,
