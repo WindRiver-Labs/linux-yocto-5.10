@@ -720,165 +720,137 @@ static int tc_setup_cls(struct stmmac_priv *priv,
 static int tc_setup_taprio(struct stmmac_priv *priv,
 			   struct tc_taprio_qopt_offload *qopt)
 {
-	u32 size, wid = priv->dma_cap.estwid, dep = priv->dma_cap.estdep;
-	struct plat_stmmacenet_data *plat = priv->plat;
-	struct timespec64 time, current_time;
-	ktime_t current_time_ns;
-	bool fpe = false;
-	int i, ret = 0;
-	u64 ctr;
+	u64 time_extension = qopt->cycle_time_extension;
+	u64 base_time = ktime_to_ns(qopt->base_time);
+	u64 cycle_time = qopt->cycle_time;
+	struct est_gcrr egcrr;
+	u32 extension_ns;
+	u32 extension_s;
+	u32 cycle_ns;
+	u32 cycle_s;
+	u32 base_ns;
+	u32 base_s;
+	int ret;
+	int i;
 
-	if (!priv->dma_cap.estsel)
-		return -EOPNOTSUPP;
-
-	switch (wid) {
-	case 0x1:
-		wid = 16;
-		break;
-	case 0x2:
-		wid = 20;
-		break;
-	case 0x3:
-		wid = 24;
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	switch (dep) {
-	case 0x1:
-		dep = 64;
-		break;
-	case 0x2:
-		dep = 128;
-		break;
-	case 0x3:
-		dep = 256;
-		break;
-	case 0x4:
-		dep = 512;
-		break;
-	case 0x5:
-		dep = 1024;
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	if (!qopt->enable)
-		goto disable;
-	if (qopt->num_entries >= dep)
-		return -EINVAL;
-	if (!qopt->base_time)
-		return -ERANGE;
-	if (!qopt->cycle_time)
-		return -ERANGE;
-
-	if (!plat->est) {
-		plat->est = devm_kzalloc(priv->device, sizeof(*plat->est),
-					 GFP_KERNEL);
-		if (!plat->est)
-			return -ENOMEM;
+	if (qopt->enable) {
+		stmmac_set_est_enable(priv, priv->hw, priv->dev, true);
+		dev_info(priv->device, "taprio: EST enabled\n");
 	} else {
-		memset(plat->est, 0, sizeof(*plat->est));
+		stmmac_set_est_enable(priv, priv->hw, priv->dev, false);
+		dev_info(priv->device, "taprio: EST disabled\n");
+		return 0;
 	}
 
-	size = qopt->num_entries;
+	dev_dbg(priv->device,
+		"EST: base_time %llu, cycle_time %llu, cycle_extension %llu\n",
+		qopt->base_time, qopt->cycle_time,
+		qopt->cycle_time_extension);
 
-	priv->plat->est->gcl_size = size;
-	priv->plat->est->enable = qopt->enable;
+	for (i = 0; i < qopt->num_entries; i++) {
+		struct est_gc_entry sgce;
 
-	for (i = 0; i < size; i++) {
-		s64 delta_ns = qopt->entries[i].interval;
-		u32 gates = qopt->entries[i].gate_mask;
+		sgce.gates = qopt->entries[i].gate_mask;
+		sgce.ti_nsec = qopt->entries[i].interval;
 
-		if (delta_ns > GENMASK(wid, 0))
-			return -ERANGE;
-		if (gates > GENMASK(31 - wid, 0))
-			return -ERANGE;
+		/* cycle_time will be sum of all time interval
+		 * of the entries in the schedule if the
+		 * cycle_time is not provided
+		 */
+		if (!qopt->cycle_time)
+			cycle_time += qopt->entries[i].interval;
 
-		switch (qopt->entries[i].command) {
-		case TC_TAPRIO_CMD_SET_GATES:
-			if (fpe)
-				return -EINVAL;
-			break;
-		case TC_TAPRIO_CMD_SET_AND_HOLD:
-			gates |= BIT(0);
-			fpe = true;
-			break;
-		case TC_TAPRIO_CMD_SET_AND_RELEASE:
-			gates &= ~BIT(0);
-			fpe = true;
-			break;
-		default:
-			return -EOPNOTSUPP;
+		dev_dbg(priv->device,
+			"EST: gates 0x%x, ti_ns %u, cycle_ns %llu\n",
+			sgce.gates, sgce.ti_nsec, cycle_time);
+
+		ret = stmmac_set_est_gce(priv, priv->hw, priv->dev,
+					 &sgce, i, 0, 0);
+		if (ret) {
+			dev_err(priv->device,
+				"EST: fail to program GC entry(%d).\n", i);
+
+			return ret;
 		}
-
-		priv->plat->est->gcl[i] = delta_ns | (gates << wid);
 	}
 
-	/* Adjust for real system time */
-	priv->ptp_clock_ops.gettime64(&priv->ptp_clock_ops, &current_time);
-	current_time_ns = timespec64_to_ktime(current_time);
-	if (ktime_after(qopt->base_time, current_time_ns)) {
-		time = ktime_to_timespec64(qopt->base_time);
-	} else {
-		ktime_t base_time;
-		s64 n;
-
-		n = div64_s64(ktime_sub_ns(current_time_ns, qopt->base_time),
-			      qopt->cycle_time);
-		base_time = ktime_add_ns(qopt->base_time,
-					 (n + 1) * qopt->cycle_time);
-
-		time = ktime_to_timespec64(base_time);
-	}
-
-	priv->plat->est->btr[0] = (u32)time.tv_nsec;
-	priv->plat->est->btr[1] = (u32)time.tv_sec;
-
-	ctr = qopt->cycle_time;
-	priv->plat->est->ctr[0] = do_div(ctr, NSEC_PER_SEC);
-	priv->plat->est->ctr[1] = (u32)ctr;
-
-	if (fpe && !priv->dma_cap.fpesel)
-		return -EOPNOTSUPP;
-
-	/* Actual FPE register configuration will be done after FPE handshake
-	 * is success.
-	 */
-	priv->plat->fpe_cfg->enable = fpe;
-
-	ret = stmmac_est_configure(priv, priv->ioaddr, priv->plat->est,
-				   priv->plat->clk_ptp_rate);
+	ret = stmmac_set_est_gcl_len(priv, priv->hw, priv->dev,
+				     qopt->num_entries,
+				     0, 0);
 	if (ret) {
-		netdev_err(priv->dev, "failed to configure EST\n");
-		goto disable;
+		dev_err(priv->device,
+			"EST: fail to program GC length into HW\n");
+		return ret;
 	}
 
-	netdev_info(priv->dev, "configured EST\n");
+	/* set est_info */
+	base_ns = do_div(base_time, NSEC_PER_SEC);
+	base_s = base_time;
+	dev_info(priv->device, "EST: base_s %u, base_ns %u\n",
+		 base_s, base_ns);
 
-	if (fpe) {
-		stmmac_fpe_handshake(priv, true);
-		netdev_info(priv->dev, "start FPE handshake\n");
+	cycle_ns = do_div(cycle_time, NSEC_PER_SEC);
+	cycle_s = cycle_time;
+	dev_info(priv->device, "EST: cycle_s %u, cycle_ns %u\n",
+		 cycle_s, cycle_ns);
+
+	extension_ns = do_div(time_extension, NSEC_PER_SEC);
+	extension_s = time_extension;
+	dev_info(priv->device,
+		 "EST: cycle extension_s %u, cycle_extension_ns %u\n",
+		 extension_s, extension_ns);
+
+	if (extension_s) {
+		dev_err(priv->device,
+			"EST: extension in seconds not supported.\n");
+		return -EINVAL;
 	}
 
-	return 0;
+	egcrr.cycle_sec = cycle_s;
+	egcrr.cycle_nsec = cycle_ns;
+	egcrr.base_sec = base_s;
+	egcrr.base_nsec = base_ns;
+	egcrr.ter_nsec = extension_ns;
 
-disable:
-	priv->plat->est->enable = false;
-	stmmac_est_configure(priv, priv->ioaddr, priv->plat->est,
-			     priv->plat->clk_ptp_rate);
+	ret = stmmac_set_est_gcrr_times(priv, priv->hw, priv->dev,
+					&egcrr, 0, 0);
+	if (ret) {
+		dev_err(priv->device,
+			"EST: fail to program GCRR times into HW\n");
+		return ret;
+	}
 
-	priv->plat->fpe_cfg->enable = false;
-	stmmac_fpe_configure(priv, priv->ioaddr,
-			     priv->plat->tx_queues_to_use,
-			     priv->plat->rx_queues_to_use,
-			     false);
-	netdev_info(priv->dev, "disabled FPE\n");
+	if (priv->plat->tx_queues_to_use > 1) {
+		u32 queue;
 
-	stmmac_fpe_handshake(priv, false);
-	netdev_info(priv->dev, "stop FPE handshake\n");
+		for (queue = 1; queue < priv->plat->tx_queues_to_use; queue++) {
+			u32 new_idle_slope;
+
+			struct stmmac_txq_cfg *txqcfg =
+				&priv->plat->tx_queues_cfg[queue];
+
+			if (txqcfg->mode_to_use == MTL_QUEUE_DCB)
+				continue;
+
+			new_idle_slope = txqcfg->idle_slope;
+			ret = stmmac_cbs_recal_idleslope(priv, priv->hw,
+							 priv->dev, queue,
+							 &new_idle_slope);
+
+			if (ret) {
+				dev_err(priv->device,
+					"Recal idleslope failed.\n");
+				break;
+			}
+
+			stmmac_config_cbs(priv, priv->hw,
+					  txqcfg->send_slope,
+					  new_idle_slope,
+					  txqcfg->high_credit,
+					  txqcfg->low_credit,
+					  queue);
+		}
+	}
 
 	return ret;
 }
