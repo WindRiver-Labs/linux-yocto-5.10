@@ -5,6 +5,7 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/io.h>
+#include <linux/device_cooling.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -17,6 +18,7 @@
 #include "thermal_hwmon.h"
 
 #define SITES_MAX		16
+#define TMU_TEMP_PASSIVE_COOL_DELTA    10000
 #define TMR_DISABLE		0x0
 #define TMR_ME			0x80000000
 #define TMR_ALPF		0x0c000000
@@ -68,6 +70,9 @@
  */
 struct qoriq_sensor {
 	int				id;
+	int                             temp_passive;
+	int                             temp_critical;
+	struct thermal_cooling_device   *cdev;
 };
 
 struct qoriq_tmu_data {
@@ -75,6 +80,12 @@ struct qoriq_tmu_data {
 	struct regmap *regmap;
 	struct clk *clk;
 	struct qoriq_sensor	sensor[SITES_MAX];
+};
+
+enum tmu_trip {
+       TMU_TRIP_PASSIVE,
+       TMU_TRIP_CRITICAL,
+       TMU_TRIP_NUM,
 };
 
 static struct qoriq_tmu_data *qoriq_sensor_to_data(struct qoriq_sensor *s)
@@ -122,8 +133,44 @@ static int tmu_get_temp(void *p, int *temp)
 	return 0;
 }
 
+static int tmu_get_trend(void *p, int trip, enum thermal_trend *trend)
+{
+	struct qoriq_sensor *qsensor = p;
+	int trip_temp;
+
+	if (!qsensor->tzd)
+               return 0;
+
+	trip_temp = (trip == TMU_TRIP_PASSIVE) ? qsensor->temp_passive :
+                                            qsensor->temp_critical;
+
+	if (qsensor->tzd->temperature >=
+               (trip_temp - TMU_TEMP_PASSIVE_COOL_DELTA))
+		*trend = THERMAL_TREND_RAISE_FULL;
+	else
+		*trend = THERMAL_TREND_DROP_FULL;
+
+	return 0;
+}
+
+static int tmu_set_trip_temp(void *p, int trip,
+                            int temp)
+{
+       struct qoriq_sensor *qsensor = p;
+
+       if (trip == TMU_TRIP_CRITICAL)
+               qsensor->temp_critical = temp;
+
+       if (trip == TMU_TRIP_PASSIVE)
+               qsensor->temp_passive = temp;
+
+       return 0;
+}
+
 static const struct thermal_zone_of_device_ops tmu_tz_ops = {
 	.get_temp = tmu_get_temp,
+	.get_trend = tmu_get_trend,
+	.set_trip_temp = tmu_set_trip_temp,
 };
 
 static int qoriq_tmu_register_tmu_zone(struct device *dev,
@@ -157,6 +204,36 @@ static int qoriq_tmu_register_tmu_zone(struct device *dev,
 			regmap_write(qdata->regmap, REGS_TMR, TMR_DISABLE);
 			return ret;
 		}
+
+		/* first thermal zone takes care of system-wide device cooling */
+                if (id == 0) {
+                        qdata->sensor[id]->cdev = devfreq_cooling_register();
+                        if (IS_ERR(qdata->sensor[id]->cdev)) {
+                                ret = PTR_ERR(qdata->sensor[id]->cdev);
+                                pr_err("failed to register devfreq cooling device: %d\n",
+                                        ret);
+                                return ret;
+                        }
+
+                        ret = thermal_zone_bind_cooling_device(qdata->sensor[id]->tzd,
+                                TMU_TRIP_PASSIVE,
+                                qdata->sensor[id]->cdev,
+                                THERMAL_NO_LIMIT,
+                                THERMAL_NO_LIMIT,
+                                THERMAL_WEIGHT_DEFAULT);
+                        if (ret) {
+                                pr_err("binding zone %s with cdev %s failed:%d\n",
+                                        qdata->sensor[id]->tzd->type,
+                                        qdata->sensor[id]->cdev->type,
+                                        ret);
+                                devfreq_cooling_unregister(qdata->sensor[id]->cdev);
+                                return ret;
+                        }
+
+                        trip = of_thermal_get_trip_points(qdata->sensor[id]->tzd);
+                        qdata->sensor[id]->temp_passive = trip[0].temperature;
+                        qdata->sensor[id]->temp_critical = trip[1].temperature;
+                }
 
 		if (devm_thermal_add_hwmon_sysfs(tzd))
 			dev_warn(dev,
