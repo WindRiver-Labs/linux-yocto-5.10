@@ -1743,7 +1743,11 @@ static int __init_dma_tx_desc_rings(struct stmmac_priv *priv, u32 queue)
 			stmmac_mode_init(priv, tx_q->dma_etx,
 					 tx_q->dma_tx_phy,
 					 priv->dma_tx_size, 1);
-		else if (!(tx_q->tbs & STMMAC_TBS_AVAIL))
+		else if (tx_q->tbs & STMMAC_TBS_AVAIL)
+			stmmac_mode_init(priv, tx_q->dma_entx,
+					 tx_q->dma_tx_phy,
+					 priv->dma_tx_size, 1);
+		else
 			stmmac_mode_init(priv, tx_q->dma_tx,
 					 tx_q->dma_tx_phy,
 					 priv->dma_tx_size, 0);
@@ -4012,11 +4016,11 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	/* set new MSS value if needed */
 	if (mss != tx_q->mss) {
+		/* TSO is not available in DWMAC v3.5  */
 		if (tx_q->tbs & STMMAC_TBS_AVAIL)
 			mss_desc = &tx_q->dma_entx[tx_q->cur_tx].basic;
 		else
 			mss_desc = &tx_q->dma_tx[tx_q->cur_tx];
-
 		stmmac_set_mss(priv, mss_desc, mss);
 		tx_q->mss = mss;
 		tx_q->cur_tx = STMMAC_GET_ENTRY(tx_q->cur_tx,
@@ -4036,11 +4040,12 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	first_entry = tx_q->cur_tx;
 	WARN_ON(tx_q->tx_skbuff[first_entry]);
-
+	/* TSO is not available in DWMAC v3.5  */
 	if (tx_q->tbs & STMMAC_TBS_AVAIL)
 		desc = &tx_q->dma_entx[first_entry].basic;
 	else
 		desc = &tx_q->dma_tx[first_entry];
+
 	first = desc;
 
 	if (has_vlan)
@@ -4173,6 +4178,12 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 		dma_wmb();
 		stmmac_set_tx_owner(priv, mss_desc);
 	}
+
+	/* The own bit must be the latest setting done when prepare the
+	 * descriptor and then barrier is needed to make sure that
+	 * all is coherent before granting the DMA engine.
+	 */
+	wmb();
 
 	if (netif_msg_pktdata(priv)) {
 		pr_info("%s: curr=%d dirty=%d f=%d, e=%d, f_p=%p, nfrags %d\n",
@@ -4358,10 +4369,19 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	tx_q->cur_tx = entry;
 
 	if (netif_msg_pktdata(priv)) {
+		void *tx_head;
+
 		netdev_dbg(priv->dev,
 			   "%s: curr=%d dirty=%d f=%d, e=%d, first=%p, nfrags=%d",
 			   __func__, tx_q->cur_tx, tx_q->dirty_tx, first_entry,
 			   entry, first, nfrags);
+
+		if (priv->extend_desc)
+			tx_head = (void *)tx_q->dma_etx;
+		else if (tx_q->tbs & STMMAC_TBS_AVAIL)
+			tx_head = (void *)tx_q->dma_entx;
+		else
+			tx_head = (void *)tx_q->dma_tx;
 
 		netdev_dbg(priv->dev, ">>> frame to be transmitted: ");
 		print_pkt(skb->data, skb->len);
@@ -4413,6 +4433,12 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 				csum_insertion, priv->mode, 0, last_segment,
 				skb->len);
 	}
+
+	/* The own bit must be the latest setting done when prepare the
+	 * descriptor and then barrier is needed to make sure that
+	 * all is coherent before granting the DMA engine.
+	 */
+	wmb();
 
 	if (tx_q->tbs & STMMAC_TBS_EN) {
 		struct timespec64 ts = ns_to_timespec64(skb->tstamp);
@@ -5961,24 +5987,30 @@ static void sysfs_display_ring(void *head, int size, int extend_desc,
 			       struct seq_file *seq, dma_addr_t dma_phy_addr)
 {
 	int i;
+	struct dma_enhanced_tx_desc *enhp = (struct dma_enhanced_tx_desc *)head;
 	struct dma_extended_desc *ep = (struct dma_extended_desc *)head;
 	struct dma_desc *p = (struct dma_desc *)head;
-	dma_addr_t dma_addr;
 
 	for (i = 0; i < size; i++) {
-		if (extend_desc) {
-			dma_addr = dma_phy_addr + i * sizeof(*ep);
-			seq_printf(seq, "%d [%pad]: 0x%x 0x%x 0x%x 0x%x\n",
-				   i, &dma_addr,
+		if (extend_desc == 2) {
+			seq_printf(seq, "%d [0x%x]: 0x%x 0x%x 0x%x 0x%x\n",
+				   i, (unsigned int)virt_to_phys(enhp),
+				   le32_to_cpu(enhp->basic.des0),
+				   le32_to_cpu(enhp->basic.des1),
+				   le32_to_cpu(enhp->basic.des2),
+				   le32_to_cpu(enhp->basic.des3));
+			enhp++;
+		} else if (extend_desc == 1) {
+			seq_printf(seq, "%d [0x%x]: 0x%x 0x%x 0x%x 0x%x\n",
+				   i, (unsigned int)virt_to_phys(ep),
 				   le32_to_cpu(ep->basic.des0),
 				   le32_to_cpu(ep->basic.des1),
 				   le32_to_cpu(ep->basic.des2),
 				   le32_to_cpu(ep->basic.des3));
 			ep++;
 		} else {
-			dma_addr = dma_phy_addr + i * sizeof(*p);
-			seq_printf(seq, "%d [%pad]: 0x%x 0x%x 0x%x 0x%x\n",
-				   i, &dma_addr,
+			seq_printf(seq, "%d [0x%x]: 0x%x 0x%x 0x%x 0x%x\n",
+				   i, (unsigned int)virt_to_phys(p),
 				   le32_to_cpu(p->des0), le32_to_cpu(p->des1),
 				   le32_to_cpu(p->des2), le32_to_cpu(p->des3));
 			p++;
@@ -6024,6 +6056,10 @@ static int stmmac_rings_status_show(struct seq_file *seq, void *v)
 			sysfs_display_ring((void *)tx_q->dma_etx,
 					   priv->dma_tx_size, 1, seq, tx_q->dma_tx_phy);
 		} else if (!(tx_q->tbs & STMMAC_TBS_AVAIL)) {
+			seq_printf(seq, "Enhanced descriptor ring:\n");
+			sysfs_display_ring((void *)tx_q->dma_entx,
+					   priv->dma_tx_size, 2, seq, tx_q->dma_tx_phy);
+		} else {
 			seq_printf(seq, "Descriptor ring:\n");
 			sysfs_display_ring((void *)tx_q->dma_tx,
 					   priv->dma_tx_size, 0, seq, tx_q->dma_tx_phy);
