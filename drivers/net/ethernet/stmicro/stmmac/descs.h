@@ -154,6 +154,14 @@
 #define RDES_PTP_SIGNALING		0xa
 #define RDES_PTP_PKT_RESERVED_TYPE	0xf
 
+/* Enhanced TX descriptor definitions (DWMAC v5.xx) */
+#define ETDESC4_LTV                    BIT(31)
+#define ETDESC4_GSN                    GENMASK(11, 8)
+#define ETDESC4_GSN_SHIFT              8
+#define ETDESC4_LT_SEC                 GENMASK(7, 0)
+#define ETDESC5_LT_NANOSEC             GENMASK(31, 8)
+#define ETDESC5_LT_NANOSEC_SHIFT       8
+
 /* Basic descriptor structure for normal and alternate descriptors */
 struct dma_desc {
 	__le32 des0;
@@ -178,6 +186,14 @@ struct dma_edesc {
 	__le32 des6;
 	__le32 des7;
 	struct dma_desc basic;
+};
+/* Enhanced TX descriptor structure (e.g. >= databook 5.00) */
+struct dma_enhanced_tx_desc {
+	__le32 etdes4;  /* Launch Time (s), GSN, LTV */
+	__le32 etdes5;  /* Launch Time (us) */
+	__le32 etdes6;  /* Reserved */
+	__le32 etdes7;  /* Reserved */
+	struct dma_desc basic;  /* Basic descriptors */
 };
 
 /* Transmit checksum insertion control */
