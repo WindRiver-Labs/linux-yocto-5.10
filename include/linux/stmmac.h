@@ -247,10 +247,12 @@ struct plat_stmmacenet_data {
 	struct reset_control *stmmac_ahb_rst;
 	struct stmmac_axi *axi;
 	int has_gmac4;
+	int has_tbs;
 	bool has_sun8i;
 	bool tso_en;
 	int rss_en;
 	bool tsn_est_en;
+	bool tsn_tbs_en;
 	bool sph_en;
 	int mac_port_sel_speed;
 	bool en_tx_lpi_clockgating;
