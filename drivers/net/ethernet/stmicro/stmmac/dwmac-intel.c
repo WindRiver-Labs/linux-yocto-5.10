@@ -503,6 +503,12 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->sph_en = 0;
 	plat->tsn_est_en = 1;
 	plat->tsn_tbs_en = 1;
+	/* TBS HW Tunable */
+	plat->estm = 0;  /* Absolute Mode */
+	plat->leos = 0;  /* Launch Expiry Offset */
+	plat->legos = 0; /* Launch Expiry GSN Offset */
+	plat->ftos = 0;  /* Fetch Time Offset */
+	plat->fgos = 0;  /* Fetch GSN Offset */
 
 	/* Multiplying factor to the clk_eee_i clock time
 	 * period to make it closer to 100 ns. This value
