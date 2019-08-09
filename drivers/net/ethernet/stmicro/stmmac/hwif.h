@@ -417,7 +417,7 @@ struct stmmac_ops {
 	bool (*has_tsn_feat)(struct mac_device_info *hw, struct net_device *dev,
 			     enum tsn_feat_id featid);
 	void (*setup_tsn_hw)(struct mac_device_info *hw,
-			     struct net_device *dev);
+			     struct net_device *dev, u32 fprq);
 	int (*set_tsn_hwtunable)(struct mac_device_info *hw,
 				 struct net_device *dev,
 				 enum tsn_hwtunable_id id,
@@ -452,6 +452,15 @@ struct stmmac_ops {
 				   struct net_device *dev,
 				   u32 queue,
 				   u32 *idle_slope);
+	int (*fpe_set_txqpec)(struct mac_device_info *hw,
+			      struct net_device *dev, u32 txqpec);
+	int (*fpe_set_enable)(struct mac_device_info *hw,
+			      struct net_device *dev, bool enable);
+	int (*fpe_get_config)(struct mac_device_info *hw,
+			      struct net_device *dev, u32 *txqpec,
+			      bool *enable);
+	int (*fpe_show_pmac_sts)(struct mac_device_info *hw,
+				 struct net_device *dev);
 	int (*est_configure)(void __iomem *ioaddr, struct stmmac_est *cfg,
 			     unsigned int ptp_rate);
 	void (*est_irq_status)(void __iomem *ioaddr, struct net_device *dev,
@@ -599,6 +608,14 @@ struct stmmac_ops {
 	stmmac_do_callback(__priv, mac, cbs_recal_idleslope, __args)
 #define stmmac_fpe_configure(__priv, __args...) \
 	stmmac_do_void_callback(__priv, mac, fpe_configure, __args)
+#define stmmac_fpe_set_txqpec(__priv, __args...) \
+	stmmac_do_callback(__priv, mac, fpe_set_txqpec, __args)
+#define stmmac_fpe_set_enable(__priv, __args...) \
+	stmmac_do_callback(__priv, mac, fpe_set_enable, __args)
+#define stmmac_fpe_get_config(__priv, __args...) \
+	stmmac_do_callback(__priv, mac, fpe_get_config, __args)
+#define stmmac_fpe_show_pmac_sts(__priv, __args...) \
+	stmmac_do_callback(__priv, mac, fpe_show_pmac_sts, __args)
 #define stmmac_fpe_send_mpacket(__priv, __args...) \
 	stmmac_do_void_callback(__priv, mac, fpe_send_mpacket, __args)
 #define stmmac_fpe_irq_status(__priv, __args...) \
@@ -768,11 +785,13 @@ struct tsn_mmc_stat;
 struct tsnif_ops {
 	u32 (*read_hwid)(void __iomem *ioaddr);
 	bool (*has_tsn_cap)(void __iomem *ioaddr, enum tsn_feat_id featid);
-	void (*hw_setup)(void __iomem *ioaddr, enum tsn_feat_id featid);
+	void (*hw_setup)(void __iomem *ioaddr, enum tsn_feat_id featid,
+			 u32 fprq);
 	/* IEEE 802.1Qbv Enhanced Scheduled Traffics (EST) */
 	u32 (*est_get_gcl_depth)(void __iomem *ioaddr);
 	u32 (*est_get_ti_width)(void __iomem *ioaddr);
 	u32 (*est_get_txqcnt)(void __iomem *ioaddr);
+	u32 (*est_get_rxqcnt)(void __iomem *ioaddr);
 	void (*est_get_max)(u32 *ptov_max, u32 *ctov_max, u32 *ct_max,
 			    u32 *idleslope_max);
 	int (*est_write_gcl_config)(void __iomem *ioaddr, u32 data, u32 addr,
@@ -795,6 +814,12 @@ struct tsnif_ops {
 	int (*est_irq_status)(void *ioaddr, struct net_device *dev,
 			      struct tsn_mmc_stat *mmc_stat,
 			      unsigned int txqcnt);
+	/* Frame Preemption (FPE) */
+	void (*fpe_get_info)(u32 *pmac_bit);
+	void (*fpe_set_txqpec)(void *ioaddr, u32 txqpec, u32 txqmask);
+	void (*fpe_set_enable)(void *ioaddr, bool enable);
+	void (*fpe_get_config)(void *ioaddr, u32 *txqpec, bool *enable);
+	void (*fpe_get_pmac_sts)(void *ioaddr, u32 *hrs);
 	/* Time-Based Scheduling (TBS) */
 	void (*tbs_get_max)(u32 *leos_max, u32 *legos_max,
 			    u32 *ftos_max, u32 *fgos_max);
@@ -821,6 +846,8 @@ struct tsnif_ops {
 	tsnif_do_callback(__hw, est_get_ti_width, __args)
 #define tsnif_est_get_txqcnt(__hw, __args...) \
 	tsnif_do_callback(__hw, est_get_txqcnt, __args)
+#define tsnif_est_get_rxqcnt(__hw, __args...) \
+	tsnif_do_callback(__hw, est_get_rxqcnt, __args)
 #define tsnif_est_get_max(__hw, __args...) \
 	tsnif_do_void_callback(__hw, est_get_max, __args)
 #define tsnif_est_write_gcl_config(__hw, __args...) \
@@ -845,6 +872,16 @@ struct tsnif_ops {
 	tsnif_do_void_callback(__hw, est_switch_swol, __args)
 #define tsnif_est_irq_status(__hw, __args...) \
 	tsnif_do_callback(__hw, est_irq_status, __args)
+#define tsnif_fpe_get_info(__hw, __args...) \
+	tsnif_do_void_callback(__hw, fpe_get_info, __args)
+#define tsnif_fpe_set_txqpec(__hw, __args...) \
+	tsnif_do_void_callback(__hw, fpe_set_txqpec, __args)
+#define tsnif_fpe_set_enable(__hw, __args...) \
+	tsnif_do_void_callback(__hw, fpe_set_enable, __args)
+#define tsnif_fpe_get_config(__hw, __args...) \
+	tsnif_do_void_callback(__hw, fpe_get_config, __args)
+#define tsnif_fpe_get_pmac_sts(__hw, __args...) \
+	tsnif_do_void_callback(__hw, fpe_get_pmac_sts, __args)
 #define tsnif_tbs_get_max(__hw, __args...) \
 	tsnif_do_void_callback(__hw, tbs_get_max, __args)
 #define tsnif_tbs_set_estm(__hw, __args...) \
