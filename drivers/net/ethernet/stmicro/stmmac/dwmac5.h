@@ -278,6 +278,8 @@
 #define DMA_TBS_CTRL_FTOV		BIT(0)  /* Valid bit */
 
 /* TBS Global defines */
+#define TBS_LEOS_MAX			999999999	/* Max LEOS (ns) */
+#define TBS_LEGOS_MAX			7		/* Max LE GSN Slot */
 #define TBS_FTOS_MAX			999999999	/* Max FTOS (ns) */
 #define TBS_FGOS_MAX			7		/* Max FT GSN Slot */
 
