@@ -583,12 +583,18 @@ static void dwmac5_dma_init_tx_chan(void __iomem *ioaddr,
 	u32 value;
 
 	value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
-	value = value | (txpbl << DMA_BUS_MODE_PBL_SHIFT) | DMA_CONTROL_EDSE;
+	value = value | (txpbl << DMA_BUS_MODE_PBL_SHIFT);
 
 	/* Enable OSP to get best performance */
 	value |= DMA_CONTROL_OSP;
 
 	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+#ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
+	writel(upper_32_bits(dma_tx_phy),
+	       ioaddr + DMA_CHAN_TX_BASE_ADDR_HI(chan));
+#endif
+
 	writel(dma_tx_phy, ioaddr + DMA_CHAN_TX_BASE_ADDR(chan));
 }
 
