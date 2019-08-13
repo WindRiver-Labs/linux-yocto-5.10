@@ -824,6 +824,9 @@ struct tsnif_ops {
 	void (*fpe_set_afsz)(void *ioaddr, const u32 afsz);
 	void (*fpe_set_hadv)(void *ioaddr, const u32 hadv);
 	void (*fpe_set_radv)(void *ioaddr, const u32 radv);
+	void (*fpe_send_mpacket)(void __iomem *ioaddr,
+				 enum stmmac_mpacket_type type);
+	int (*fpe_irq_status)(void __iomem *ioaddr, struct net_device *dev);
 	/* Time-Based Scheduling (TBS) */
 	void (*tbs_get_max)(u32 *leos_max, u32 *legos_max,
 			    u32 *ftos_max, u32 *fgos_max);
