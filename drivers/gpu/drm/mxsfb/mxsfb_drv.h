@@ -39,6 +39,7 @@ struct mxsfb_drm_private {
 	} planes;
 	struct drm_crtc			crtc;
 	struct drm_encoder		encoder;
+	struct drm_connector            panel_connector;
 	struct drm_connector		*connector;
 	struct drm_bridge		*bridge;
 };
