@@ -59,6 +59,13 @@
 		enable-active-high;
 	};
 
+	reg_vref_3v3: regulator-adc-verf {
+                compatible = "regulator-fixed";
+                regulator-name = "vref-3v3";
+                regulator-min-microvolt = <3300000>;
+                regulator-max-microvolt = <3300000>;
+        };
+
 	reg_usb_otg1_vbus: regulator-usb-otg1-vbus {
 		compatible = "regulator-fixed";
 		pinctrl-names = "default";
@@ -191,6 +198,16 @@
 		spdif-out;
 	};
 
+};
+
+&adc1 {
+        vref-supply = <&reg_vref_3v3>;
+        status = "okay";
+};
+
+&adc2 {
+        vref-supply = <&reg_vref_3v3>;
+        status = "okay";
 };
 
 &audmux {
