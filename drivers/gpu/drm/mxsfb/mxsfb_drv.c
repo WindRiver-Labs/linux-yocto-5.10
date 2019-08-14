@@ -175,6 +175,49 @@ static const struct drm_mode_config_helper_funcs mxsfb_mode_config_helpers = {
 	.atomic_commit_tail = drm_atomic_helper_commit_tail_rpm,
 };
 
+enum drm_mode_status mxsfb_pipe_mode_valid(struct drm_crtc *crtc,
+                                           const struct drm_display_mode *mode)
+{
+        struct drm_simple_display_pipe *pipe =
+                container_of(crtc, struct drm_simple_display_pipe, crtc);
+        struct mxsfb_drm_private *mxsfb = drm_pipe_to_mxsfb_drm_private(pipe);
+        u32 bpp;
+        u64 bw;
+
+        if (!pipe->plane.state->fb)
+                bpp = 32;
+        else
+                bpp = pipe->plane.state->fb->format->depth;
+
+        bw = (u64)mode->clock * 1000;
+        bw = bw * mode->hdisplay * mode->vdisplay * (bpp / 8);
+        bw = div_u64(bw, mode->htotal * mode->vtotal);
+
+        if (mxsfb->max_bw && (bw > mxsfb->max_bw))
+                return MODE_BAD;
+
+        return MODE_OK;
+}
+
+static int mxsfb_pipe_check(struct drm_simple_display_pipe *pipe,
+                            struct drm_plane_state *plane_state,
+                            struct drm_crtc_state *crtc_state)
+{
+        struct drm_framebuffer *fb = plane_state->fb;
+        struct drm_framebuffer *old_fb = pipe->plane.state->fb;
+
+        /* force 'mode_changed' when fb pitches changed, since
+         * the pitch related registers configuration of LCDIF
+         * can not be done when LCDIF is running.
+         */
+        if (old_fb && likely(!crtc_state->mode_changed)) {
+                if (old_fb->pitches[0] != fb->pitches[0])
+                        crtc_state->mode_changed = true;
+        }
+
+        return 0;
+}
+
 static int mxsfb_attach_bridge(struct mxsfb_drm_private *mxsfb)
 {
 	struct drm_device *drm = mxsfb->drm;
@@ -215,6 +258,11 @@ static int mxsfb_attach_bridge(struct mxsfb_drm_private *mxsfb)
 	return 0;
 }
 
+static struct drm_simple_display_pipe_funcs mxsfb_funcs = {
+        .mode_valid     = mxsfb_pipe_mode_valid,
+        .check          = mxsfb_pipe_check,
+};
+
 static int mxsfb_load(struct drm_device *drm,
 		      const struct mxsfb_devdata *devdata)
 {
@@ -247,6 +295,9 @@ static int mxsfb_load(struct drm_device *drm,
 	mxsfb->clk_disp_axi = devm_clk_get(drm->dev, "disp_axi");
 	if (IS_ERR(mxsfb->clk_disp_axi))
 		mxsfb->clk_disp_axi = NULL;
+
+	of_property_read_u32(drm->dev->of_node, "max-memory-bandwidth",
+			     &mxsfb->max_bw);
 
 	ret = dma_set_mask_and_coherent(drm->dev, DMA_BIT_MASK(32));
 	if (ret)
