@@ -204,12 +204,19 @@
 	pinctrl-0 = <&pinctrl_i2c1>;
 	status = "okay";
 
-	magnetometer@e {
-		compatible = "fsl,mag3110";
-		reg = <0x0e>;
-		vdd-supply = <&reg_peri_3v3>;
-		vddio-supply = <&reg_peri_3v3>;
-	};
+	mag3110@e {
+                compatible = "fsl,mag3110";
+                reg = <0x0e>;
+                position = <2>;
+        };
+
+        fxls8471@1e {
+                compatible = "fsl,fxls8471";
+                reg = <0x1e>;
+                position = <0>;
+                interrupt-parent = <&gpio5>;
+                interrupts = <0 8>;
+        };
 };
 
 &lcdif {
