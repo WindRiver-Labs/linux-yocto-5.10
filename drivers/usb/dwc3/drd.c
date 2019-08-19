@@ -574,6 +574,7 @@ int dwc3_drd_init(struct dwc3 *dwc)
 
 	if (ROLE_SWITCH &&
 	    device_property_read_bool(dwc->dev, "usb-role-switch")) {
+		dwc3_role_switch.fwnode = dev_fwnode(dwc->dev);
 		ret = dwc3_setup_role_switch(dwc);
 		if (ret < 0)
 			return ret;
