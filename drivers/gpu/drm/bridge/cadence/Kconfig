@@ -16,6 +16,9 @@ config DRM_CDNS_HDMI
 config DRM_CDNS_DP
 	tristate "Cadence DP DRM driver"
 
+config DRM_CDNS_AUDIO
+	tristate "Cadence MHDP Audio driver"
+
 if DRM_CDNS_MHDP8546
 
 config DRM_CDNS_MHDP8546_J721E
