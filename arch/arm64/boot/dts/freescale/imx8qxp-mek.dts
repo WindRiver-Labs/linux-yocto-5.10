@@ -589,6 +589,7 @@
 };
 
 &dsp {
+	compatible = "fsl,imx8qxp-dsp-v1";
 	status = "okay";
 };
 
