@@ -910,6 +910,20 @@
 			status = "disabled";
 		};
 
+		tmu: tmu@1f80000 {
+			compatible = "fsl,qoriq-tmu";
+			reg = <0x0 0x1f80000 0x0 0x10000>;
+			interrupts = <0 23 0x4>;
+			fsl,tmu-range = <0x800000E6 0x8001017D>;
+			fsl,tmu-calibration =
+				/* Calibration data group 1 */
+				<0x00000000 0x00000035
+				/* Calibration data group 2 */
+				0x00010001 0x00000154>;
+			little-endian;
+			#thermal-sensor-cells = <1>;
+		};
+
 		uart0: serial@21c0000 {
 			compatible = "arm,sbsa-uart","arm,pl011";
 			reg = <0x0 0x21c0000 0x0 0x1000>;
