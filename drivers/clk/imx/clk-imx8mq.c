@@ -616,7 +616,7 @@ static int imx8mq_clocks_probe(struct platform_device *pdev)
 		uart_hws[i] = &hws[index]->clk;
 	}
 
-	imx_register_uart_clocks(uart_hws);
+	imx_register_uart_clocks();
 
 	return 0;
 

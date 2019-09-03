@@ -633,7 +633,7 @@ static int imx8mm_clocks_probe(struct platform_device *pdev)
 
 	clk_set_parent(clks[IMX8MM_CLK_PCIE1_CTRL], clks[IMX8MM_SYS_PLL2_250M]);
 	clk_set_parent(clks[IMX8MM_CLK_PCIE1_PHY], clks[IMX8MM_SYS_PLL2_100M]);
-	imx_register_uart_clocks(uart_hws);
+	imx_register_uart_clocks();
 
 	return 0;
 
