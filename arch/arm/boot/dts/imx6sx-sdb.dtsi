@@ -688,6 +688,13 @@
 			>;
 		};
 
+		pinctrl_mqs: mqsgrp {
+			fsl,pins = <
+				MX6SX_PAD_SD2_CLK__MQS_RIGHT 0x120b0
+				MX6SX_PAD_SD2_CMD__MQS_LEFT  0x120b0
+			>;
+		};
+
 		pinctrl_sai1: sai1grp {
 			fsl,pins = <
 				MX6SX_PAD_CSI_DATA00__SAI1_TX_BCLK	0x130b0
