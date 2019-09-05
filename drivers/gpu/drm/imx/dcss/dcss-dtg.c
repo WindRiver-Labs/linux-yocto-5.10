@@ -88,6 +88,10 @@ struct dcss_dtg {
 	u32 dis_ulc_x;
 	u32 dis_ulc_y;
 
+	struct clk *pix_clk;
+        struct clk *pll_src_clk;
+        struct clk *pll_phy_ref_clk;
+
 	u32 control_status;
 	u32 alpha;
 	u32 alpha_cfg;
@@ -317,8 +321,13 @@ void dcss_dtg_plane_alpha_set(struct dcss_dtg *dtg, int ch_num,
 	dtg->alpha = alpha;
 }
 
-void dcss_dtg_css_set(struct dcss_dtg *dtg)
+void dcss_dtg_css_set(struct dcss_dtg *dtg, bool out_is_yuv)
 {
+	dtg->control_status &= ~CSS_PIX_COMP_SWAP_MASK;
+
+	if (out_is_yuv)
+		return;
+
 	dtg->control_status |=
 			(0x5 << CSS_PIX_COMP_SWAP_POS) & CSS_PIX_COMP_SWAP_MASK;
 }

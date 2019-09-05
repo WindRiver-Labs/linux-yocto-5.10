@@ -23,6 +23,10 @@ struct dcss_crtc {
 	int			irq;
 
 	bool disable_ctxld_kick_irq;
+	bool output_is_yuv;
+	enum dcss_hdr10_nonlinearity opipe_nl;
+	enum dcss_hdr10_gamut opipe_g;
+	enum dcss_hdr10_pixel_range opipe_pr;
 };
 
 struct dcss_kms_dev {

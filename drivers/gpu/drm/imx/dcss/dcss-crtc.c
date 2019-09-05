@@ -92,8 +92,8 @@ static void dcss_crtc_atomic_enable(struct drm_crtc *crtc,
 
 	vm.pixelclock = mode->crtc_clock * 1000;
 
-	dcss_ss_subsam_set(dcss->ss);
-	dcss_dtg_css_set(dcss->dtg);
+	dcss_ss_subsam_set(dcss->ss, dcss_crtc->output_is_yuv);
+	dcss_dtg_css_set(dcss->dtg, dcss_crtc->output_is_yuv);
 
 	if (!drm_mode_equal(mode, old_mode) || !old_crtc_state->active) {
 		dcss_dtg_sync_set(dcss->dtg, &vm);
@@ -183,7 +183,7 @@ int dcss_crtc_init(struct dcss_crtc *crtc, struct drm_device *drm)
 	int ret;
 
 	crtc->plane[0] = dcss_plane_init(drm, drm_crtc_mask(&crtc->base),
-					 DRM_PLANE_TYPE_PRIMARY, 0);
+					 DRM_PLANE_TYPE_PRIMARY, 2);
 	if (IS_ERR(crtc->plane[0]))
 		return PTR_ERR(crtc->plane[0]);
 
@@ -196,6 +196,18 @@ int dcss_crtc_init(struct dcss_crtc *crtc, struct drm_device *drm)
 		dev_err(dcss->dev, "failed to init crtc\n");
 		return ret;
 	}
+
+	crtc->plane[1] = dcss_plane_init(drm, drm_crtc_mask(&crtc->base),
+                                        DRM_PLANE_TYPE_OVERLAY, 1);
+	if (IS_ERR(crtc->plane[1]))
+		crtc->plane[1] = NULL;
+
+	crtc->plane[2] = dcss_plane_init(drm, drm_crtc_mask(&crtc->base),
+				DRM_PLANE_TYPE_OVERLAY, 0);
+	if (IS_ERR(crtc->plane[2]))
+		crtc->plane[2] = NULL;
+
+	drm_plane_create_alpha_property(&crtc->plane[0]->base);
 
 	crtc->irq = platform_get_irq_byname(pdev, "vblank");
 	if (crtc->irq < 0)
