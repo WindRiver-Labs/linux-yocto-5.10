@@ -84,6 +84,7 @@ struct dcss_dev {
 	struct clk *pll_src_clk;
 	struct clk *pll_phy_ref_clk;
 
+	bool bus_freq_on;
 	bool hdmi_output;
 
 	void (*disable_callback)(void *data);
