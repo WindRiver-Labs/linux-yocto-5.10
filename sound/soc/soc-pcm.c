@@ -2690,6 +2690,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dai *cpu_dai;
 	struct snd_soc_component *component;
+	struct snd_soc_rtdcom_list *rtdcom;
 	struct snd_pcm *pcm;
 	char new_name[64];
 	int ret = 0, playback = 0, capture = 0;
