@@ -225,3 +225,7 @@
 &vpu_h1 {
 	status = "okay";
 };
+
+&gpu {
+	status = "okay";
+};
