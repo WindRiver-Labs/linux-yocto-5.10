@@ -181,7 +181,7 @@ static int ak4497_read(struct snd_soc_component *component, unsigned int reg,
 {
 	int ret;
 
-	ret = snd_soc_component_read(component, reg, val);
+	ret = snd_soc_component_read(component, reg);
 	if (ret < 0)
 		dev_err(component->dev, "Register %u read failed, ret=%d.\n", reg, ret);
 
@@ -886,6 +886,9 @@ static int ak4497_probe(struct snd_soc_component *component)
 			return ret;
 		gpio_direction_output(ak4497->mute_gpio, 0);
 	}
+
+	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "AK4497 AOUT");
+	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "Playback");
 
 	ret = ak4497_init_reg(component);
 	if (ret)
