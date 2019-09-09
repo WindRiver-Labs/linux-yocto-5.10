@@ -3905,6 +3905,7 @@ int stmmac_release(struct net_device *dev)
 	stmmac_mac_set(priv, priv->ioaddr, false);
 
 	netif_carrier_off(dev);
+	netif_tx_stop_all_queues(dev);
 
 	stmmac_release_ptp(priv);
 
