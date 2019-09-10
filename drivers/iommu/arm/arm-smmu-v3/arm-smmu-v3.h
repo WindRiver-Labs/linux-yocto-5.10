@@ -71,6 +71,9 @@
 
 #define ARM_SMMU_IIDR			0x18
 #define IIDR_CN96XX_A0			0x2b20034c
+#define IIDR_CN96XX_B0			0x2b20134c
+#define IIDR_CN95XX_A0			0x2b30034c
+#define IIDR_CN95XX_A1			0x2b30134c
 
 #define ARM_SMMU_CR0			0x20
 #define CR0_ATSCHK			(1 << 4)
