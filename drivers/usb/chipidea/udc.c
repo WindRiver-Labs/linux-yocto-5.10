@@ -1646,7 +1646,7 @@ static const struct usb_ep_ops usb_ep_ops = {
 /*
  * ci_hdrc_gadget_connect: caller makes sure gadget driver is binded
  */
-static void ci_hdrc_gadget_connect(struct usb_gadget *_gadget, int is_active)
+void ci_hdrc_gadget_connect(struct usb_gadget *_gadget, int is_active)
 {
 	struct ci_hdrc *ci = container_of(_gadget, struct ci_hdrc, gadget);
 
@@ -1703,7 +1703,7 @@ static int ci_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
 			usb_phy_set_event(ci->usb_phy, USB_EVENT_NONE);
 	}
 
-	if (gadget_ready)
+	if (ci->driver)
 		ci_hdrc_gadget_connect(_gadget, is_active);
 
 	return ret;
@@ -2156,33 +2156,6 @@ int ci_usb_charger_connect(struct ci_hdrc *ci, int is_active)
 
 	pm_runtime_put_sync(ci->dev);
 	return ret;
-}
-
-/**
- * ci_hdrc_gadget_connect: caller make sure gadget driver is binded
- */
-void ci_hdrc_gadget_connect(struct usb_gadget *gadget, int is_active)
-{
-	struct ci_hdrc *ci = container_of(gadget, struct ci_hdrc, gadget);
-
-	if (is_active) {
-		pm_runtime_get_sync(ci->dev);
-		hw_device_reset(ci);
-		hw_device_state(ci, ci->ep0out->qh.dma);
-		usb_gadget_set_state(gadget, USB_STATE_POWERED);
-		usb_udc_vbus_handler(gadget, true);
-	} else {
-		usb_udc_vbus_handler(gadget, false);
-		if (ci->driver)
-			ci->driver->disconnect(gadget);
-		hw_device_state(ci, 0);
-		if (ci->platdata->notify_event)
-			ci->platdata->notify_event(ci,
-			CI_HDRC_CONTROLLER_STOPPED_EVENT);
-		_gadget_stop_activity(gadget);
-		pm_runtime_put_sync(ci->dev);
-		usb_gadget_set_state(gadget, USB_STATE_NOTATTACHED);
-	}
 }
 
 static int udc_id_switch_for_device(struct ci_hdrc *ci)
