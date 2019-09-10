@@ -3375,14 +3375,17 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	/* Options based on implementation */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IIDR);
 
+	/* Marvell Octeontx2 SMMU wrongly issues unsupported
+	 * 64 byte memory reads under certain conditions for
+	 * reading commands from the command queue.
+	 * Force command queue drain for every two writes,
+	 * so that SMMU issues only 32 byte reads.
+	 */
 	switch (reg) {
 	case IIDR_CN96XX_A0:
-		/* Marvell Octeontx2 SMMU wrongly issues unsupported
-		 * 64 byte memory reads under certain conditions for
-		 * reading commands from the command queue.
-		 * Force command queue drain for every two writes,
-		 * so that SMMU issues only 32 byte reads.
-		 */
+	case IIDR_CN96XX_B0:
+	case IIDR_CN95XX_A0:
+	case IIDR_CN95XX_A1:
 		smmu->options |= ARM_SMMU_OPT_FORCE_QDRAIN;
 		break;
 	}
