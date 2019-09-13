@@ -322,18 +322,20 @@ int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
 	 * Allocate IRQ's before binding the scanned devices with their
 	 * respective drivers.
 	 */
-	if (dev_get_msi_domain(&mc_bus_dev->dev)) {
-		if (irq_count > FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS) {
-			dev_warn(&mc_bus_dev->dev,
-				 "IRQs needed (%u) exceed IRQs preallocated (%u)\n",
-				 irq_count, FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS);
-		}
+	if (alloc_interrupts) {
+               if (dev_get_msi_domain(&mc_bus_dev->dev) && !mc_bus->irq_resources) {
+                       if (irq_count > FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS) {
+                               dev_warn(&mc_bus_dev->dev,
+                                        "IRQs needed (%u) exceed IRQs preallocated (%u)\n",
+                                        irq_count, FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS);
+                       }
 
-		if (alloc_interrupts && !mc_bus->irq_resources) {
-			error = fsl_mc_populate_irq_pool(mc_bus_dev,
-					 FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS);
-			if (error < 0)
-				return error;
+			if (alloc_interrupts && !mc_bus->irq_resources) {
+				error = fsl_mc_populate_irq_pool(mc_bus_dev,
+						 FSL_MC_IRQ_POOL_MAX_TOTAL_IRQS);
+				if (error < 0)
+					return error;
+			}
 		}
 	}
 
