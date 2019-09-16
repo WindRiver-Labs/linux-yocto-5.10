@@ -298,6 +298,9 @@ struct stmmac_priv {
 	/* Receive Side Scaling */
 	struct stmmac_rss rss;
 
+	/* WA for EST */
+	int est_hw_del;
+
 	/* XDP BPF Program */
 	unsigned long *af_xdp_zc_qps;
 	struct bpf_prog *xdp_prog;
