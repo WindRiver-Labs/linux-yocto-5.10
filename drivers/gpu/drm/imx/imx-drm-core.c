@@ -13,6 +13,7 @@
 
 #include <video/imx-ipu-v3.h>
 #include <video/imx-lcdif.h>
+#include <video/imx-lcdifv3.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
@@ -41,6 +42,12 @@ void imx_drm_connector_destroy(struct drm_connector *connector)
 	drm_connector_cleanup(connector);
 }
 EXPORT_SYMBOL_GPL(imx_drm_connector_destroy);
+
+void imx_drm_encoder_destroy(struct drm_encoder *encoder)
+{
+        drm_encoder_cleanup(encoder);
+}
+EXPORT_SYMBOL_GPL(imx_drm_encoder_destroy);
 
 int imx_drm_encoder_parse_of(struct drm_device *drm,
 	struct drm_encoder *encoder, struct device_node *np)
@@ -96,7 +103,8 @@ static int compare_of(struct device *dev, void *data)
 		struct dpu_client_platformdata *pdata = dev->platform_data;
 
 		return pdata->of_node == np;
-	} else if (strcmp(dev->driver->name, "imx-lcdif-crtc") == 0) {
+	} else if (strcmp(dev->driver->name, "imx-lcdif-crtc") == 0 ||
+		   strcmp(dev->driver->name, "imx-lcdifv3-crtc") == 0) {
 		struct lcdif_client_platformdata *pdata = dev->platform_data;
 #if IS_ENABLED(CONFIG_DRM_FBDEV_EMULATION)
 		/* set legacyfb_depth to be 32 for lcdif, since
