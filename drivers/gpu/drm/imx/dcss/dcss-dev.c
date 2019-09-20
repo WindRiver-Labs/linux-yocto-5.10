@@ -7,7 +7,6 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/pm_runtime.h>
-#include <linux/busfreq-imx.h>
 #include <linux/slab.h>
 #include <drm/drm_bridge_connector.h>
 #include <drm/drm_device.h>
@@ -32,26 +31,6 @@ static void dcss_clocks_disable(struct dcss_dev *dcss)
 	clk_disable_unprepare(dcss->rtrm_clk);
 	clk_disable_unprepare(dcss->apb_clk);
 	clk_disable_unprepare(dcss->axi_clk);
-}
-
-static void dcss_busfreq_enable(struct dcss_dev *dcss)
-{
-	if (dcss->bus_freq_on)
-		return;
-
-	request_bus_freq(BUS_FREQ_HIGH);
-
-	dcss->bus_freq_on = true;
-}
-
-static void dcss_busfreq_disable(struct dcss_dev *dcss)
-{
-	if (!dcss->bus_freq_on)
-		return;
-
-	release_bus_freq(BUS_FREQ_HIGH);
-
-	dcss->bus_freq_on = false;
 }
 
 static void dcss_disable_dtg_and_ss_cb(void *data)
@@ -288,8 +267,6 @@ int dcss_dev_suspend(struct device *dev)
 
 	dcss_clocks_disable(dcss);
 
-	dcss_busfreq_disable(dcss);
-
 	return 0;
 }
 
@@ -303,8 +280,6 @@ int dcss_dev_resume(struct device *dev)
 		drm_mode_config_helper_resume(ddev);
 		return 0;
 	}
-
-	dcss_busfreq_enable(dcss);
 
 	dcss_clocks_enable(dcss);
 
@@ -332,16 +307,12 @@ int dcss_dev_runtime_suspend(struct device *dev)
 
 	dcss_clocks_disable(dcss);
 
-	dcss_busfreq_disable(dcss);
-
 	return 0;
 }
 
 int dcss_dev_runtime_resume(struct device *dev)
 {
 	struct dcss_dev *dcss = dcss_drv_dev_to_dcss(dev);
-
-	dcss_busfreq_enable(dcss);
 
 	dcss_clocks_enable(dcss);
 
