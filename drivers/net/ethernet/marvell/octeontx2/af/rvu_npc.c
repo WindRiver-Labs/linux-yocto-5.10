@@ -1360,12 +1360,12 @@ int rvu_npc_init(struct rvu *rvu)
 	}
 	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX), tx_kex);
 
+	/* Configure MKEX profile */
+	npc_load_mkex_profile(rvu, blkaddr, rvu->mkex_pfl_name);
+
 	err = npc_mcam_rsrcs_init(rvu, blkaddr);
 	if (err)
 		return err;
-
-	/* Configure MKEX profile */
-	npc_load_mkex_profile(rvu, blkaddr, rvu->mkex_pfl_name);
 
 	err = npc_flow_steering_init(rvu, blkaddr);
 	if (err) {
