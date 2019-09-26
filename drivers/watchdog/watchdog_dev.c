@@ -284,6 +284,8 @@ static int watchdog_start(struct watchdog_device *wdd)
 			wd_data->last_keepalive = started_at;
 			wd_data->last_hw_keepalive = started_at;
 			watchdog_update_worker(wdd);
+			if (test_bit(WDOG_RESET_KEEPALIVE, &wdd->status))
+				wd_data->last_hw_keepalive = started_at;
 		}
 	}
 
