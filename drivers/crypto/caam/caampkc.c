@@ -282,19 +282,6 @@ static struct rsa_edesc *rsa_edesc_alloc(struct akcipher_request *req,
 				     req_ctx->fixup_src_len);
 	dst_nents = sg_nents_for_len(req->dst, req->dst_len);
 
-	mapped_src_nents = dma_map_sg(dev, req_ctx->fixup_src, src_nents,
-				      DMA_TO_DEVICE);
-	if (unlikely(!mapped_src_nents)) {
-		dev_err(dev, "unable to map source\n");
-		return ERR_PTR(-ENOMEM);
-	}
-	mapped_dst_nents = dma_map_sg(dev, req->dst, dst_nents,
-				      DMA_FROM_DEVICE);
-	if (unlikely(!mapped_dst_nents)) {
-		dev_err(dev, "unable to map destination\n");
-		goto src_fail;
-	}
-
 	if (!diff_size && mapped_src_nents == 1)
 		sec4_sg_len = 0; /* no need for an input hw s/g table */
 	else
