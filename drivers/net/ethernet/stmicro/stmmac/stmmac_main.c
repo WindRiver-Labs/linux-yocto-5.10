@@ -2030,8 +2030,18 @@ static int __alloc_dma_rx_desc_resources(struct stmmac_priv *priv, u32 queue)
 static int alloc_dma_rx_desc_resources(struct stmmac_priv *priv)
 {
 	u32 rx_count = priv->plat->rx_queues_to_use;
+	int bfsize = 0;
 	u32 queue;
 	int ret;
+
+	bfsize = stmmac_set_16kib_bfsize(priv, priv->dev->mtu);
+	if (bfsize < 0)
+		bfsize = 0;
+
+	if (bfsize < BUF_SIZE_16KiB)
+		bfsize = stmmac_set_bfsize(priv->dev->mtu, priv->dma_buf_sz);
+
+	priv->dma_buf_sz = bfsize;
 
 	/* RX queues buffers and DMA */
 	for (queue = 0; queue < rx_count; queue++) {
@@ -2039,6 +2049,7 @@ static int alloc_dma_rx_desc_resources(struct stmmac_priv *priv)
 		if (ret)
 			goto err_dma;
 	}
+	buf_sz = bfsize;
 
 	return 0;
 
