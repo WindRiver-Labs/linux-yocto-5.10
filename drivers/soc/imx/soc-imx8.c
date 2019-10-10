@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/sys_soc.h>
 #include <linux/platform_device.h>
+#include <linux/arm-smccc.h>
 #include <linux/of.h>
 
 #define REV_B1				0x21
@@ -16,10 +17,24 @@
 #define IMX8MQ_SW_INFO_B1		0x40
 #define IMX8MQ_SW_MAGIC_B1		0xff0055aa
 
+#define IMX_SIP_GET_SOC_INFO           0xc2000006
+
 struct imx8_soc_data {
 	char *name;
 	u32 (*soc_revision)(void);
 };
+
+static u32 imx8mq_soc_revision_from_atf(void)
+{
+       struct arm_smccc_res res;
+
+       arm_smccc_smc(IMX_SIP_GET_SOC_INFO, 0, 0, 0, 0, 0, 0, 0, &res);
+
+       if (res.a0 == SMCCC_RET_NOT_SUPPORTED)
+               return 0;
+       else
+               return res.a0 & 0xff;
+}
 
 static u32 __init imx8mq_soc_revision(void)
 {
@@ -35,9 +50,16 @@ static u32 __init imx8mq_soc_revision(void)
 	ocotp_base = of_iomap(np, 0);
 	WARN_ON(!ocotp_base);
 
-	magic = readl_relaxed(ocotp_base + IMX8MQ_SW_INFO_B1);
-	if (magic == IMX8MQ_SW_MAGIC_B1)
-		rev = REV_B1;
+	/*
+        * SOC revision on older imx8mq is not available in fuses so query
+        * the value from ATF instead.
+        */
+       rev = imx8mq_soc_revision_from_atf();
+       if (!rev) {
+               magic = readl_relaxed(ocotp_base + IMX8MQ_SW_INFO_B1);
+               if (magic == IMX8MQ_SW_MAGIC_B1)
+                       rev = REV_B1;
+       }
 
 	iounmap(ocotp_base);
 
