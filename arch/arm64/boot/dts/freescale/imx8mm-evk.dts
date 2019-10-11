@@ -15,6 +15,17 @@
 	aliases {
 		spi0 = &flexspi;
 	};
+
+	reg_sd1_vmmc: sd1_regulator {
+                compatible = "regulator-fixed";
+                regulator-name = "WLAN_EN";
+                regulator-min-microvolt = <3300000>;
+                regulator-max-microvolt = <3300000>;
+                gpio = <&gpio2 10 GPIO_ACTIVE_HIGH>;
+                off-on-delay-us = <20000>;
+                startup-delay-us = <100>;
+                enable-active-high;
+        };
 };
 
 &ddrc {
@@ -51,6 +62,19 @@
 		spi-tx-bus-width = <4>;
 		spi-rx-bus-width = <4>;
 	};
+};
+
+&usdhc1 {
+	pinctrl-names = "default", "state_100mhz", "state_200mhz";
+	pinctrl-0 = <&pinctrl_usdhc1>, <&pinctrl_usdhc1_gpio>;
+	pinctrl-1 = <&pinctrl_usdhc1_100mhz>, <&pinctrl_usdhc1_gpio>;
+	pinctrl-2 = <&pinctrl_usdhc1_200mhz>, <&pinctrl_usdhc1_gpio>;
+	bus-width = <4>;
+	vmmc-supply = <&reg_sd1_vmmc>;
+	pm-ignore-notify;
+	keep-power-in-suspend;
+	non-removable;
+	status = "okay";
 };
 
 &usdhc3 {
@@ -208,6 +232,45 @@
 	pinctrl_i2c2_synaptics_dsx_io: synaptics_dsx_iogrp {
                 fsl,pins = <
                         MX8MM_IOMUXC_GPIO1_IO09_GPIO1_IO9               0x19    /* Touch int */
+                >;
+        };
+
+	pinctrl_usdhc1_gpio: usdhc1grpgpio {
+                fsl,pins = <
+                        MX8MM_IOMUXC_SD1_RESET_B_GPIO2_IO10     0x41
+                >;
+        };
+
+        pinctrl_usdhc1: usdhc1grp {
+                fsl,pins = <
+                        MX8MM_IOMUXC_SD1_CLK_USDHC1_CLK         0x190
+                        MX8MM_IOMUXC_SD1_CMD_USDHC1_CMD         0x1d0
+                        MX8MM_IOMUXC_SD1_DATA0_USDHC1_DATA0     0x1d0
+                        MX8MM_IOMUXC_SD1_DATA1_USDHC1_DATA1     0x1d0
+                        MX8MM_IOMUXC_SD1_DATA2_USDHC1_DATA2     0x1d0
+                        MX8MM_IOMUXC_SD1_DATA3_USDHC1_DATA3     0x1d0
+                >;
+        };
+
+        pinctrl_usdhc1_100mhz: usdhc1grp100mhz {
+                fsl,pins = <
+                        MX8MM_IOMUXC_SD1_CLK_USDHC1_CLK         0x194
+                        MX8MM_IOMUXC_SD1_CMD_USDHC1_CMD         0x1d4
+                        MX8MM_IOMUXC_SD1_DATA0_USDHC1_DATA0     0x1d4
+                        MX8MM_IOMUXC_SD1_DATA1_USDHC1_DATA1     0x1d4
+                        MX8MM_IOMUXC_SD1_DATA2_USDHC1_DATA2     0x1d4
+                        MX8MM_IOMUXC_SD1_DATA3_USDHC1_DATA3     0x1d4
+                >;
+        };
+
+        pinctrl_usdhc1_200mhz: usdhc1grp200mhz {
+                fsl,pins = <
+                        MX8MM_IOMUXC_SD1_CLK_USDHC1_CLK         0x196
+                        MX8MM_IOMUXC_SD1_CMD_USDHC1_CMD         0x1d6
+                        MX8MM_IOMUXC_SD1_DATA0_USDHC1_DATA0     0x1d6
+                        MX8MM_IOMUXC_SD1_DATA1_USDHC1_DATA1     0x1d6
+                        MX8MM_IOMUXC_SD1_DATA2_USDHC1_DATA2     0x1d6
+                        MX8MM_IOMUXC_SD1_DATA3_USDHC1_DATA3     0x1d6
                 >;
         };
 
