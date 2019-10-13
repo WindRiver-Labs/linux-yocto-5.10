@@ -1312,30 +1312,29 @@ EXPORT_SYMBOL_GPL(imx_usbmisc_init);
 int imx_usbmisc_init_post(struct imx_usbmisc_data *data)
 {
 	struct imx_usbmisc *usbmisc;
+	int ret = 0;
 
 	if (!data)
 		return 0;
 
 	usbmisc = dev_get_drvdata(data->dev);
-	if (!usbmisc->ops->post)
-		return 0;
-	return usbmisc->ops->post(data);
+	if (usbmisc->ops->post)
+		ret = usbmisc->ops->post(data);
+	if (ret) {
+		dev_err(data->dev, "post init failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	if (usbmisc->ops->set_wakeup)
+		ret = usbmisc->ops->set_wakeup(data, false);
+	if (ret) {
+		dev_err(data->dev, "set_wakeup failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(imx_usbmisc_init_post);
-
-int imx_usbmisc_set_wakeup(struct imx_usbmisc_data *data, bool enabled)
-{
-	struct imx_usbmisc *usbmisc;
-
-	if (!data)
-		return 0;
-
-	usbmisc = dev_get_drvdata(data->dev);
-	if (!usbmisc->ops->set_wakeup)
-		return 0;
-	return usbmisc->ops->set_wakeup(data, enabled);
-}
-EXPORT_SYMBOL_GPL(imx_usbmisc_set_wakeup);
 
 int imx_usbmisc_hsic_set_connect(struct imx_usbmisc_data *data)
 {
@@ -1351,19 +1350,37 @@ int imx_usbmisc_hsic_set_connect(struct imx_usbmisc_data *data)
 }
 EXPORT_SYMBOL_GPL(imx_usbmisc_hsic_set_connect);
 
-int imx_usbmisc_hsic_set_clk(struct imx_usbmisc_data *data, bool on)
+int imx_usbmisc_charger_detection(struct imx_usbmisc_data *data, bool connect)
 {
 	struct imx_usbmisc *usbmisc;
+	struct usb_phy *usb_phy;
+	int ret = 0;
 
 	if (!data)
-		return 0;
+		return -EINVAL;
 
 	usbmisc = dev_get_drvdata(data->dev);
-	if (!usbmisc->ops->hsic_set_clk || !data->hsic)
-		return 0;
-	return usbmisc->ops->hsic_set_clk(data, on);
+	usb_phy = data->usb_phy;
+	if (!usbmisc->ops->charger_detection)
+		return -ENOTSUPP;
+
+	if (connect) {
+		ret = usbmisc->ops->charger_detection(data);
+		if (ret) {
+			dev_err(data->dev,
+					"Error occurs during detection: %d\n",
+					ret);
+			usb_phy->chg_state = USB_CHARGER_ABSENT;
+		} else {
+			usb_phy->chg_state = USB_CHARGER_PRESENT;
+		}
+	} else {
+		usb_phy->chg_state = USB_CHARGER_ABSENT;
+		usb_phy->chg_type = UNKNOWN_TYPE;
+	}
+	return ret;
 }
-EXPORT_SYMBOL_GPL(imx_usbmisc_hsic_set_clk);
+EXPORT_SYMBOL_GPL(imx_usbmisc_charger_detection);
 
 int imx_usbmisc_charger_detection(struct imx_usbmisc_data *data, bool connect)
 {
@@ -1397,51 +1414,77 @@ int imx_usbmisc_charger_detection(struct imx_usbmisc_data *data, bool connect)
 }
 EXPORT_SYMBOL_GPL(imx_usbmisc_charger_detection);
 
-int imx_usbmisc_power_lost_check(struct imx_usbmisc_data *data)
+int imx_usbmisc_suspend(struct imx_usbmisc_data *data, bool wakeup)
 {
 	struct imx_usbmisc *usbmisc;
-
-	if (!data)
-		return 0;
-
-	usbmisc = dev_get_drvdata(data->dev);
-	if (!usbmisc->ops->power_lost_check)
-		return 0;
-	return usbmisc->ops->power_lost_check(data);
-}
-EXPORT_SYMBOL_GPL(imx_usbmisc_power_lost_check);
-
-int imx_usbmisc_charger_detection(struct imx_usbmisc_data *data, bool connect)
-{
-	struct imx_usbmisc *usbmisc;
-	struct usb_phy *usb_phy;
 	int ret = 0;
 
 	if (!data)
-		return -EINVAL;
+		return 0;
 
 	usbmisc = dev_get_drvdata(data->dev);
-	usb_phy = data->usb_phy;
-	if (!usbmisc->ops->charger_detection)
-		return -ENOTSUPP;
 
-	if (connect) {
-		ret = usbmisc->ops->charger_detection(data);
-		if (ret) {
-			dev_err(data->dev,
-					"Error occurs during detection: %d\n",
-					ret);
-			usb_phy->chg_state = USB_CHARGER_ABSENT;
-		} else {
-			usb_phy->chg_state = USB_CHARGER_PRESENT;
-		}
-	} else {
-		usb_phy->chg_state = USB_CHARGER_ABSENT;
-		usb_phy->chg_type = UNKNOWN_TYPE;
+	if (wakeup && usbmisc->ops->set_wakeup)
+		ret = usbmisc->ops->set_wakeup(data, true);
+	if (ret) {
+		dev_err(data->dev, "set_wakeup failed, ret=%d\n", ret);
+		return ret;
 	}
+
+	if (usbmisc->ops->hsic_set_clk && data->hsic)
+		ret = usbmisc->ops->hsic_set_clk(data, false);
+	if (ret) {
+		dev_err(data->dev, "set_wakeup failed, ret=%d\n", ret);
+		return ret;
+	}
+
 	return ret;
 }
-EXPORT_SYMBOL_GPL(imx_usbmisc_charger_detection);
+EXPORT_SYMBOL_GPL(imx_usbmisc_suspend);
+
+int imx_usbmisc_resume(struct imx_usbmisc_data *data, bool wakeup)
+{
+	struct imx_usbmisc *usbmisc;
+	int ret = 0;
+
+	if (!data)
+		return 0;
+
+	usbmisc = dev_get_drvdata(data->dev);
+
+	if (usbmisc->ops->power_lost_check)
+		ret = usbmisc->ops->power_lost_check(data);
+	if (ret > 0) {
+		/* re-init if resume from power lost */
+		ret = imx_usbmisc_init(data);
+		if (ret) {
+			dev_err(data->dev, "re-init failed, ret=%d\n", ret);
+			return ret;
+		}
+	}
+
+	if (wakeup && usbmisc->ops->set_wakeup)
+		ret = usbmisc->ops->set_wakeup(data, false);
+	if (ret) {
+		dev_err(data->dev, "set_wakeup failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	if (usbmisc->ops->hsic_set_clk && data->hsic)
+		ret = usbmisc->ops->hsic_set_clk(data, true);
+	if (ret) {
+		dev_err(data->dev, "set_wakeup failed, ret=%d\n", ret);
+		goto hsic_set_clk_fail;
+	}
+
+	return 0;
+
+hsic_set_clk_fail:
+	if (wakeup && usbmisc->ops->set_wakeup)
+		usbmisc->ops->set_wakeup(data, true);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(imx_usbmisc_resume);
 
 static const struct of_device_id usbmisc_imx_dt_ids[] = {
 	{
