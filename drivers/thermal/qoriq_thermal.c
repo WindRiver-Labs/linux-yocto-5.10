@@ -65,6 +65,77 @@
 						   */
 #define REGS_V2_TEUMR(n)	(0xf00 + 4 * (n))
 
+struct qoriq_tmu_regs_v1 {
+        u32 tmr;                /* Mode Register */
+        u32 tsr;                /* Status Register */
+        u32 tmtmir;             /* Temperature measurement interval Register */
+        u8 res0[0x14];
+        u32 tier;               /* Interrupt Enable Register */
+        u32 tidr;               /* Interrupt Detect Register */
+        u32 tiscr;              /* Interrupt Site Capture Register */
+        u32 ticscr;             /* Interrupt Critical Site Capture Register */
+        u8 res1[0x10];
+        u32 tmhtcrh;            /* High Temperature Capture Register */
+        u32 tmhtcrl;            /* Low Temperature Capture Register */
+        u8 res2[0x8];
+        u32 tmhtitr;            /* High Temperature Immediate Threshold */
+        u32 tmhtatr;            /* High Temperature Average Threshold */
+        u32 tmhtactr;   /* High Temperature Average Crit Threshold */
+        u8 res3[0x24];
+        u32 ttcfgr;             /* Temperature Configuration Register */
+        u32 tscfgr;             /* Sensor Configuration Register */
+        u8 res4[0x78];
+        struct qoriq_tmu_site_regs site[SITES_MAX];
+        u8 res5[0x9f8];
+        u32 ipbrr0;             /* IP Block Revision Register 0 */
+        u32 ipbrr1;             /* IP Block Revision Register 1 */
+        u8 res6[0x310];
+        u32 ttrcr[4];           /* Temperature Range Control Register */
+};
+
+struct qoriq_tmu_regs_v2 {
+        u32 tmr;                /* Mode Register */
+        u32 tsr;                /* Status Register */
+        u32 tmsr;               /* monitor site register */
+        u32 tmtmir;             /* Temperature measurement interval Register */
+        u8 res0[0x10];
+        u32 tier;               /* Interrupt Enable Register */
+        u32 tidr;               /* Interrupt Detect Register */
+        u8 res1[0x8];
+        u32 tiiscr;             /* interrupt immediate site capture register */
+        u32 tiascr;             /* interrupt average site capture register */
+        u32 ticscr;             /* Interrupt Critical Site Capture Register */
+        u32 res2;
+        u32 tmhtcr;             /* monitor high temperature capture register */
+        u32 tmltcr;             /* monitor low temperature capture register */
+        u32 tmrtrcr;    /* monitor rising temperature rate capture register */
+        u32 tmftrcr;    /* monitor falling temperature rate capture register */
+        u32 tmhtitr;    /* High Temperature Immediate Threshold */
+        u32 tmhtatr;    /* High Temperature Average Threshold */
+        u32 tmhtactr;   /* High Temperature Average Crit Threshold */
+        u32 res3;
+        u32 tmltitr;    /* monitor low temperature immediate threshold */
+        u32 tmltatr;    /* monitor low temperature average threshold register */
+        u32 tmltactr;   /* monitor low temperature average critical threshold */
+        u32 res4;
+        u32 tmrtrctr;   /* monitor rising temperature rate critical threshold */
+        u32 tmftrctr;   /* monitor falling temperature rate critical threshold*/
+        u8 res5[0x8];
+        u32 ttcfgr;     /* Temperature Configuration Register */
+        u32 tscfgr;     /* Sensor Configuration Register */
+        u8 res6[0x78];
+        struct qoriq_tmu_site_regs site[SITES_MAX];
+        u8 res7[0x9f8];
+        u32 ipbrr0;             /* IP Block Revision Register 0 */
+        u32 ipbrr1;             /* IP Block Revision Register 1 */
+        u8 res8[0x300];
+        u32 teumr0;
+        u32 teumr1;
+        u32 teumr2;
+        u32 res9;
+        u32 ttrcr[4];   /* Temperature Range Control Register */
+};
+
 /*
  * Thermal zone data
  */
@@ -77,6 +148,8 @@ struct qoriq_sensor {
 
 struct qoriq_tmu_data {
 	int ver;
+	struct qoriq_tmu_regs_v1 __iomem *regs;
+	struct qoriq_tmu_regs_v2 __iomem *regs_v2;
 	struct regmap *regmap;
 	struct clk *clk;
 	struct qoriq_sensor	sensor[SITES_MAX];
@@ -235,11 +308,28 @@ static int qoriq_tmu_register_tmu_zone(struct device *dev,
                         qdata->sensor[id]->temp_critical = trip[1].temperature;
                 }
 
+		if (qdata->ver == TMU_VER1)
+                        sites |= 0x1 << (15 - id);
+                else
+                        sites |= 0x1 << id;
+
 		if (devm_thermal_add_hwmon_sysfs(tzd))
 			dev_warn(dev,
 				 "Failed to add hwmon sysfs attributes\n");
 
 	}
+
+	/* Enable monitoring */
+        if (sites != 0) {
+                if (qdata->ver == TMU_VER1) {
+                        tmu_write(qdata, sites | TMR_ME | TMR_ALPF,
+                                        &qdata->regs->tmr);
+                } else {
+                        tmu_write(qdata, sites, &qdata->regs_v2->tmsr);
+                        tmu_write(qdata, TMR_ME | TMR_ALPF_V2,
+                                        &qdata->regs_v2->tmr);
+                }
+        }
 
 	return 0;
 }
