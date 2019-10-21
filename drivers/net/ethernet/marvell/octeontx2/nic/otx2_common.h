@@ -205,6 +205,7 @@ struct otx2_hw {
 struct otx2_vf_config {
 	struct otx2_nic *pf;
 	struct delayed_work link_event_work;
+	struct delayed_work ptp_info_work;
 	bool intf_down; /* interface was either configured or not */
 	u8 mac[ETH_ALEN];
 	u16 vlan;
@@ -233,6 +234,7 @@ struct otx2_ptp {
 
 	struct cyclecounter cycle_counter;
 	struct timecounter time_counter;
+	bool ptp_en;
 };
 
 #define OTX2_HW_TIMESTAMP_LEN	8
