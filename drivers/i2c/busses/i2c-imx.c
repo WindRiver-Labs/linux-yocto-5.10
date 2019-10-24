@@ -499,7 +499,7 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy, bool a
 
 		/* check for arbitration lost */
 		if (temp & I2SR_IAL) {
-			i2c_imx_clear_irq(i2c_imx, I2SR_IAL);
+			i2c_imx_clr_al_bit(temp, i2c_imx);
 			return -EAGAIN;
 		}
 
