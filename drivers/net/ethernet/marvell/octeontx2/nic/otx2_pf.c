@@ -1633,6 +1633,11 @@ int otx2_open(struct net_device *netdev)
 	if (pf->flags & OTX2_FLAG_RX_VLAN_SUPPORT)
 		otx2_enable_rxvlan(pf, true);
 
+	/* Set NPC parsing mode */
+	err = otx2_set_npc_parse_mode(pf);
+	if (err)
+		goto err_free_cints;
+
 	err = otx2_rxtx_enable(pf, true);
 	if (err)
 		goto err_tx_stop_queues;
