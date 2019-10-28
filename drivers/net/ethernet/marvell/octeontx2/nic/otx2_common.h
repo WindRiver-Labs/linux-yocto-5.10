@@ -365,6 +365,8 @@ static inline void otx2_setup_dev_hw_settings(struct otx2_nic *pfvf)
 		pfvf->hw.rq_skid = 600;
 		pfvf->qset.rqe_cnt = Q_COUNT(Q_SIZE_1K);
 	}
+	if (is_96xx_A0(pfvf->pdev))
+		pfvf->hw.cq_qcount_wait = 0x0;
 }
 
 /* Register read/write APIs */
