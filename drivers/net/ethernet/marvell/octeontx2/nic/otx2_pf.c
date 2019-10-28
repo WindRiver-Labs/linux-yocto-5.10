@@ -1614,6 +1614,11 @@ int otx2_open(struct net_device *netdev)
 	/* Restore pause frame settings */
 	otx2_config_pause_frm(pf);
 
+	/* Set NPC parsing mode */
+	err = otx2_set_npc_parse_mode(pf);
+	if (err)
+		goto err_free_cints;
+
 	err = otx2_rxtx_enable(pf, true);
 	if (err)
 		goto err_tx_stop_queues;
