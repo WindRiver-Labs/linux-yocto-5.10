@@ -960,6 +960,10 @@ init:
 	if (err)
 		goto cgx_err;
 
+	err = rvu_sdp_init(rvu);
+	if (err)
+		goto cgx_err;
+
 	/* Assign MACs for CGX mapped functions */
 	rvu_setup_pfvf_macaddress(rvu);
 
