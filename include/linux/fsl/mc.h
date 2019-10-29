@@ -863,40 +863,8 @@ int dprc_reset_container(struct fsl_mc_io *mc_io,
                         u16 token,
                         int child_container_id);
 
-struct dprc_cmd_open {
-       __le32 container_id;
-};
-
-struct dprc_cmd_reset_container {
-       __le32 child_container_id;
-};
-
-static inline bool is_fsl_mc_bus_dpdcei(const struct fsl_mc_device *mc_dev)
-{
-	return mc_dev->dev.type == &fsl_mc_bus_dpdcei_type;
-}
-
-static inline bool is_fsl_mc_bus_dpaiop(const struct fsl_mc_device *mc_dev)
-{
-	return mc_dev->dev.type == &fsl_mc_bus_dpaiop_type;
-}
-
-static inline bool is_fsl_mc_bus_dpci(const struct fsl_mc_device *mc_dev)
-{
-	return mc_dev->dev.type == &fsl_mc_bus_dpci_type;
-}
-
-static inline bool is_fsl_mc_bus_dpdmai(const struct fsl_mc_device *mc_dev)
-{
-	return mc_dev->dev.type == &fsl_mc_bus_dpdmai_type;
-}
 
 #define DPRC_RESET_OPTION_NON_RECURSIVE                0x00000001
-int dprc_reset_container(struct fsl_mc_io *mc_io,
-			 u32 cmd_flags,
-			 u16 token,
-			 int child_container_id,
-			 u32 options);
 
 int dprc_scan_container(struct fsl_mc_device *mc_bus_dev,
 			bool alloc_interrupts);
@@ -1090,6 +1058,7 @@ struct fsl_mc_bus {
 	struct mutex scan_mutex;    /* serializes bus scanning */
 	struct dprc_attributes dprc_attr;
 	struct fsl_mc_uapi uapi_misc;
+	int irq_enabled;
 };
 
 int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
@@ -1107,11 +1076,6 @@ void fsl_destroy_mc_io(struct fsl_mc_io *mc_io);
 
 int fsl_mc_find_msi_domain(struct device *mc_platform_dev,
 			   struct irq_domain **mc_msi_domain);
-
-int fsl_mc_populate_irq_pool(struct fsl_mc_bus *mc_bus,
-			     unsigned int irq_count);
-
-void fsl_mc_cleanup_irq_pool(struct fsl_mc_bus *mc_bus);
 
 void fsl_mc_init_all_resource_pools(struct fsl_mc_device *mc_bus_dev);
 
