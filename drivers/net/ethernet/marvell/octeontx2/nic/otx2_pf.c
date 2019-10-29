@@ -1607,7 +1607,7 @@ int otx2_open(struct net_device *netdev)
 	/* Restore pause frame settings */
 	otx2_config_pause_frm(pf);
 
-	if (otx2_nic_is_feature_enabled(pf, OTX2_RX_VLAN_OFFLOAD_CAPABLE))
+	if (pf->flags & OTX2_FLAG_RX_VLAN_SUPPORT)
 		otx2_enable_rxvlan(pf, true);
 
 	err = otx2_rxtx_enable(pf, true);
@@ -2191,7 +2191,6 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pf->dev = dev;
 	pf->total_vfs = pci_sriov_get_totalvfs(pdev);
 	pf->flags |= OTX2_FLAG_INTF_DOWN;
-	pf->intf_down = true;
 
 	hw = &pf->hw;
 	hw->pdev = pdev;

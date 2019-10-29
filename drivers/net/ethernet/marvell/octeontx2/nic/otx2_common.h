@@ -244,6 +244,10 @@ struct otx2_nic {
 #define OTX2_FLAG_RX_TSTAMP_ENABLED		BIT_ULL(0)
 #define OTX2_FLAG_TX_TSTAMP_ENABLED		BIT_ULL(1)
 #define OTX2_FLAG_INTF_DOWN			BIT_ULL(2)
+#define OTX2_FLAG_MCAM_ENTRIES_ALLOC		BIT_ULL(3)
+#define OTX2_FLAG_NTUPLE_SUPPORT		BIT_ULL(4)
+#define OTX2_FLAG_UCAST_FLTR_SUPPORT		BIT_ULL(5)
+#define OTX2_FLAG_RX_VLAN_SUPPORT		BIT_ULL(6)
 #define OTX2_FLAG_RX_PAUSE_ENABLED		BIT_ULL(9)
 #define OTX2_FLAG_TX_PAUSE_ENABLED		BIT_ULL(10)
 	u64			flags;
@@ -282,10 +286,6 @@ struct otx2_nic {
 	bool			entries_alloc;
 	u32			nr_flows;
 	u32                     ntuple_max_flows;
-#define OTX2_NTUPLE_FILTER_CAPABLE		0
-#define OTX2_UNICAST_FILTER_CAPABLE		1
-#define OTX2_RX_VLAN_OFFLOAD_CAPABLE		2
-	unsigned long           priv_flags;
 	u16			entry_list[NPC_MAX_NONCONTIG_ENTRIES];
 	struct list_head	flows;
 
@@ -682,19 +682,4 @@ int otx2_prepare_flow_request(struct ethtool_rx_flow_spec *fsp,
 			      struct npc_install_flow_req *req);
 int otx2_enable_rxvlan(struct otx2_nic *pf, bool enable);
 
-/* OTX2_NIC access priv_flags */
-static inline void otx2_nic_enable_feature(struct otx2_nic *pf,
-					   unsigned long nr) {
-	set_bit(nr, &pf->priv_flags);
-}
-
-static inline void otx2_nic_disable_feature(struct otx2_nic *pf,
-					    unsigned long nr) {
-	clear_bit(nr, &pf->priv_flags);
-}
-
-static inline int otx2_nic_is_feature_enabled(struct otx2_nic *pf,
-					      unsigned long nr) {
-	return test_bit(nr, &pf->priv_flags);
-}
 #endif /* OTX2_COMMON_H */
