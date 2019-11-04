@@ -13,7 +13,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
-#include <linux/dma-resv.h>
+#include <linux/reservation.h>
 
 #include "dcss-dev.h"
 #include "dcss-kms.h"
