@@ -739,6 +739,94 @@
         };
 };
 
+&uart1 { /* BT */
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_uart1>;
+        assigned-clocks = <&clk IMX8MN_CLK_UART1>;
+        assigned-clock-parents = <&clk IMX8MN_SYS_PLL1_80M>;
+        fsl,uart-has-rtscts;
+        resets = <&modem_reset>;
+        status = "okay";
+};
+
+&uart2 { /* console */
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_uart2>;
+        status = "okay";
+};
+
+&uart3 {
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_uart3>;
+        assigned-clocks = <&clk IMX8MN_CLK_UART3>;
+        assigned-clock-parents = <&clk IMX8MN_SYS_PLL1_80M>;
+        fsl,uart-has-rtscts;
+        status = "okay";
+};
+
+&usbotg1 {
+        picophy,pre-emp-curr-control = <3>;
+        picophy,dc-vol-level-adjust = <7>;
+        dr_mode = "otg";
+        hnp-disable;
+        srp-disable;
+        adp-disable;
+        usb-role-switch;
+        status = "okay";
+
+        port {
+                usb1_drd_sw: endpoint {
+                        remote-endpoint = <&typec1_dr_sw>;
+                };
+        };
+};
+
+&usdhc1 {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        pinctrl-names = "default", "state_100mhz", "state_200mhz";
+        pinctrl-0 = <&pinctrl_usdhc1>, <&pinctrl_wlan>;
+        pinctrl-1 = <&pinctrl_usdhc1_100mhz>, <&pinctrl_wlan>;
+        pinctrl-2 = <&pinctrl_usdhc1_200mhz>, <&pinctrl_wlan>;
+        bus-width = <4>;
+        pm-ignore-notify;
+        keep-power-in-suspend;
+        non-removable;
+        cap-power-off-card;
+        /delete-property/ vmmc-supply;
+        mmc-pwrseq = <&usdhc1_pwrseq>;
+        status = "okay";
+
+        brcmf: bcrmf@1 {
+                reg = <1>;
+                compatible = "brcm,bcm4329-fmac";
+                interrupt-parent = <&gpio2>;
+                interrupts = <9 IRQ_TYPE_LEVEL_HIGH>;
+                interrupt-names = "host-wake";
+        };
+};
+
+&usdhc2 {
+        pinctrl-names = "default", "state_100mhz", "state_200mhz";
+        pinctrl-0 = <&pinctrl_usdhc2>, <&pinctrl_usdhc2_gpio>;
+        pinctrl-1 = <&pinctrl_usdhc2_100mhz>, <&pinctrl_usdhc2_gpio>;
+        pinctrl-2 = <&pinctrl_usdhc2_200mhz>, <&pinctrl_usdhc2_gpio>;
+        cd-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>;
+        bus-width = <4>;
+        vmmc-supply = <&reg_usdhc2_vmmc>;
+        status = "okay";
+};
+
+&usdhc3 {
+        pinctrl-names = "default", "state_100mhz", "state_200mhz";
+        pinctrl-0 = <&pinctrl_usdhc3>;
+        pinctrl-1 = <&pinctrl_usdhc3_100mhz>;
+        pinctrl-2 = <&pinctrl_usdhc3_200mhz>;
+        bus-width = <8>;
+        non-removable;
+        status = "okay";
+};
+
 &gpu {
 	status= "okay";
 };
