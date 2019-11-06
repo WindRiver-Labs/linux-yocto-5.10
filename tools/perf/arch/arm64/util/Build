@@ -1,4 +1,5 @@
 perf-y += header.o
+libperf-y += sym-handling.o
 perf-y += machine.o
 perf-y += perf_regs.o
 perf-y += tsc.o
