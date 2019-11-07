@@ -96,174 +96,196 @@ out:
 EXPORT_SYMBOL(snd_sof_get_status);
 
 /*
- *			FW Boot State Transition Diagram
- *
- *    +-----------------------------------------------------------------------+
- *    |									      |
- * ------------------	     ------------------				      |
- * |		    |	     |		      |				      |
- * |   BOOT_FAILED  |	     |  READY_FAILED  |-------------------------+     |
- * |		    |	     |	              |				|     |
- * ------------------	     ------------------				|     |
- *	^			    ^					|     |
- *	|			    |					|     |
- * (FW Boot Timeout)		(FW_READY FAIL)				|     |
- *	|			    |					|     |
- *	|			    |					|     |
- * ------------------		    |		   ------------------	|     |
- * |		    |		    |		   |		    |	|     |
- * |   IN_PROGRESS  |---------------+------------->|    COMPLETE    |	|     |
- * |		    | (FW Boot OK)   (FW_READY OK) |		    |	|     |
- * ------------------				   ------------------	|     |
- *	^						|		|     |
- *	|						|		|     |
- * (FW Loading OK)			       (System Suspend/Runtime Suspend)
- *	|						|		|     |
- *	|						|		|     |
- * ------------------		------------------	|		|     |
- * |		    |		|		 |<-----+		|     |
- * |   PREPARE	    |		|   NOT_STARTED  |<---------------------+     |
- * |		    |		|		 |<---------------------------+
- * ------------------		------------------
- *    |	    ^			    |	   ^
- *    |	    |			    |	   |
- *    |	    +-----------------------+	   |
- *    |		(DSP Probe OK)		   |
- *    |					   |
- *    |					   |
- *    +------------------------------------+
- *	(System Suspend/Runtime Suspend)
+ * SOF Driver enumeration.
  */
+int sof_machine_check(struct snd_sof_dev *sdev)
+{
+        struct snd_sof_pdata *plat_data = sdev->pdata;
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
+        struct snd_soc_acpi_mach *machine;
+        int ret;
+#endif
+
+        if (plat_data->machine)
+                return 0;
+
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC)
+        dev_err(sdev->dev, "error: no matching ASoC machine driver found - aborting probe\n");
+        return -ENODEV;
+#else
+        /* fallback to nocodec mode */
+        dev_warn(sdev->dev, "No ASoC machine driver found - using nocodec\n");
+        machine = devm_kzalloc(sdev->dev, sizeof(*machine), GFP_KERNEL);
+        if (!machine)
+                return -ENOMEM;
+
+        machine->drv_name = "sof-nocodec";
+        plat_data->fw_filename = plat_data->desc->nocodec_fw_filename;
+        plat_data->tplg_filename = plat_data->desc->nocodec_tplg_filename;
+        ret = sof_nocodec_setup(sdev->dev, plat_data->desc->ops);
+        if (ret < 0)
+                return ret;
+
+        plat_data->machine = machine;
+
+        return 0;
+#endif
+}
+EXPORT_SYMBOL(sof_machine_check);
+
+int sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
+{
+        struct snd_sof_pdata *plat_data = (struct snd_sof_pdata *)pdata;
+        const char *drv_name;
+        const void *mach;
+        int size;
+
+        drv_name = plat_data->machine->drv_name;
+        mach = (const void *)plat_data->machine;
+        size = sizeof(*plat_data->machine);
+
+        /* register machine driver, pass machine info as pdata */
+        plat_data->pdev_mach =
+                platform_device_register_data(sdev->dev, drv_name,
+                                              PLATFORM_DEVID_NONE, mach, size);
+        if (IS_ERR(plat_data->pdev_mach))
+                return PTR_ERR(plat_data->pdev_mach);
+
+        dev_dbg(sdev->dev, "created machine %s\n",
+                dev_name(&plat_data->pdev_mach->dev));
+
+        return 0;
+}
+EXPORT_SYMBOL(sof_machine_register);
+
+void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata)
+{
+        struct snd_sof_pdata *plat_data = (struct snd_sof_pdata *)pdata;
+
+        if (!IS_ERR_OR_NULL(plat_data->pdev_mach))
+                platform_device_unregister(plat_data->pdev_mach);
+}
+EXPORT_SYMBOL(sof_machine_unregister);
 
 static int sof_probe_continue(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_pdata *plat_data = sdev->pdata;
-	int ret;
+        struct snd_sof_pdata *plat_data = sdev->pdata;
+        int ret;
 
-	/* probe the DSP hardware */
-	ret = snd_sof_probe(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
-		return ret;
+        /* probe the DSP hardware */
+        ret = snd_sof_probe(sdev);
+        if (ret < 0) {
+                dev_err(sdev->dev, "error: failed to probe DSP %d\n", ret);
+                return ret;
+        }
+
+        sdev->fw_state = SOF_FW_BOOT_PREPARE;
+
+        /* check machine info */
+        ret = snd_sof_machine_check(sdev);
+        if (ret < 0) {
+                dev_err(sdev->dev, "error: failed to get machine info %d\n",
+                        ret);
+                goto dbg_err;
+        }
+
+        /* set up platform component driver */
+        snd_sof_new_platform_drv(sdev);
+
+        /* register any debug/trace capabilities */
+        ret = snd_sof_dbg_init(sdev);
+        if (ret < 0) {
+                /*
+                 * debugfs issues are suppressed in snd_sof_dbg_init() since
+                 * we cannot rely on debugfs
+                 * here we trap errors due to memory allocation only.
+                 */
+                dev_err(sdev->dev, "error: failed to init DSP trace/debug %d\n",
+                        ret);
+                goto dbg_err;
 	}
 
-	sdev->fw_state = SOF_FW_BOOT_PREPARE;
+        /* init the IPC */
+        sdev->ipc = snd_sof_ipc_init(sdev);
+        if (!sdev->ipc) {
+                dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
+                goto ipc_err;
+        }
 
-	/* check machine info */
-	ret = sof_machine_check(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to get machine info %d\n",
-			ret);
-		goto dbg_err;
-	}
+        /* load the firmware */
+        ret = snd_sof_load_firmware(sdev);
+        if (ret < 0) {
+                dev_err(sdev->dev, "error: failed to load DSP firmware %d\n",
+                        ret);
+                goto fw_load_err;
+        }
 
-	/* set up platform component driver */
-	snd_sof_new_platform_drv(sdev);
+        sdev->fw_state = SOF_FW_BOOT_IN_PROGRESS;
 
-	/* register any debug/trace capabilities */
-	ret = snd_sof_dbg_init(sdev);
-	if (ret < 0) {
-		/*
-		 * debugfs issues are suppressed in snd_sof_dbg_init() since
-		 * we cannot rely on debugfs
-		 * here we trap errors due to memory allocation only.
-		 */
-		dev_err(sdev->dev, "error: failed to init DSP trace/debug %d\n",
-			ret);
-		goto dbg_err;
-	}
+        /*
+         * Boot the firmware. The FW boot status will be modified
+         * in snd_sof_run_firmware() depending on the outcome.
+         */
+        ret = snd_sof_run_firmware(sdev);
+        if (ret < 0) {
+                dev_err(sdev->dev, "error: failed to boot DSP firmware %d\n",
+                        ret);
+                goto fw_run_err;
+        }
 
-	/* init the IPC */
-	sdev->ipc = snd_sof_ipc_init(sdev);
-	if (!sdev->ipc) {
-		ret = -ENOMEM;
-		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
-		goto ipc_err;
-	}
+        /* init DMA trace */
+        ret = snd_sof_init_trace(sdev);
+        if (ret < 0) {
+                /* non fatal */
+                dev_warn(sdev->dev,
+                         "warning: failed to initialize trace %d\n", ret);
+        }
+/* hereafter all FW boot flows are for PM reasons */
+        sdev->first_boot = false;
 
-	/* load the firmware */
-	ret = snd_sof_load_firmware(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to load DSP firmware %d\n",
-			ret);
-		goto fw_load_err;
-	}
+        /* now register audio DSP platform driver and dai */
+        ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
+                                              sof_ops(sdev)->drv,
+                                              sof_ops(sdev)->num_drv);
+        if (ret < 0) {
+                dev_err(sdev->dev,
+                        "error: failed to register DSP DAI driver %d\n", ret);
+                goto fw_trace_err;
+        }
 
-	sdev->fw_state = SOF_FW_BOOT_IN_PROGRESS;
+        ret = snd_sof_machine_register(sdev, plat_data);
+        if (ret < 0)
+                goto fw_run_err;
 
-	/*
-	 * Boot the firmware. The FW boot status will be modified
-	 * in snd_sof_run_firmware() depending on the outcome.
-	 */
-	ret = snd_sof_run_firmware(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to boot DSP firmware %d\n",
-			ret);
-		goto fw_run_err;
-	}
+        /*
+         * Some platforms in SOF, ex: BYT, may not have their platform PM
+         * callbacks set. Increment the usage count so as to
+         * prevent the device from entering runtime suspend.
+         */
+        if (!sof_ops(sdev)->runtime_suspend || !sof_ops(sdev)->runtime_resume)
+                pm_runtime_get_noresume(sdev->dev);
 
-	if (IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_FIRMWARE_TRACE) ||
-	    (sof_core_debug & SOF_DBG_ENABLE_TRACE)) {
-		sdev->dtrace_is_supported = true;
+        if (plat_data->sof_probe_complete)
+                plat_data->sof_probe_complete(sdev->dev);
 
-		/* init DMA trace */
-		ret = snd_sof_init_trace(sdev);
-		if (ret < 0) {
-			/* non fatal */
-			dev_warn(sdev->dev,
-				 "warning: failed to initialize trace %d\n",
-				 ret);
-		}
-	} else {
-		dev_dbg(sdev->dev, "SOF firmware trace disabled\n");
-	}
-
-	/* hereafter all FW boot flows are for PM reasons */
-	sdev->first_boot = false;
-
-	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
-	}
-
-	ret = snd_sof_machine_register(sdev, plat_data);
-	if (ret < 0)
-		goto fw_trace_err;
-
-	/*
-	 * Some platforms in SOF, ex: BYT, may not have their platform PM
-	 * callbacks set. Increment the usage count so as to
-	 * prevent the device from entering runtime suspend.
-	 */
-	if (!sof_ops(sdev)->runtime_suspend || !sof_ops(sdev)->runtime_resume)
-		pm_runtime_get_noresume(sdev->dev);
-
-	if (plat_data->sof_probe_complete)
-		plat_data->sof_probe_complete(sdev->dev);
-
-	return 0;
+        return 0;
 
 fw_trace_err:
-	snd_sof_free_trace(sdev);
+        snd_sof_free_trace(sdev);
 fw_run_err:
-	snd_sof_fw_unload(sdev);
+        snd_sof_fw_unload(sdev);
 fw_load_err:
-	snd_sof_ipc_free(sdev);
+        snd_sof_ipc_free(sdev);
 ipc_err:
-	snd_sof_free_debug(sdev);
+        snd_sof_free_debug(sdev);
 dbg_err:
-	snd_sof_remove(sdev);
+        snd_sof_remove(sdev);
 
-	/* all resources freed, update state to match */
-	sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
-	sdev->first_boot = true;
+        /* all resources freed, update state to match */
+        sdev->fw_state = SOF_FW_BOOT_NOT_STARTED;
+        sdev->first_boot = true;
 
-	return ret;
+        return ret;
 }
 
 static void sof_probe_work(struct work_struct *work)

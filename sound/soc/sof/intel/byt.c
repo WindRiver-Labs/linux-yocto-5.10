@@ -619,6 +619,11 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = byt_set_mach_params,
 
+	/* machine driver */
+	.machine_check = sof_machine_check,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+
 	/* debug */
 	.debug_map	= byt_debugfs,
 	.debug_map_count	= ARRAY_SIZE(byt_debugfs),
@@ -863,6 +868,11 @@ const struct snd_sof_dsp_ops sof_byt_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = byt_set_mach_params,
 
+	/* machine driver */
+	.machine_check = sof_machine_check,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+
 	/* debug */
 	.debug_map	= byt_debugfs,
 	.debug_map_count	= ARRAY_SIZE(byt_debugfs),
@@ -941,6 +951,16 @@ const struct snd_sof_dsp_ops sof_cht_ops = {
 	.machine_register = sof_machine_register,
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = byt_set_mach_params,
+
+	/* machine driver */
+	.machine_check = sof_machine_check,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+
+	/* machine driver */
+	.machine_check = sof_machine_check,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
 
 	/* debug */
 	.debug_map	= cht_debugfs,

@@ -393,6 +393,32 @@ snd_sof_pcm_platform_pointer(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+/* machine driver */
+static inline int
+snd_sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
+{
+        if (sof_ops(sdev) && sof_ops(sdev)->machine_register)
+                return sof_ops(sdev)->machine_register(sdev, pdata);
+
+        return 0;
+}
+
+static inline void
+snd_sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata)
+{
+        if (sof_ops(sdev) && sof_ops(sdev)->machine_unregister)
+                sof_ops(sdev)->machine_unregister(sdev, pdata);
+}
+
+static inline int
+snd_sof_machine_check(struct snd_sof_dev *sdev)
+{
+        if (sof_ops(sdev) && sof_ops(sdev)->machine_check)
+                return sof_ops(sdev)->machine_check(sdev);
+
+        return 0;
+}
+
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 static inline int
 snd_sof_probe_compr_assign(struct snd_sof_dev *sdev,
