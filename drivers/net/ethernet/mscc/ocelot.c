@@ -314,6 +314,30 @@ int ocelot_vlan_del(struct ocelot *ocelot, int port, u16 vid)
 }
 EXPORT_SYMBOL(ocelot_vlan_del);
 
+static int ocelot_vlan_vid_del(struct net_device *dev, u16 vid)
+{
+       struct ocelot_port *ocelot_port = netdev_priv(dev);
+       struct ocelot *ocelot = ocelot_port->ocelot;
+       int port = ocelot_port->chip_port;
+       int ret;
+
+       /* 8021q removes VID 0 on module unload for all interfaces
+        * with VLAN filtering feature. We need to keep it to receive
+        * untagged traffic.
+        */
+       if (vid == 0)
+               return 0;
+
+       ret = ocelot_vlan_del(ocelot, port, vid);
+       if (ret)
+               return ret;
+
+       /* Del the port MAC address to with the right VLAN information */
+       ocelot_mact_forget(ocelot, dev->dev_addr, vid);
+
+       return 0;
+}
+
 static void ocelot_vlan_init(struct ocelot *ocelot)
 {
 	u16 port, vid;
