@@ -32,6 +32,7 @@ static const u32 dcss_common_formats[] = {
 	DRM_FORMAT_ABGR2101010,
 	DRM_FORMAT_RGBA1010102,
 	DRM_FORMAT_BGRA1010102,
+	DRM_FORMAT_NV12_10LE40,
 };
 
 static const u64 dcss_video_format_modifiers[] = {
@@ -124,6 +125,9 @@ static bool dcss_plane_can_rotate(const struct drm_format_info *format,
 		  format->format == DRM_FORMAT_NV21))
 		supported_rotation = DRM_MODE_ROTATE_0 | DRM_MODE_ROTATE_180 |
 				     DRM_MODE_REFLECT_MASK;
+	else if (format->is_yuv && linear_format &&
+		 format->format == DRM_FORMAT_NV12_10LE40)
+		supported_rotation = DRM_MODE_ROTATE_0 | DRM_MODE_REFLECT_Y;
 
 	return !!(rotation & supported_rotation);
 }
@@ -131,7 +135,8 @@ static bool dcss_plane_can_rotate(const struct drm_format_info *format,
 static bool dcss_plane_is_source_size_allowed(u16 src_w, u16 src_h, u32 pix_fmt)
 {
 	if (src_w < 64 &&
-	    (pix_fmt == DRM_FORMAT_NV12 || pix_fmt == DRM_FORMAT_NV21))
+	    (pix_fmt == DRM_FORMAT_NV12 || pix_fmt == DRM_FORMAT_NV21 ||
+	     pix_fmt == DRM_FORMAT_NV12_10LE40))
 		return false;
 	else if (src_w < 32 &&
 		 (pix_fmt == DRM_FORMAT_UYVY || pix_fmt == DRM_FORMAT_VYUY ||
@@ -289,26 +294,38 @@ static void dcss_plane_atomic_set_base(struct dcss_plane *dcss_plane)
 	const struct drm_format_info *format = fb->format;
 	struct drm_gem_cma_object *cma_obj = drm_fb_cma_get_gem_obj(fb, 0);
 	unsigned long p1_ba = 0, p2_ba = 0;
+	u16 x1, y1;
+
+	x1 = state->src.x1 >> 16;
+	y1 = state->src.y1 >> 16;
 
 	if (!format->is_yuv ||
 	    format->format == DRM_FORMAT_NV12 ||
 	    format->format == DRM_FORMAT_NV21)
 		p1_ba = cma_obj->paddr + fb->offsets[0] +
-			fb->pitches[0] * (state->src.y1 >> 16) +
-			format->char_per_block[0] * (state->src.x1 >> 16);
+			fb->pitches[0] * y1 +
+			format->char_per_block[0] * x1;
+	else if (format->format == DRM_FORMAT_NV12_10LE40)
+		p1_ba = cma_obj->paddr + fb->offsets[0] +
+			fb->pitches[0] * y1 +
+			format->char_per_block[0] * (x1 >> 2);
 	else if (format->format == DRM_FORMAT_UYVY ||
 		 format->format == DRM_FORMAT_VYUY ||
 		 format->format == DRM_FORMAT_YUYV ||
 		 format->format == DRM_FORMAT_YVYU)
 		p1_ba = cma_obj->paddr + fb->offsets[0] +
-			fb->pitches[0] * (state->src.y1 >> 16) +
-			2 * format->char_per_block[0] * (state->src.x1 >> 17);
+			fb->pitches[0] * y1 +
+			2 * format->char_per_block[0] * (x1 >> 1);
 
 	if (format->format == DRM_FORMAT_NV12 ||
 	    format->format == DRM_FORMAT_NV21)
 		p2_ba = cma_obj->paddr + fb->offsets[1] +
-			(((fb->pitches[1] >> 1) * (state->src.y1 >> 17) +
-			(state->src.x1 >> 17)) << 1);
+			(((fb->pitches[1] >> 1) * (y1 >> 1) +
+			(x1 >> 1)) << 1);
+	else if (format->format == DRM_FORMAT_NV12_10LE40)
+		p2_ba = cma_obj->paddr + fb->offsets[1] +
+			(((fb->pitches[1] >> 1) * (y1 >> 1)) << 1) +
+			format->char_per_block[1] * (x1 >> 2);
 
 	dcss_dpr_addr_set(dcss->dpr, dcss_plane->ch_num, p1_ba, p2_ba,
 			  fb->pitches[0]);

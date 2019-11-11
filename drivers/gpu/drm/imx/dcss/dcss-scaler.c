@@ -450,7 +450,8 @@ static void dcss_scaler_res_set(struct dcss_scaler_ch *ch,
 		csrc_xres >>= 1;
 		src_is_444 = false;
 	} else if (pix_format == DRM_FORMAT_NV12 ||
-		   pix_format == DRM_FORMAT_NV21) {
+		   pix_format == DRM_FORMAT_NV21 ||
+		   pix_format == DRM_FORMAT_NV12_10LE40) {
 		csrc_xres >>= 1;
 		csrc_yres >>= 1;
 		src_is_444 = false;
@@ -491,7 +492,7 @@ static const struct dcss_scaler_factors dcss_scaler_factors[] = {
 	{3, 8}, {5, 8}, {5, 8},
 };
 
-static void dcss_scaler_fractions_set(struct dcss_scaler_ch *ch,
+static bool dcss_scaler_fractions_set(struct dcss_scaler_ch *ch,
 				      int src_xres, int src_yres,
 				      int dst_xres, int dst_yres,
 				      u32 src_format, u32 dst_format,
@@ -577,6 +578,12 @@ static void dcss_scaler_fractions_set(struct dcss_scaler_ch *ch,
 
 	dcss_scaler_write(ch, c_hstart, DCSS_SCALER_H_CHR_START);
 	dcss_scaler_write(ch, c_hinc, DCSS_SCALER_H_CHR_INC);
+
+	/* return if WR_SCL/RD_SRC is needed to scale */
+        return l_vinc > downscale_fp(downscale_factor, 13)  ||
+               l_vinc < upscale_fp(upscale_factor, 13)      ||
+               l_hinc > downscale_fp(downscale_factor, 13)  ||
+               l_hinc < upscale_fp(upscale_factor, 13);
 }
 
 int dcss_scaler_get_min_max_ratios(struct dcss_scaler *scl, int ch_num,
@@ -829,7 +836,8 @@ void dcss_scaler_setup(struct dcss_scaler *scl, int ch_num,
 		dcss_scaler_yuv_enable(ch, true);
 
 		if (pix_format == DRM_FORMAT_NV12 ||
-		    pix_format == DRM_FORMAT_NV21) {
+		    pix_format == DRM_FORMAT_NV21 ||
+		    pix_format == DRM_FORMAT_NV12_10LE40) {
 			rtr_8line_en = true;
 			src_format = BUF_FMT_YUV420;
 		} else if (pix_format == DRM_FORMAT_UYVY ||
@@ -840,6 +848,9 @@ void dcss_scaler_setup(struct dcss_scaler *scl, int ch_num,
 		}
 
 		use_5_taps = !rtr_8line_en;
+
+		if (pix_format == DRM_FORMAT_NV12_10LE40)
+			pixel_depth = 30;
 	} else {
 		dcss_scaler_yuv_enable(ch, false);
 
