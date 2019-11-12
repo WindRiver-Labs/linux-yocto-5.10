@@ -8,6 +8,7 @@
  *   Author: Wolfram Sang <kernel@pengutronix.de>
  */
 
+#include <linux/busfreq-imx.h>
 #include <linux/bitfield.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -23,6 +24,7 @@
 #include <linux/mmc/slot-gpio.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/iopoll.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_data/mmc-esdhc-imx.h>
 #include <linux/pm_runtime.h>
@@ -191,6 +193,8 @@
  */
 #define ESDHC_FLAG_BROKEN_AUTO_CMD23	BIT(16)
 
+#define ESDHC_FLAG_BUSFREQ		BIT(16)
+
 struct esdhc_soc_data {
 	u32 flags;
 };
@@ -273,15 +277,6 @@ static struct esdhc_soc_data usdhc_imx8mm_data = {
 	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_STD_TUNING
 			| ESDHC_FLAG_HAVE_CAP1 | ESDHC_FLAG_HS200
 			| ESDHC_FLAG_HS400 | ESDHC_FLAG_HS400_ES
-			| ESDHC_FLAG_CQHCI
-			| ESDHC_FLAG_STATE_LOST_IN_LPMODE
-			| ESDHC_FLAG_CLK_RATE_LOST_IN_PM_RUNTIME,
-};
-
-static struct esdhc_soc_data usdhc_imx8mm_data = {
-	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_STD_TUNING
-			| ESDHC_FLAG_HAVE_CAP1 | ESDHC_FLAG_HS200
-			| ESDHC_FLAG_HS400 | ESDHC_FLAG_HS400_ES
 			| ESDHC_FLAG_CQHCI | ESDHC_FLAG_BUSFREQ
 			| ESDHC_FLAG_STATE_LOST_IN_LPMODE,
 };
@@ -293,6 +288,7 @@ static struct esdhc_soc_data usdhc_s32v234_data = {
 struct pltfm_imx_data {
 	u32 scratchpad;
 	struct pinctrl *pinctrl;
+	struct pinctrl_state *pins_default;
 	struct pinctrl_state *pins_100mhz;
 	struct pinctrl_state *pins_200mhz;
 	const struct esdhc_soc_data *socdata;
