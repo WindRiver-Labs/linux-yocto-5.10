@@ -19,12 +19,7 @@ netdev_tx_t enetc_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct enetc_ndev_priv *priv = netdev_priv(ndev);
 	struct enetc_bdr *tx_ring;
-	unsigned long flags;
-	/* pointer to per-cpu ENETC lock for register access issue WA */
-	spinlock_t *lock;
 	int count;
-
-	lock = this_cpu_ptr(&enetc_gregs);
 
 	tx_ring = priv->tx_ring[skb->queue_mapping];
 
@@ -323,9 +318,6 @@ static int enetc_poll(struct napi_struct *napi, int budget)
 	struct enetc_int_vector
 		*v = container_of(napi, struct enetc_int_vector, napi);
 	bool complete = true;
-	unsigned long flags;
-	/* pointer to per-cpu ENETC lock for register access issue WA */
-	spinlock_t *lock;
 	int work_done;
 	int i;
 
@@ -697,12 +689,6 @@ static int enetc_clean_rx_ring(struct enetc_bdr *rx_ring,
 {
 	int rx_frm_cnt = 0, rx_byte_cnt = 0;
 	int cleaned_cnt, i;
-
-	unsigned long flags;
-	/* pointer to per-cpu ENETC lock for register access issue WA */
-	spinlock_t *lock;
-
-	lock = this_cpu_ptr(&enetc_gregs);
 
 	cleaned_cnt = enetc_bd_unused(rx_ring);
 	/* next descriptor to process */
