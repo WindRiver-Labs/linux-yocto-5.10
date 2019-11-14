@@ -1151,6 +1151,7 @@ err_alloc_si_res:
 	si->ndev = NULL;
 	free_netdev(ndev);
 err_alloc_netdev:
+	enetc_mdio_remove(pf);
 err_map_pf_space:
 	enetc_pci_remove(pdev);
 
