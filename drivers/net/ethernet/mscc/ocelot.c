@@ -8,6 +8,7 @@
 #include <soc/mscc/ocelot_vcap.h>
 #include "ocelot.h"
 #include "ocelot_vcap.h"
+#include <linux/phylink.h>
 
 #define TABLE_UPDATE_SLEEP_US 10
 #define TABLE_UPDATE_TIMEOUT_US 100000
@@ -426,8 +427,53 @@ int ocelot_port_flush(struct ocelot *ocelot, int port)
 }
 EXPORT_SYMBOL(ocelot_port_flush);
 
-void ocelot_adjust_link(struct ocelot *ocelot, int port,
-			struct phy_device *phydev)
+void ocelot_phylink_validate(struct ocelot *ocelot, int port,
+                            unsigned long *supported,
+                            struct phylink_link_state *state)
+{
+       __ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+
+       if (state->interface != PHY_INTERFACE_MODE_NA &&
+           state->interface != PHY_INTERFACE_MODE_GMII &&
+           state->interface != PHY_INTERFACE_MODE_SGMII &&
+           state->interface != PHY_INTERFACE_MODE_QSGMII) {
+               bitmap_zero(supported, __ETHTOOL_LINK_MODE_MASK_NBITS);
+               return;
+       }
+
+       /* No half-duplex. */
+       phylink_set_port_modes(mask);
+       phylink_set(mask, Autoneg);
+       phylink_set(mask, Pause);
+       phylink_set(mask, Asym_Pause);
+       phylink_set(mask, 10baseT_Full);
+       phylink_set(mask, 100baseT_Full);
+       phylink_set(mask, 1000baseT_Full);
+       phylink_set(mask, 2500baseT_Full);
+
+       bitmap_and(supported, supported, mask,
+                  __ETHTOOL_LINK_MODE_MASK_NBITS);
+       bitmap_and(state->advertising, state->advertising, mask,
+                  __ETHTOOL_LINK_MODE_MASK_NBITS);
+}
+EXPORT_SYMBOL(ocelot_phylink_validate);
+
+void ocelot_phylink_mac_pcs_get_state(struct ocelot *ocelot, int port,
+                                     struct phylink_link_state *state)
+{
+       state->link = 1;
+}
+EXPORT_SYMBOL(ocelot_phylink_mac_pcs_get_state);
+
+void ocelot_phylink_mac_an_restart(struct ocelot *ocelot, int port)
+{
+       /* Not supported */
+}
+EXPORT_SYMBOL(ocelot_phylink_mac_an_restart);
+
+void ocelot_phylink_mac_config(struct ocelot *ocelot, int port,
+                              unsigned int link_an_mode,
+                              const struct phylink_link_state *state)
 {
 	int speed, mac_speed, mac_mode = DEV_MAC_MODE_CFG_FDX_ENA;
 	struct ocelot_port *ocelot_port = ocelot->ports[port];
@@ -453,15 +499,10 @@ void ocelot_adjust_link(struct ocelot *ocelot, int port,
 		mac_mode |= DEV_MAC_MODE_CFG_GIGA_MODE_ENA;
 		break;
 	default:
-		dev_err(ocelot->dev, "Unsupported PHY speed on port %d: %d\n",
+		dev_err(ocelot->dev, "Unsupported speed on port %d: %d\n",
 			port, speed);
 		return;
 	}
-
-	phy_print_status(phydev);
-
-	if (!phydev->link)
-		return;
 
 	/* Only full duplex supported for now */
 	ocelot_port_writel(ocelot_port, mac_mode, DEV_MAC_MODE_CFG);
@@ -502,18 +543,23 @@ void ocelot_adjust_link(struct ocelot *ocelot, int port,
 			    QSYS_SWITCH_PORT_MODE_PORT_ENA, 1);
 
 	/* Flow control */
-	ocelot_write_rix(ocelot, SYS_MAC_FC_CFG_PAUSE_VAL_CFG(0xffff) |
-			 SYS_MAC_FC_CFG_RX_FC_ENA | SYS_MAC_FC_CFG_TX_FC_ENA |
-			 SYS_MAC_FC_CFG_ZERO_PAUSE_ENA |
-			 SYS_MAC_FC_CFG_FC_LATENCY_CFG(0x7) |
-			 SYS_MAC_FC_CFG_FC_LINK_SPEED(mac_speed),
-			 SYS_MAC_FC_CFG, port);
+	mac_fc_cfg = SYS_MAC_FC_CFG_FC_LINK_SPEED(mac_speed);
+       if (state->pause & MLO_PAUSE_RX)
+               mac_fc_cfg |= SYS_MAC_FC_CFG_RX_FC_ENA;
+       if (state->pause & MLO_PAUSE_TX)
+               mac_fc_cfg |= SYS_MAC_FC_CFG_TX_FC_ENA |
+                             SYS_MAC_FC_CFG_PAUSE_VAL_CFG(0xffff) |
+                             SYS_MAC_FC_CFG_FC_LATENCY_CFG(0x7) |
+                             SYS_MAC_FC_CFG_ZERO_PAUSE_ENA;
+       ocelot_write_rix(ocelot, mac_fc_cfg, SYS_MAC_FC_CFG, port);
 	ocelot_write_rix(ocelot, 0, ANA_POL_FLOWC, port);
 }
-EXPORT_SYMBOL(ocelot_adjust_link);
+EXPORT_SYMBOL(ocelot_phylink_mac_config);
 
-void ocelot_port_enable(struct ocelot *ocelot, int port,
-			struct phy_device *phy)
+void ocelot_phylink_mac_link_up(struct ocelot *ocelot, int port,
+                               unsigned int link_an_mode,
+                               phy_interface_t interface,
+                               struct phy_device *phy)
 {
 	/* Enable receiving frames on the port, and activate auto-learning of
 	 * MAC addresses.
@@ -523,7 +569,7 @@ void ocelot_port_enable(struct ocelot *ocelot, int port,
 			 ANA_PORT_PORT_CFG_PORTID_VAL(port),
 			 ANA_PORT_PORT_CFG, port);
 }
-EXPORT_SYMBOL(ocelot_port_enable);
+EXPORT_SYMBOL(ocelot_phylink_mac_link_up);
 
 void ocelot_port_disable(struct ocelot *ocelot, int port)
 {

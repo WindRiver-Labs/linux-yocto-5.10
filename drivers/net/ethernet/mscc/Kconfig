@@ -27,6 +27,7 @@ config MSCC_OCELOT_SWITCH
 	depends on OF_NET
 	select MSCC_OCELOT_SWITCH_LIB
 	select GENERIC_PHY
+	select PHYLINK
 	help
 	  This driver supports the Ocelot network switch device as present on
 	  the Ocelot SoCs (VSC7514).

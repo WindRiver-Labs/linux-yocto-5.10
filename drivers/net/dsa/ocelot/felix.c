@@ -243,6 +243,16 @@ static void felix_phylink_validate(struct dsa_switch *ds, int port,
 		felix->info->phylink_validate(ocelot, port, supported, state);
 }
 
+static int felix_phylink_mac_pcs_get_state(struct dsa_switch *ds, int port,
+                                          struct phylink_link_state *state)
+{
+       struct ocelot *ocelot = ds->priv;
+
+       ocelot_phylink_mac_pcs_get_state(ocelot, port, state);
+
+        return 0;
+}
+
 static void felix_phylink_mac_config(struct dsa_switch *ds, int port,
 				     unsigned int link_an_mode,
 				     const struct phylink_link_state *state)
@@ -253,6 +263,13 @@ static void felix_phylink_mac_config(struct dsa_switch *ds, int port,
 
 	if (felix->pcs[port])
 		phylink_set_pcs(dp->pl, &felix->pcs[port]->pcs);
+}
+
+static void felix_phylink_mac_an_restart(struct dsa_switch *ds, int port)
+{
+       struct ocelot *ocelot = ds->priv;
+
+       ocelot_phylink_mac_an_restart(ocelot, port);
 }
 
 static void felix_phylink_mac_link_down(struct dsa_switch *ds, int port,
