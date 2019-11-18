@@ -1886,6 +1886,10 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ret = regulator_enable(imx6_pcie->epdev_on);
+	if (ret)
+		dev_err(dev, "failed to enable the epdev_on regulator\n");
+
 	ret = imx6_add_pcie_port(imx6_pcie, pdev);
 	if (ret < 0)
 		return ret;
