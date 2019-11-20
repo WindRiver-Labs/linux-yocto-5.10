@@ -35,7 +35,7 @@ enum imx_thermal_trip {
 	IMX_TRIP_PASSIVE,
 	IMX_TRIP_CRITICAL,
 	IMX_TRIP_NUM,
-};
+}__packed __aligned(4);
 
 struct req_get_temp {
 	u16 resource_id;
@@ -122,79 +122,54 @@ static const struct thermal_zone_of_device_ops imx_sc_thermal_ops = {
 
 static int imx_sc_thermal_probe(struct platform_device *pdev)
 {
-	struct device_node *np, *child, *sensor_np;
-	struct imx_sc_sensor *sensor;
-	int ret;
+        struct device_node *np, *child, *sensor_np;
+        struct imx_sc_sensor *sensor;
+        int ret;
 
-	ret = imx_scu_get_handle(&thermal_ipc_handle);
-	if (ret)
-		return ret;
+        ret = imx_scu_get_handle(&thermal_ipc_handle);
+        if (ret)
+                return ret;
 
-	np = of_find_node_by_name(NULL, "thermal-zones");
-	if (!np)
-		return -ENODEV;
+        np = of_find_node_by_name(NULL, "thermal-zones");
+        if (!np)
+                return -ENODEV;
 
-	sensor_np = of_node_get(pdev->dev.of_node);
+        sensor_np = of_node_get(pdev->dev.of_node);
 
-	for_each_available_child_of_node(np, child) {
-		sensor = devm_kzalloc(&pdev->dev, sizeof(*sensor), GFP_KERNEL);
-		if (!sensor) {
-			of_node_put(sensor_np);
-			return -ENOMEM;
-		}
-
-		ret = thermal_zone_of_get_sensor_id(child,
-						    sensor_np,
-						    &sensor->resource_id);
-		if (ret < 0) {
-			dev_err(&pdev->dev,
-				"failed to get valid sensor resource id: %d\n",
-				ret);
-			break;
-		}
-		trip = of_thermal_get_trip_points(sensor->tzd);
-		sensor->temp_passive = trip[0].temperature;
-		sensor->temp_critical = trip[1].temperature;
-
-		sensor->cdev = devfreq_cooling_register();
-		if (IS_ERR(sensor->cdev)) {
-			dev_err(&pdev->dev,
-			"failed to register devfreq cooling device: %d\n",
-			ret);
-			return ret;
-		}
-
-		ret = thermal_zone_bind_cooling_device(sensor->tzd,
-			IMX_TRIP_PASSIVE,
-			sensor->cdev,
-			THERMAL_NO_LIMIT,
-			THERMAL_NO_LIMIT,
-			THERMAL_WEIGHT_DEFAULT);
-		if (ret) {
-			dev_err(&sensor->tzd->device,
-				"binding zone %s with cdev %s failed:%d\n",
-				sensor->tzd->type, sensor->cdev->type, ret);
-			devfreq_cooling_unregister(sensor->cdev);
-			return ret;
+        for_each_available_child_of_node(np, child) {
+                sensor = devm_kzalloc(&pdev->dev, sizeof(*sensor), GFP_KERNEL);
+                if (!sensor) {
+                        of_node_put(sensor_np);
+                        return -ENOMEM;
                 }
 
-		sensor->tzd = devm_thermal_zone_of_sensor_register(&pdev->dev,
-								   sensor->resource_id,
-								   sensor,
-								   &imx_sc_thermal_ops);
-		if (IS_ERR(sensor->tzd)) {
-			dev_err(&pdev->dev, "failed to register thermal zone\n");
-			ret = PTR_ERR(sensor->tzd);
-			break;
-		}
+                ret = thermal_zone_of_get_sensor_id(child,
+                                                    sensor_np,
+                                                    &sensor->resource_id);
+                if (ret < 0) {
+                        dev_err(&pdev->dev,
+                                "failed to get valid sensor resource id: %d\n",
+                                ret);
+                        break;
+                }
 
-		if (devm_thermal_add_hwmon_sysfs(sensor->tzd))
-			dev_warn(&pdev->dev, "failed to add hwmon sysfs attributes\n");
-	}
+                sensor->tzd = devm_thermal_zone_of_sensor_register(&pdev->dev,
+                                                                   sensor->resource_id,
+                                                                   sensor,
+                                                                   &imx_sc_thermal_ops);
+                if (IS_ERR(sensor->tzd)) {
+                        dev_err(&pdev->dev, "failed to register thermal zone\n");
+                        ret = PTR_ERR(sensor->tzd);
+                        break;
+                }
+
+                if (devm_thermal_add_hwmon_sysfs(sensor->tzd))
+                        dev_warn(&pdev->dev, "failed to add hwmon sysfs attributes\n");
+        }
 
 	of_node_put(sensor_np);
 
-	return ret;
+        return ret;
 }
 
 static int imx_sc_thermal_remove(struct platform_device *pdev)
