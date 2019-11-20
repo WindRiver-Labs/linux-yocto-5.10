@@ -155,6 +155,20 @@
 	};
 };
 
+&flexspi {
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_flexspi0>;
+        status = "okay";
+
+        flash0: mt25qu256aba@0 {
+                reg = <0>;
+                compatible = "jedec,spi-nor";
+                spi-max-frequency = <80000000>;
+                spi-tx-bus-width = <4>;
+                spi-rx-bus-width = <4>;
+        };
+};
+
 &i2c1 {
 	pmic@4b {
 		compatible = "rohm,bd71847";
