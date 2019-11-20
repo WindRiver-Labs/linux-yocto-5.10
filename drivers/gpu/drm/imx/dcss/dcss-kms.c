@@ -13,7 +13,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
-#include <linux/reservation.h>
+#include <linux/component.h>
 
 #include "dcss-dev.h"
 #include "dcss-kms.h"
@@ -262,6 +262,8 @@ struct dcss_kms_dev *dcss_kms_attach(struct dcss_dev *dcss)
 		goto cleanup_mode_config;
 
 	drm_mode_config_reset(drm);
+
+	dcss_crtc_attach_color_mgmt_properties(crtc);
 
 	drm_kms_helper_poll_init(drm);
 
