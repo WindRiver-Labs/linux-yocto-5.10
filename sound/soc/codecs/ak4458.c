@@ -37,16 +37,17 @@ struct ak4458_drvdata {
 	struct snd_soc_dai_driver *dai_drv;
 	const struct snd_soc_component_driver *comp_drv;
 	enum ak4458_type type;
+	bool  dsd512;   /* DSD512 is supported or not */
 };
 
 /* AK4458 Codec Private Data */
 struct ak4458_priv {
 	struct regulator_bulk_data supplies[AK4458_NUM_SUPPLIES];
-	const struct ak4458_drvdata *drvdata;
 	struct device *dev;
 	struct regmap *regmap;
 	struct gpio_desc *reset_gpiod;
 	struct gpio_desc *mute_gpiod;
+	const struct ak4458_drvdata *drvdata;
 	int digfil;	/* SSLOW, SD, SLOW bits */
 	int fs;		/* sampling rate */
 	int fmt;
@@ -357,6 +358,7 @@ static int ak4458_hw_params(struct snd_pcm_substream *substream,
 	int pcm_width = max(params_physical_width(params), ak4458->slot_width);
 	u8 format, dsdsel0, dsdsel1, dchn;
 	int ret, dsd_bclk, channels, channels_max;
+	int nfs1;
 
 	channels = params_channels(params);
 	channels_max = dai->driver->playback.channels_max;
@@ -470,7 +472,6 @@ static int ak4458_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_component *component = dai->component;
 	struct ak4458_priv *ak4458 = snd_soc_component_get_drvdata(component);
-	u8 dp;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBS_CFS: /* Slave Mode */
@@ -758,12 +759,14 @@ static const struct regmap_config ak4458_regmap = {
 static const struct ak4458_drvdata ak4458_drvdata = {
 	.dai_drv = &ak4458_dai,
 	.comp_drv = &soc_codec_dev_ak4458,
+	.dsd512 = false,
 	.type = AK4458,
 };
 
 static const struct ak4458_drvdata ak4497_drvdata = {
 	.dai_drv = &ak4497_dai,
 	.comp_drv = &soc_codec_dev_ak4497,
+	.dsd512 = true,
 	.type = AK4497,
 };
 
