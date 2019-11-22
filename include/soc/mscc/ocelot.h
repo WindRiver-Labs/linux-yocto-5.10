@@ -572,6 +572,15 @@ struct ocelot_ops {
 	int (*netdev_to_port)(struct net_device *dev);
 	int (*reset)(struct ocelot *ocelot);
 	u16 (*wm_enc)(u16 value);
+	void (*pcs_init)(struct ocelot *ocelot, int port,
+                        unsigned int link_an_mode,
+                        const struct phylink_link_state *state);
+       void (*pcs_an_restart)(struct ocelot *ocelot, int port);
+       void (*pcs_link_state)(struct ocelot *ocelot, int port,
+                              struct phylink_link_state *state);
+       void (*pcs_validate)(struct ocelot *ocelot, int port,
+                            unsigned long *supported,
+                            struct phylink_link_state *state);
 };
 
 struct ocelot_vcap_block {
