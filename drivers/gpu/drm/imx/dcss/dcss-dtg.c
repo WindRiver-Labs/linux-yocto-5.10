@@ -83,6 +83,7 @@ struct dcss_dtg {
 	u32 ctx_id;
 
 	bool in_use;
+	bool hdmi_output;
 
 	u32 dis_ulc_x;
 	u32 dis_ulc_y;
@@ -169,6 +170,7 @@ int dcss_dtg_init(struct dcss_dev *dcss, unsigned long dtg_base)
 
 	dtg->base_ofs = dtg_base;
 	dtg->ctx_id = CTX_DB;
+	dtg->hdmi_output = dcss->hdmi_output;
 
 	dtg->alpha = 255;
 
@@ -221,6 +223,17 @@ void dcss_dtg_sync_set(struct dcss_dtg *dtg, struct videomode *vm)
 		    vm->vactive - 1;
 
 	clk_disable_unprepare(dcss->pix_clk);
+
+	if (dtg->hdmi_output) {
+		int err;
+
+		clk_disable_unprepare(dtg->pll_src_clk);
+		err = clk_set_parent(dtg->pll_src_clk, dtg->pll_phy_ref_clk);
+		if (err < 0)
+			dev_warn(dtg->dev, "clk_set_parent() returned %d", err);
+		clk_prepare_enable(dtg->pll_src_clk);
+	}
+
 	clk_set_rate(dcss->pix_clk, vm->pixelclock);
 	clk_prepare_enable(dcss->pix_clk);
 
