@@ -1618,6 +1618,8 @@ int enetc_setup_tc(struct net_device *ndev, enum tc_setup_type type,
 		return enetc_setup_tc_txtime(ndev, type_data);
 	case TC_SETUP_BLOCK:
 		return enetc_setup_tc_psfp(ndev, type_data);
+	case TC_SETUP_QDISC_CBS:
+		return enetc_setup_tc_cbs(ndev, type_data);
 	default:
 		return -EOPNOTSUPP;
 	}
