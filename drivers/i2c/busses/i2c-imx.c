@@ -113,6 +113,35 @@
 
 #define I2C_PM_TIMEOUT		1000 /* ms */
 
+enum pinmux_endian_type {
+        BIG_ENDIAN,
+        LITTLE_ENDIAN,
+};
+
+struct pinmux_cfg {
+        enum pinmux_endian_type endian; /* endian of RCWPMUXCR0 */
+        u32 pmuxcr_offset;
+        u32 pmuxcr_set_bit;                 /* pin mux of RCWPMUXCR0 */
+};
+
+static struct pinmux_cfg ls1012a_pinmux_cfg = {
+        .endian = BIG_ENDIAN,
+        .pmuxcr_offset = 0x430,
+        .pmuxcr_set_bit = 0x10,
+};
+
+static struct pinmux_cfg ls1043a_pinmux_cfg = {
+        .endian = BIG_ENDIAN,
+        .pmuxcr_offset = 0x40C,
+        .pmuxcr_set_bit = 0x10,
+};
+
+static struct pinmux_cfg ls1046a_pinmux_cfg = {
+        .endian = BIG_ENDIAN,
+        .pmuxcr_offset = 0x40C,
+        .pmuxcr_set_bit = 0x80000000,
+};
+
 static const struct of_device_id pinmux_of_match[] = {
         { .compatible = "fsl,ls1012a-vf610-i2c", .data = &ls1012a_pinmux_cfg},
         { .compatible = "fsl,ls1043a-vf610-i2c", .data = &ls1043a_pinmux_cfg},
@@ -236,9 +265,7 @@ struct imx_i2c_struct {
 	int			pmuxcr_set;
 	int			pmuxcr_endian;
 	void __iomem		*pmuxcr_addr;
-#if IS_ENABLED(CONFIG_I2C_SLAVE)
 	struct i2c_client	*slave;
-#endif
 };
 
 static const struct imx_i2c_hwdata imx1_i2c_hwdata = {
@@ -340,8 +367,8 @@ static void i2c_imx_reset_regs(struct imx_i2c_struct *i2c_imx)
 }
 
 /* Functions for DMA support */
-static void i2c_imx_dma_request(struct imx_i2c_struct *i2c_imx,
-						dma_addr_t phy_addr)
+static int i2c_imx_dma_request(struct imx_i2c_struct *i2c_imx,
+			       dma_addr_t phy_addr)
 {
 	struct imx_i2c_dma *dma;
 	struct dma_slave_config dma_sconfig;
@@ -350,7 +377,7 @@ static void i2c_imx_dma_request(struct imx_i2c_struct *i2c_imx,
 
 	dma = devm_kzalloc(dev, sizeof(*dma), GFP_KERNEL);
 	if (!dma)
-		return;
+		return -ENOMEM;
 
 	dma->chan_tx = dma_request_chan(dev, "tx");
 	if (IS_ERR(dma->chan_tx)) {
@@ -395,7 +422,7 @@ static void i2c_imx_dma_request(struct imx_i2c_struct *i2c_imx,
 	dev_info(dev, "using %s (tx) and %s (rx) for DMA transfers\n",
 		dma_chan_name(dma->chan_tx), dma_chan_name(dma->chan_rx));
 
-	return;
+	return 0;
 
 fail_rx:
 	dma_release_channel(dma->chan_rx);
@@ -403,6 +430,8 @@ fail_tx:
 	dma_release_channel(dma->chan_tx);
 fail_al:
 	devm_kfree(dev, dma);
+
+	return ret;
 }
 
 static void i2c_imx_dma_callback(void *arg)
@@ -485,6 +514,14 @@ static void i2c_imx_clear_irq(struct imx_i2c_struct *i2c_imx, unsigned int bits)
 	 */
 	temp = ~i2c_imx->hwdata->i2sr_clr_opcode ^ bits;
 	imx_i2c_write_reg(temp, i2c_imx, IMX_I2C_I2SR);
+}
+
+/* Clear arbitration lost bit */
+static void i2c_imx_clr_al_bit(unsigned int status, struct imx_i2c_struct *i2c_imx)
+{
+       status &= ~I2SR_IAL;
+       status |= (i2c_imx->hwdata->i2sr_clr_opcode & I2SR_IAL);
+       imx_i2c_write_reg(status, i2c_imx, IMX_I2C_I2SR);
 }
 
 static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy, bool atomic)
@@ -720,14 +757,6 @@ static void i2c_imx_clr_if_bit(unsigned int status, struct imx_i2c_struct *i2c_i
 	status &= ~I2SR_IIF;
 	status |= (i2c_imx->hwdata->i2sr_clr_opcode & I2SR_IIF);
 	imx_i2c_write_reg(status, i2c_imx, IMX_I2C_I2SR);
-}
-
-/* Clear arbitration lost bit */
-static void i2c_imx_clr_al_bit(unsigned int status, struct imx_i2c_struct *i2c_imx)
-{
-       status &= ~I2SR_IAL;
-       status |= (i2c_imx->hwdata->i2sr_clr_opcode & I2SR_IAL);
-       imx_i2c_write_reg(status, i2c_imx, IMX_I2C_I2SR);
 }
 
 static irqreturn_t i2c_imx_master_isr(struct imx_i2c_struct *i2c_imx)
@@ -1192,49 +1221,21 @@ fail0:
 }
 
 static int i2c_imx_xfer(struct i2c_adapter *adapter,
-			struct i2c_msg *msgs, int num)
+                        struct i2c_msg *msgs, int num)
 {
-	struct imx_i2c_struct *i2c_imx = i2c_get_adapdata(adapter);
-	int result;
-	bool enable_runtime_pm = false;
+        struct imx_i2c_struct *i2c_imx = i2c_get_adapdata(adapter);
+        int result;
 
-	if (!pm_runtime_enabled(i2c_imx->adapter.dev.parent)) {
-		pm_runtime_enable(i2c_imx->adapter.dev.parent);
-		enable_runtime_pm = true;
-	}
+        result = pm_runtime_get_sync(i2c_imx->adapter.dev.parent);
+        if (result < 0)
+                return result;
 
-	/*
-	* workround for ERR010027: ensure that the I2C BUS is idle
-	* before switching to master mode and attempting a Start cycle
-	*/
-	result =  i2c_imx_bus_busy(i2c_imx, 0);
-	if (result) {
-		/* timeout */
-		if ((result == -ETIMEDOUT) && (i2c_imx->layerscape_bus_recover == 1))
-			i2c_imx_recovery_for_layerscape(i2c_imx);
-		else
-			goto out;
-	}
+        result = i2c_imx_xfer_common(adapter, msgs, num, false);
 
-	result = pm_runtime_get_sync(i2c_imx->adapter.dev.parent);
-	if (result < 0)
-		goto out;
+        pm_runtime_mark_last_busy(i2c_imx->adapter.dev.parent);
+        pm_runtime_put_autosuspend(i2c_imx->adapter.dev.parent);
 
-	result = i2c_imx_xfer_common(adapter, msgs, num, false);
-
-	pm_runtime_mark_last_busy(i2c_imx->adapter.dev.parent);
-	pm_runtime_put_autosuspend(i2c_imx->adapter.dev.parent);
-
-	return result;
-
-out:
-        if (enable_runtime_pm)
-                pm_runtime_disable(i2c_imx->adapter.dev.parent);
-
-        dev_dbg(&i2c_imx->adapter.dev, "<%s> exit with: %s: %d\n", __func__,
-                (result < 0) ? "error" : "success msg",
-                        (result < 0) ? result : num);
-        return (result < 0) ? result : num;
+        return result;
 }
 
 static int i2c_imx_xfer_atomic(struct i2c_adapter *adapter,
@@ -1369,7 +1370,6 @@ static u32 i2c_imx_func(struct i2c_adapter *adapter)
 		| I2C_FUNC_SMBUS_READ_BLOCK_DATA;
 }
 
-#if IS_ENABLED(CONFIG_I2C_SLAVE)
 static int i2c_imx_slave_init(struct imx_i2c_struct *i2c_imx)
 {
        int temp;
@@ -1659,11 +1659,14 @@ static int i2c_imx_probe(struct platform_device *pdev)
 		i2c_imx->adapter.name);
 	dev_info(&i2c_imx->adapter.dev, "IMX I2C adapter registered\n");
 
-	/* Init DMA config if supported */
-	i2c_imx_dma_request(i2c_imx, phy_addr);
+	ret = i2c_imx_dma_request(i2c_imx, phy_addr);
+        if (ret == -EPROBE_DEFER)
+               goto i2c_adapter_remove;
 
 	return 0;   /* Return OK */
 
+i2c_adapter_remove:
+	i2c_del_adapter(&i2c_imx->adapter);
 clk_notifier_unregister:
 	clk_notifier_unregister(i2c_imx->clk, &i2c_imx->clk_change_nb);
 	free_irq(irq, i2c_imx);
