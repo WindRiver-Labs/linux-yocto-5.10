@@ -1687,6 +1687,9 @@ match:
 				}
 			}
 
+			dai_link->dpcm_playback = 1;
+			dai_link->dpcm_capture = 1;
+
 			/*
 			 * override any BE fixups
 			 * see
