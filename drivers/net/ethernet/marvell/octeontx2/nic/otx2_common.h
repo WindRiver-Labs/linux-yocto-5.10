@@ -717,5 +717,6 @@ int otx2_prepare_flow_request(struct ethtool_rx_flow_spec *fsp,
 int otx2smqvf_probe(struct otx2_nic *vf);
 int otx2smqvf_remove(struct otx2_nic *vf);
 int otx2_enable_rxvlan(struct otx2_nic *pf, bool enable);
+int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);
 
 #endif /* OTX2_COMMON_H */
