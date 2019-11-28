@@ -90,6 +90,8 @@ static int sof_of_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	/* TODO: replace machine with info from DT */
+	sof_pdata->machine = NULL;
 	sof_pdata->desc = desc;
 	sof_pdata->dev = &pdev->dev;
 	sof_pdata->fw_filename = desc->default_fw_filename;
