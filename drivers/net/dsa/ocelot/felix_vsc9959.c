@@ -1365,6 +1365,7 @@ static const struct felix_info felix_info_vsc9959 = {
 	.num_ports		= 6,
 	.num_tx_queues		= FELIX_NUM_TC,
 	.switch_pci_bar		= 4,
+	.quirks                 = OCELOT_PCS_PERFORMS_RATE_ADAPTATION,
 	.imdio_pci_bar		= 0,
 	.ptp_caps		= &vsc9959_ptp_caps,
 	.mdio_bus_alloc		= vsc9959_mdio_bus_alloc,
