@@ -1453,6 +1453,20 @@ int ocelot_get_max_mtu(struct ocelot *ocelot, int port)
 }
 EXPORT_SYMBOL(ocelot_get_max_mtu);
 
+/* Entry for PTP over Ethernet (etype 0x88f7)
+ * Action: trap to CPU port
+ */
+static struct ocelot_ace_rule ptp_rule = {
+       .prio           = 1,
+       .type           = OCELOT_ACE_TYPE_ETYPE,
+       .dmac_mc        = OCELOT_VCAP_BIT_1,
+       .action         = OCELOT_ACL_ACTION_TRAP,
+       .frame.etype.etype.value[0]     = 0x88,
+       .frame.etype.etype.value[1]     = 0xf7,
+       .frame.etype.etype.mask[0]      = 0xff,
+       .frame.etype.etype.mask[1]      = 0xff,
+};
+
 void ocelot_init_port(struct ocelot *ocelot, int port)
 {
 	struct ocelot_port *ocelot_port = ocelot->ports[port];
@@ -1672,6 +1686,13 @@ int ocelot_init(struct ocelot *ocelot)
 	queue_delayed_work(ocelot->stats_queue, &ocelot->stats_work,
 			   OCELOT_STATS_CHECK_DELAY);
 
+	/* Available on all ingress port except CPU port */
+               ptp_rule.ocelot = ocelot;
+               ptp_rule.ingress_port_mask =
+                       GENMASK(ocelot->num_phys_ports - 1, 0);
+               ptp_rule.ingress_port_mask &= ~BIT(ocelot->cpu);
+               ocelot_ace_rule_offload_add(&ptp_rule);
+
 	return 0;
 }
 EXPORT_SYMBOL(ocelot_init);
@@ -1681,6 +1702,8 @@ void ocelot_deinit(struct ocelot *ocelot)
 	cancel_delayed_work(&ocelot->stats_work);
 	destroy_workqueue(ocelot->stats_queue);
 	mutex_destroy(&ocelot->stats_lock);
+	if (ocelot->ptp)
+		ocelot_ace_rule_offload_del(&ptp_rule);
 }
 EXPORT_SYMBOL(ocelot_deinit);
 
