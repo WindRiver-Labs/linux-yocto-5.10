@@ -9,3 +9,5 @@ mscc_felix-objs := \
 mscc_seville-objs := \
 	felix.o \
 	seville_vsc9953.o
+
+obj-$(CONFIG_MSCC_FELIX_SWITCH_TSN) += felix_tsn.o
