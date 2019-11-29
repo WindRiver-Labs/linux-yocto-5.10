@@ -22,6 +22,7 @@
 #include <soc/mscc/ocelot_dev.h>
 #include <soc/mscc/ocelot_ana.h>
 #include <soc/mscc/ocelot_ptp.h>
+#include "ocelot_dev_gmii.h"
 #include <soc/mscc/ocelot.h>
 #include "ocelot_rew.h"
 #include "ocelot_qs.h"
@@ -31,6 +32,8 @@
 #define OCELOT_STATS_CHECK_DELAY (2 * HZ)
 
 #define OCELOT_PTP_QUEUE_SZ	128
+
+#define PGID_MCRED   (PGID_AGGR - 25)
 
 struct frame_info {
 	u32 len;
