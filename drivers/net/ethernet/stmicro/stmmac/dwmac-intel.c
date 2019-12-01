@@ -664,7 +664,6 @@ static int ehl_common_data(struct pci_dev *pdev,
 	plat->rx_queues_to_use = 8;
 	plat->tx_queues_to_use = 8;
 	plat->has_safety_feat = 1;
-	plat->clk_ptp_rate = 200000000;
 	plat->use_phy_wol = 1;
 
 	plat->safety_feat_cfg->tsoee = 1;
@@ -685,6 +684,10 @@ static int ehl_sgmii_data(struct pci_dev *pdev,
 {
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
+
+	/* Set PTP clock rate for EHL as 200MHz */
+	plat->clk_ptp_rate = 204860000;
+
 	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
@@ -702,6 +705,9 @@ static int ehl_rgmii_data(struct pci_dev *pdev,
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_RGMII;
 
+	/* Set PTP clock rate for EHL as 200MHz */
+	plat->clk_ptp_rate = 200000000;
+
 	return ehl_common_data(pdev, plat);
 }
 
@@ -717,6 +723,8 @@ static int ehl_pse0_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 2;
 	plat->addr64 = 32;
+
+	plat->clk_ptp_rate = 200000000;
 
 	/* store A2H packets in L2 SRAM, access through BAR0 + 128KB */
 #ifdef CONFIG_STMMAC_NETWORK_PROXY
@@ -763,6 +771,8 @@ static int ehl_pse1_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 3;
 	plat->addr64 = 32;
+
+	plat->clk_ptp_rate = 200000000;
 
 	/* store A2H packets in L2 SRAM, access through BAR0 + 128KB */
 #ifdef CONFIG_STMMAC_NETWORK_PROXY
