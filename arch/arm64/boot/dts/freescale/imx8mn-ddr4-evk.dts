@@ -5,6 +5,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/usb/pd.h>
 #include "imx8mn.dtsi"
 #include "imx8mn-evk.dtsi"
 
@@ -564,6 +565,12 @@
                         MX8MN_IOMUXC_SD1_STROBE_GPIO2_IO11      0x159
                 >;
         };
+
+	pinctrl_typec1: typec1grp {
+		fsl,pins = <
+			MX8MN_IOMUXC_SD1_STROBE_GPIO2_IO11      0x159
+		>;
+	};
 
 	pinctrl_reg_usdhc2_vmmc: regusdhc2vmmc {
                 fsl,pins = <
