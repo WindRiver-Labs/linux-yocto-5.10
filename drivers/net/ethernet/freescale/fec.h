@@ -16,8 +16,16 @@
 
 #include <linux/clocksource.h>
 #include <linux/net_tstamp.h>
+#include <linux/pm_qos.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
+#include <linux/busfreq-imx.h>
+
+#ifdef CONFIG_IMX_SCU_SOC
+#include <dt-bindings/firmware/imx/rsrc.h>
+#include <linux/firmware/imx/ipc.h>
+#include <linux/firmware/imx/svc/misc.h>
+#endif
 
 #if defined(CONFIG_M523x) || defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
     defined(CONFIG_M520x) || defined(CONFIG_M532x) || defined(CONFIG_ARM) || \
@@ -474,12 +482,20 @@ struct bufdesc_ex {
  * clocks to generate 2ns delay.
  */
 #define FEC_QUIRK_DELAYED_CLKS_SUPPORT (1 << 18)
+/* request pmqos during low power */
+#define FEC_QUIRK_HAS_PMQOS            (1 << 19)
 
 /* Some FEC hardware blocks need the MMFR cleared at setup time to avoid
  * the generation of an MII event. This must be avoided in the older
  * FEC blocks where it will stop MII events being generated.
  */
 #define FEC_QUIRK_CLEAR_SETUP_MII	(1 << 17)
+
+struct fec_enet_stop_mode {
+        struct regmap *gpr;
+        u8 req_gpr;
+        u8 req_bit;
+};
 
 struct bufdesc_prop {
 	int qid;
@@ -571,6 +587,7 @@ struct fec_enet_private {
 	bool	bufdesc_ex;
 	int	pause_flag;
 	int	wol_flag;
+	int     wake_irq;
 	u32	quirks;
 
 	struct	napi_struct napi;
@@ -591,6 +608,7 @@ struct fec_enet_private {
 	int hwts_tx_en;
 	struct delayed_work time_keep;
 	struct regulator *reg_phy;
+	struct pm_qos_request pm_qos_req;
 	struct fec_stop_mode_gpr stop_gpr;
 
 	unsigned int tx_align;
@@ -617,6 +635,10 @@ struct fec_enet_private {
 	unsigned int reload_period;
 	int pps_enable;
 	unsigned int next_counter;
+	struct fec_enet_stop_mode lpm;
+#ifdef CONFIG_IMX_SCU_SOC
+        struct imx_sc_ipc *ipc_handle;
+#endif
 
 	u64 ethtool_stats[];
 };
