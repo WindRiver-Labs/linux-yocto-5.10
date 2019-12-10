@@ -56,7 +56,7 @@ static int imx_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct dma_chan *chan;
 	int err = 0;
 
-	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 
 	/* return if this is a bufferless transfer e.g.
 	 * codec <--> BT codec or GSM modem -- lg FIXME
@@ -99,21 +99,29 @@ static snd_pcm_uframes_t imx_pcm_pointer(struct snd_pcm_substream *substream)
 	return snd_dmaengine_pcm_pointer(substream);
 }
 
-static void imx_pcm_preallocate_dma_buffer(struct snd_pcm_substream *substream,
-	struct device *dev)
+static int imx_pcm_preallocate_dma_buffer(struct snd_pcm_substream *substream,
+					  struct device *dev)
 {
 	size_t size = imx_pcm_hardware.buffer_bytes_max;
+	int ret;
 
-	snd_pcm_lib_preallocate_pages(substream,
-				SNDRV_DMA_TYPE_DEV_IRAM,
-				dev,
-				size,
-				size);
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV_IRAM,
+				  dev,
+				  size,
+				  &substream->dma_buffer);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void imx_pcm_free_dma_buffers(struct snd_pcm_substream *substream)
 {
-	snd_pcm_lib_preallocate_free(substream);
+	if (substream) {
+		snd_dma_free_pages(&substream->dma_buffer);
+		substream->dma_buffer.area = NULL;
+		substream->dma_buffer.addr = 0;
+	}
 }
 
 static int imx_pcm_open(struct snd_pcm_substream *substream)
@@ -128,13 +136,13 @@ static int imx_pcm_open(struct snd_pcm_substream *substream)
 	int ret;
 	int i;
 
-	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 
 	/* DT boot: filter_data is the DMA name */
-	if (rtd->cpu_dai->dev->of_node) {
+	if (asoc_rtd_to_cpu(rtd, 0)->dev->of_node) {
 		struct dma_chan *chan;
 
-		chan = dma_request_slave_channel(rtd->cpu_dai->dev,
+		chan = dma_request_slave_channel(asoc_rtd_to_cpu(rtd, 0)->dev,
 						 dma_data->chan_name);
 		ret = snd_dmaengine_pcm_open(substream, chan);
 		if (ret)
@@ -202,7 +210,9 @@ static int imx_pcm_open(struct snd_pcm_substream *substream)
 
 	snd_soc_set_runtime_hwparams(substream, &imx_pcm_hardware);
 
-	imx_pcm_preallocate_dma_buffer(substream, chan->device->dev);
+	ret = imx_pcm_preallocate_dma_buffer(substream, chan->device->dev);
+	if (ret)
+		return ret;
 
 	ret = snd_pcm_hw_constraint_integer(substream->runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
@@ -255,8 +265,6 @@ static int imx_pcm_new(struct snd_soc_pcm_runtime *rtd)
 
 static struct snd_soc_component_driver imx_soc_platform = {
 	.name           = "imx-pcm-dma-v2",
-	.ops		= &imx_pcm_ops,
-	.pcm_new	= imx_pcm_new,
 };
 
 int imx_pcm_platform_register(struct device *dev)
