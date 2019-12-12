@@ -637,32 +637,6 @@ static void esdhc_flush_async_fifo(struct sdhci_host *host)
 	}
 }
 
-static void esdhc_flush_async_fifo(struct sdhci_host *host)
-{
-	ktime_t timeout;
-	u32 val;
-
-	val = sdhci_readl(host, ESDHC_DMA_SYSCTL);
-	val |= ESDHC_FLUSH_ASYNC_FIFO;
-	sdhci_writel(host, val, ESDHC_DMA_SYSCTL);
-
-	/* Wait max 20 ms */
-	timeout = ktime_add_ms(ktime_get(), 20);
-	while (1) {
-		bool timedout = ktime_after(ktime_get(), timeout);
-
-		if (!(sdhci_readl(host, ESDHC_DMA_SYSCTL) &
-		      ESDHC_FLUSH_ASYNC_FIFO))
-			break;
-		if (timedout) {
-			pr_err("%s: flushing asynchronous FIFO timeout.\n",
-				mmc_hostname(host->mmc));
-			break;
-		}
-		usleep_range(10, 20);
-	}
-}
-
 static void esdhc_of_set_clock(struct sdhci_host *host, unsigned int clock)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -1008,44 +982,60 @@ static void esdhc_tuning_window_ptr(struct sdhci_host *host, u8 *window_start,
 	/* Read the TBSTAT[31:0] register twice */
 	val = sdhci_readl(host, ESDHC_TBSTAT);
 	val = sdhci_readl(host, ESDHC_TBSTAT);
-
-	*window_end = val & 0xff;
-	*window_start = (val >> 8) & 0xff;
 }
 
 static void esdhc_prepare_sw_tuning(struct sdhci_host *host, u8 *window_start,
-				    u8 *window_end)
+                                    u8 *window_end)
 {
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_esdhc *esdhc = sdhci_pltfm_priv(pltfm_host);
-	u8 start_ptr, end_ptr;
+        struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+        struct sdhci_esdhc *esdhc = sdhci_pltfm_priv(pltfm_host);
+        u8 tbstat_15_8, tbstat_7_0;
+        u32 val;
 
-	if (esdhc->quirk_tuning_erratum_type1) {
-		*window_start = 5 * esdhc->div_ratio;
-		*window_end = 3 * esdhc->div_ratio;
-		return;
-	}
+        if (esdhc->quirk_tuning_erratum_type1) {
+                *window_start = 5 * esdhc->div_ratio;
+                *window_end = 3 * esdhc->div_ratio;
+                return;
+        }
 
-	esdhc_tuning_window_ptr(host, &start_ptr, &end_ptr);
+        /* Write TBCTL[11:8]=4'h8 */
+        val = sdhci_readl(host, ESDHC_TBCTL);
+        val &= ~(0xf << 8);
+        val |= 8 << 8;
+        sdhci_writel(host, val, ESDHC_TBCTL);
 
-	/* Reset data lines by setting ESDHCCTL[RSTD] */
-	sdhci_reset(host, SDHCI_RESET_DATA);
-	/* Write 32'hFFFF_FFFF to IRQSTAT register */
-	sdhci_writel(host, 0xFFFFFFFF, SDHCI_INT_STATUS);
+        mdelay(1);
 
-	/* If TBSTAT[15:8]-TBSTAT[7:0] > (4 * div_ratio) + 2
-	 * or TBSTAT[7:0]-TBSTAT[15:8] > (4 * div_ratio) + 2,
-	 * then program TBPTR[TB_WNDW_END_PTR] = 4 * div_ratio
-	 * and program TBPTR[TB_WNDW_START_PTR] = 8 * div_ratio.
-	 */
+        /* Read TBCTL[31:0] register and rewrite again */
+        val = sdhci_readl(host, ESDHC_TBCTL);
+        sdhci_writel(host, val, ESDHC_TBCTL);
 
-	if (abs(start_ptr - end_ptr) > (4 * esdhc->div_ratio + 2)) {
-		*window_start = 8 * esdhc->div_ratio;
-		*window_end = 4 * esdhc->div_ratio;
-	} else {
-		*window_start = 5 * esdhc->div_ratio;
-		*window_end = 3 * esdhc->div_ratio;
-	}
+        mdelay(1);
+
+        /* Read the TBSTAT[31:0] register twice */
+        val = sdhci_readl(host, ESDHC_TBSTAT);
+        val = sdhci_readl(host, ESDHC_TBSTAT);
+
+        /* Reset data lines by setting ESDHCCTL[RSTD] */
+        sdhci_reset(host, SDHCI_RESET_DATA);
+        /* Write 32'hFFFF_FFFF to IRQSTAT register */
+        sdhci_writel(host, 0xFFFFFFFF, SDHCI_INT_STATUS);
+
+        /* If TBSTAT[15:8]-TBSTAT[7:0] > 4 * div_ratio
+         * or TBSTAT[7:0]-TBSTAT[15:8] > 4 * div_ratio,
+         * then program TBPTR[TB_WNDW_END_PTR] = 4 * div_ratio
+         * and program TBPTR[TB_WNDW_START_PTR] = 8 * div_ratio.
+         */
+        tbstat_7_0 = val & 0xff;
+        tbstat_15_8 = (val >> 8) & 0xff;
+
+        if (abs(tbstat_15_8 - tbstat_7_0) > (4 * esdhc->div_ratio)) {
+                *window_start = 8 * esdhc->div_ratio;
+                *window_end = 4 * esdhc->div_ratio;
+        } else {
+                *window_start = 5 * esdhc->div_ratio;
+                *window_end = 3 * esdhc->div_ratio;
+        }
 }
 
 static int esdhc_execute_sw_tuning(struct mmc_host *mmc, u32 opcode,
