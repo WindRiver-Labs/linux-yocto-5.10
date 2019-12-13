@@ -295,6 +295,7 @@
                 port {
                         adv7535_from_dsim: endpoint {
                                 remote-endpoint = <&dsim_to_adv7535>;
+				attach-bridge;
                         };
                 };
         };
