@@ -182,6 +182,20 @@
         };
 };
 
+&lcdif {
+       status = "okay";
+};
+
+&mipi_dsi {
+       status = "okay";
+
+       port@1 {
+               dsim_to_adv7535: endpoint {
+                       remote-endpoint = <&adv7535_from_dsim>;
+               };
+       };
+};
+
 &A53_0 {
 	/delete-property/operating-points-v2;
 };
