@@ -2095,6 +2095,7 @@ pl022_platform_data_dt_get(struct device *dev)
 	struct device_node *np = dev->of_node;
 	struct pl022_ssp_controller *pd;
 	u32 tmp = 0;
+	int ret = -1;
 
 	if (!np) {
 		dev_err(dev, "no dt node defined\n");
@@ -2106,7 +2107,17 @@ pl022_platform_data_dt_get(struct device *dev)
 		return NULL;
 
 	pd->bus_id = -1;
-	pd->enable_dma = 1;
+
+	/*
+	 * If the dma property is not valid assume dma is enabled, as code
+	 * was before.
+	 */
+	ret = of_property_read_u32(np, "enable-dma", &tmp);
+	if (ret == 0)
+		pd->enable_dma = tmp;
+	else
+		pd->enable_dma = 1;
+
 	of_property_read_u32(np, "num-cs", &tmp);
 	pd->num_chipselect = tmp;
 	of_property_read_u32(np, "pl022,autosuspend-delay",
