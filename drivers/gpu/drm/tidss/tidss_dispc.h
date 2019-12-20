@@ -84,6 +84,7 @@ struct dispc_features {
 	bool vid_lite[TIDSS_MAX_PLANES];
 	u32 vid_order[TIDSS_MAX_PLANES];
 	bool has_writeback;
+	const char *wb_name; /* Should match dt reg names */
 };
 
 extern const struct dispc_features dispc_k2g_feats;
