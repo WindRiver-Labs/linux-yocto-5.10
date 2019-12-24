@@ -741,6 +741,10 @@
         status = "okay";
 };
 
+&pgc_vpu {
+       power-supply = <&sw1c_reg>;
+};
+
 &snvs_pwrkey {
 	status = "okay";
 };
@@ -1182,7 +1186,6 @@
 };
 
 &vpu {
-	regulator-supply = <&sw1c_reg>;
 	status = "okay";
 };
 
