@@ -128,8 +128,8 @@ static int fsl_easrc_dma_hw_params(struct snd_pcm_substream *substream,
 	struct snd_dmaengine_dai_dma_data *dma_params_fe = NULL;
 	struct snd_dmaengine_dai_dma_data *dma_params_be = NULL;
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct fsl_easrc_context *ctx = runtime->private_data;
-	struct fsl_easrc *easrc = ctx->easrc;
+	struct fsl_asrc_pair *ctx = runtime->private_data;
+	struct fsl_asrc *easrc = ctx->asrc;
 	struct dma_slave_config config_fe, config_be;
 	enum asrc_pair_index index = ctx->index;
 	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
@@ -142,13 +142,14 @@ static int fsl_easrc_dma_hw_params(struct snd_pcm_substream *substream,
 	u8 dir = tx ? OUT : IN;
 	dma_cap_mask_t mask;
 	enum sdma_peripheral_type be_peripheral_type;
+	struct device_node *of_dma_node;
 	int ret;
 
 	/* Fetch the Back-End dma_data from DPCM */
 	list_for_each_entry(dpcm, &rtd->dpcm[stream].be_clients, list_be) {
 		struct snd_soc_pcm_runtime *be = dpcm->be;
 		struct snd_pcm_substream *substream_be;
-		struct snd_soc_dai *dai = be->cpu_dai;
+		struct snd_soc_dai *dai = asoc_rtd_to_cpu(be, 0);
 
 		if (dpcm->fe != rtd)
 			continue;
@@ -165,7 +166,7 @@ static int fsl_easrc_dma_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* Override dma_data of the Front-End and config its dmaengine */
-	dma_params_fe = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_params_fe = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 	dma_params_fe->addr = easrc->paddr + REG_EASRC_FIFO(!dir, index);
 	dma_params_fe->maxburst = dma_params_be->maxburst;
 
@@ -189,6 +190,7 @@ static int fsl_easrc_dma_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
+	of_dma_node = ctx->dma_chan[!dir]->device->dev->of_node;
 	/* Request and config DMA channel for Back-End */
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
@@ -228,7 +230,8 @@ static int fsl_easrc_dma_hw_params(struct snd_pcm_substream *substream,
 	 */
 	if (ctx->dma_data.dma_request2 != ctx->dma_data.dma_request)
 		ctx->dma_chan[dir] =
-			dma_request_channel(mask, filter, &ctx->dma_data);
+			__dma_request_channel(&mask, filter, &ctx->dma_data,
+						of_dma_node);
 	else
 		ctx->dma_chan[dir] =
 			dma_request_slave_channel(dev_be, tx ? "tx" : "rx");
@@ -295,8 +298,8 @@ static int fsl_easrc_dma_startup(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct device *dev = component->dev;
-	struct fsl_easrc *easrc = dev_get_drvdata(dev);
-	struct fsl_easrc_context *ctx;
+	struct fsl_asrc *easrc = dev_get_drvdata(dev);
+	struct fsl_asrc_pair *ctx;
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	u8 dir = tx ? OUT : IN;
 	struct dma_slave_caps dma_caps;
@@ -312,7 +315,7 @@ static int fsl_easrc_dma_startup(struct snd_pcm_substream *substream)
 	if (!ctx)
 		return -ENOMEM;
 
-	ctx->easrc = easrc;
+	ctx->asrc = easrc;
 
 	runtime->private_data = ctx;
 
@@ -323,7 +326,7 @@ static int fsl_easrc_dma_startup(struct snd_pcm_substream *substream)
 		return ret;
 	}
 
-	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 
 	fsl_easrc_request_context(ctx, 1);
 
@@ -486,8 +489,5 @@ static void fsl_easrc_dma_pcm_free(struct snd_pcm *pcm)
 
 struct snd_soc_component_driver fsl_easrc_dma_component = {
 	.name		= DRV_NAME,
-	.ops		= &fsl_easrc_dma_pcm_ops,
-	.pcm_new	= fsl_easrc_dma_pcm_new,
-	.pcm_free	= fsl_easrc_dma_pcm_free,
 };
 EXPORT_SYMBOL_GPL(fsl_easrc_dma_component);
