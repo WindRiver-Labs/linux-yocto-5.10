@@ -105,7 +105,6 @@
 
 &qspi {
 	status = "okay";
-	fsl,qspi-has-second-chip;
 
 	s25fs512s0: flash@0 {
 		compatible = "jedec,spi-nor";
