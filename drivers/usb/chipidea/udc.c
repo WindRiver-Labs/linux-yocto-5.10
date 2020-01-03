@@ -1680,10 +1680,6 @@ static int ci_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
 	ci->vbus_active = is_active;
 	spin_unlock_irqrestore(&ci->lock, flags);
 
-	if (ci->usb_phy)
-		usb_phy_set_charger_state(ci->usb_phy, is_active ?
-			USB_CHARGER_PRESENT : USB_CHARGER_ABSENT);
-
 	if (ci->platdata->notify_event)
 		ret = ci->platdata->notify_event(ci,
 				CI_HDRC_CONTROLLER_VBUS_EVENT);
@@ -1691,10 +1687,10 @@ static int ci_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
 	if (ci->driver)
 		ci_hdrc_gadget_connect(_gadget, is_active);
 
-	/* Charger Detection */
-	ci_usb_charger_connect(ci, is_active);
-
 	if (ci->usb_phy) {
+		/* Charger Detection */
+		ci_usb_charger_connect(ci, is_active);
+
 		if (is_active)
 			usb_phy_set_event(ci->usb_phy, USB_EVENT_VBUS);
 		else
