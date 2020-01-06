@@ -8,7 +8,7 @@
 #include <soc/mscc/ocelot_vcap.h>
 #include "ocelot.h"
 #include "ocelot_vcap.h"
-#include <linux/phylink.h>
+#include <linux/phy.h>
 
 #define TABLE_UPDATE_SLEEP_US 10
 #define TABLE_UPDATE_TIMEOUT_US 100000
@@ -427,35 +427,8 @@ int ocelot_port_flush(struct ocelot *ocelot, int port)
 }
 EXPORT_SYMBOL(ocelot_port_flush);
 
-void ocelot_phylink_validate(struct ocelot *ocelot, int port,
-                            unsigned long *supported,
-                            struct phylink_link_state *state)
-{
-	if (ocelot->ops->pcs_validate)
-		ocelot->ops->pcs_validate(ocelot, port, supported, state);
-}
-EXPORT_SYMBOL(ocelot_phylink_validate);
-
-void ocelot_phylink_mac_pcs_get_state(struct ocelot *ocelot, int port,
-                                     struct phylink_link_state *state)
-{
-	if (ocelot->ops->pcs_link_state)
-               ocelot->ops->pcs_link_state(ocelot, port, state);
-       else
-               state->link = 1;
-}
-EXPORT_SYMBOL(ocelot_phylink_mac_pcs_get_state);
-
-void ocelot_phylink_mac_an_restart(struct ocelot *ocelot, int port)
-{
-	if (ocelot->ops->pcs_an_restart)
-		ocelot->ops->pcs_an_restart(ocelot, port);
-}
-EXPORT_SYMBOL(ocelot_phylink_mac_an_restart);
-
-void ocelot_phylink_mac_config(struct ocelot *ocelot, int port,
-                              unsigned int link_an_mode,
-                              const struct phylink_link_state *state)
+void ocelot_adjust_link(struct ocelot *ocelot, int port,
+                       struct phy_device *phydev)
 {
 	int speed, mac_speed, mac_mode = DEV_MAC_MODE_CFG_FDX_ENA;
 	struct ocelot_port *ocelot_port = ocelot->ports[port];
@@ -481,10 +454,15 @@ void ocelot_phylink_mac_config(struct ocelot *ocelot, int port,
 		mac_mode |= DEV_MAC_MODE_CFG_GIGA_MODE_ENA;
 		break;
 	default:
-		dev_err(ocelot->dev, "Unsupported speed on port %d: %d\n",
+		dev_err(ocelot->dev, "Unsupported PHY speed on port %d: %d\n",
 			port, speed);
 		return;
 	}
+
+	phy_print_status(phydev);
+
+	if (!phydev->link)
+		return;
 
 	/* Only full duplex supported for now */
 	ocelot_port_writel(ocelot_port, mac_mode, DEV_MAC_MODE_CFG);

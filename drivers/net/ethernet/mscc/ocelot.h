@@ -12,7 +12,8 @@
 #include <linux/etherdevice.h>
 #include <linux/if_vlan.h>
 #include <linux/net_tstamp.h>
-#include <linux/phylink.h>
+#include <linux/phy.h>
+#include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
@@ -47,10 +48,12 @@ struct ocelot_multicast {
 	struct list_head list;
 	unsigned char addr[ETH_ALEN];
 	u16 vid;
-	struct phylink *phylink;
-	struct phylink_config phylink_config;
+	struct phy_device *phy;
 	u16 ports;
 	int pgid;
+
+	phy_interface_t phy_mode;
+	struct phy *serdes;
 };
 
 struct ocelot_port_tc {
