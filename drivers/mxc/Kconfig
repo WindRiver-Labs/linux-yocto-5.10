@@ -8,6 +8,7 @@ if ARM64
 source "drivers/mxc/hantro/Kconfig"
 source "drivers/mxc/hantro_845/Kconfig"
 source "drivers/mxc/hantro_845_h1/Kconfig"
+source "drivers/mxc/hantro_vc8000e/Kconfig"
 source "drivers/mxc/gpu-viv/Kconfig"
 endif
 
