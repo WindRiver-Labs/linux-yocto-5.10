@@ -596,6 +596,8 @@ int rvu_cgx_exit(struct rvu *rvu);
 void *rvu_cgx_pdata(u8 cgx_id, struct rvu *rvu);
 int rvu_cgx_config_rxtx(struct rvu *rvu, u16 pcifunc, bool start);
 void rvu_cgx_enadis_rx_bp(struct rvu *rvu, int pf, bool enable);
+void rvu_cgx_enadis_higig2(struct rvu *rvu, int pf, bool enable);
+bool rvu_cgx_is_higig2_enabled(struct rvu *rvu, int pf);
 void rvu_cgx_disable_dmac_entries(struct rvu *rvu, u16 pcifunc);
 int rvu_cgx_start_stop_io(struct rvu *rvu, u16 pcifunc, bool start);
 int rvu_cgx_nix_cuml_stats(struct rvu *rvu, void *cgxd, int lmac_id, int index,
@@ -629,6 +631,7 @@ void rvu_nix_lf_teardown(struct rvu *rvu, u16 pcifunc, int blkaddr, int npalf);
 int nix_get_nixlf(struct rvu *rvu, u16 pcifunc, int *nixlf, int *nix_blkaddr);
 int nix_update_bcast_mce_list(struct rvu *rvu, u16 pcifunc, bool add);
 void rvu_nix_reset_mac(struct rvu_pfvf *pfvf, int pcifunc);
+bool rvu_nix_is_ptp_tx_enabled(struct rvu *rvu, u16 pcifunc);
 
 /* NPC APIs */
 int rvu_npc_init(struct rvu *rvu);
