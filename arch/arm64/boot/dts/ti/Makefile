@@ -9,7 +9,8 @@
 DTC_FLAGS += -@
 
 dtb-$(CONFIG_ARCH_K3) += k3-am654-base-board.dtb \
-			 k3-am654-gp.dtbo
+			 k3-am654-gp.dtbo \
+			 k3-am654-base-board-jailhouse.dtbo
 
 dtb-$(CONFIG_ARCH_K3) += k3-j721e-common-proc-board.dtb
 
