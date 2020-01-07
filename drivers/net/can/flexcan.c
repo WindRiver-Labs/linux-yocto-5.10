@@ -1412,6 +1412,78 @@ static void flexcan_ram_init(struct net_device *dev)
 	priv->write(reg_ctrl2, &regs->ctrl2);
 }
 
+static void flexcan_init_ram(struct net_device *dev)
+{
+        struct flexcan_priv *priv = netdev_priv(dev);
+        struct flexcan_regs __iomem *regs = priv->regs;
+        u32 reg_ctrl2;
+        int i, size;
+
+        /* CTRL2[WRMFRZ] grants write access to all memory positions that
+         * require initialization. MCR[RFEN] must not be set during FlexCAN
+         * memory initialization.
+         */
+        reg_ctrl2 = priv->read(&regs->ctrl2);
+        reg_ctrl2 |= FLEXCAN_CTRL2_WRMFRZ;
+        priv->write(reg_ctrl2, &regs->ctrl2);
+
+        /* initialize MBs RAM */
+        size = sizeof(regs->mb) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->mb[0][0] + sizeof(u32) * i);
+
+        /* initialize RXIMRs RAM */
+        size = sizeof(regs->rximr) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->rximr[i]);
+
+        /* initialize RXFIRs RAM */
+        size = sizeof(regs->_rxfir) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->_rxfir[i]);
+
+        /* initialize RXMGMASK, RXFGMASK, RX14MASK, RX15MASK RAM */
+        priv->write(0, &regs->_rxmgmask);
+        priv->write(0, &regs->_rxfgmask);
+        priv->write(0, &regs->_rx14mask);
+        priv->write(0, &regs->_rx15mask);
+
+        /* initialize TX_SMB RAM */
+        size = sizeof(regs->tx_smb) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->tx_smb[i]);
+
+        /* initialize RX_SMB0 RAM */
+        size = sizeof(regs->rx_smb0) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->rx_smb0[i]);
+
+        /* initialize RX_SMB1 RAM */
+	size = sizeof(regs->rx_smb1) / sizeof(u32);
+        for (i = 0; i < size; i++)
+                priv->write(0, &regs->rx_smb1[i]);
+
+        if (priv->can.ctrlmode & CAN_CTRLMODE_FD) {
+                /* initialize TX_SMB_FD RAM */
+                size = sizeof(regs->tx_smb_fd) / sizeof(u32);
+                for (i = 0; i < size; i++)
+                        priv->write(0, &regs->tx_smb_fd[i]);
+
+                /* initialize RX_SMB0_FD RAM */
+                size = sizeof(regs->rx_smb0_fd) / sizeof(u32);
+                for (i = 0; i < size; i++)
+                        priv->write(0, &regs->rx_smb0_fd[i]);
+
+                /* initialize RX_SMB1_FD RAM */
+                size = sizeof(regs->rx_smb1_fd) / sizeof(u32);
+                for (i = 0; i < size; i++)
+                        priv->write(0, &regs->rx_smb0_fd[i]);
+        }
+
+        reg_ctrl2 &= ~FLEXCAN_CTRL2_WRMFRZ;
+        priv->write(reg_ctrl2, &regs->ctrl2);
+}
+
 /* flexcan_chip_start
  *
  * this functions is entered with clocks enabled
@@ -1440,6 +1512,9 @@ static int flexcan_chip_start(struct net_device *dev)
 		flexcan_ram_init(dev);
 
 	flexcan_set_bittiming(dev);
+
+	if (priv->devtype_data->quirks & FLEXCAN_QUIRK_DISABLE_MECR)
+		flexcan_init_ram(dev);
 
 	/* MCR
 	 *
