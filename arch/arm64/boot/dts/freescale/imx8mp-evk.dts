@@ -5,6 +5,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/usb/pd.h>
 #include "imx8mp.dtsi"
 
 / {
@@ -55,6 +56,18 @@
                enable-active-high;
         };
 
+	reg_usb1_host_vbus: regulator-usb1-vbus {
+               compatible = "regulator-fixed";
+               regulator-name = "usb1_host_vbus";
+               pinctrl-names = "default";
+               pinctrl-0 = <&pinctrl_usb1_vbus>;
+               regulator-min-microvolt = <5000000>;
+               regulator-max-microvolt = <5000000>;
+               gpio = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+               enable-active-high;
+               regulator-always-on;
+       };
+
 	reg_usdhc2_vmmc: regulator-usdhc2 {
 		compatible = "regulator-fixed";
 		pinctrl-names = "default";
@@ -65,6 +78,20 @@
 		gpio = <&gpio2 19 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
+
+	cbtl04gp {
+               compatible = "nxp,cbtl04gp";
+               pinctrl-names = "default";
+               pinctrl-0 = <&pinctrl_typec_mux>;
+               switch-gpios = <&gpio4 20 GPIO_ACTIVE_LOW>;
+               orientation-switch;
+
+               port {
+                       usb3_data_ss: endpoint {
+                               remote-endpoint = <&typec_con_ss>;
+                       };
+               };
+       };
 
 	tcm@00800000 {
                compatible = "fsl,tcm";
@@ -166,6 +193,10 @@
        };
 };
 
+&clk {
+       init-on-array = <IMX8MP_CLK_HSIO_ROOT>;
+};
+
 &i2c2 {
        clock-frequency = <100000>;
        pinctrl-names = "default";
@@ -185,6 +216,42 @@
                gpio-controller;
                #gpio-cells = <2>;
        };
+};
+
+&usb3_phy0 {
+       status = "okay";
+};
+
+&usb3_0 {
+       status = "okay";
+};
+
+&usb_dwc3_0 {
+       dr_mode = "otg";
+       hnp-disable;
+       srp-disable;
+       adp-disable;
+       usb-role-switch;
+       status = "okay";
+
+       port {
+               usb3_drd_sw: endpoint {
+                       remote-endpoint = <&typec_dr_sw>;
+               };
+       };
+};
+
+&usb3_phy1 {
+       status = "okay";
+};
+
+&usb3_1 {
+       status = "okay";
+};
+
+&usb_dwc3_1 {
+       dr_mode = "host";
+       status = "okay";
 };
 
 &uart1 { /* BT */
@@ -245,6 +312,24 @@
 };
 
 &iomuxc {
+	pinctrl_usb1_vbus: usb1grp {
+               fsl,pins = <
+                       MX8MP_IOMUXC_GPIO1_IO14__GPIO1_IO14     0x19
+               >;
+       };
+
+	pinctrl_typec: typec1grp {
+               fsl,pins = <
+                       MX8MP_IOMUXC_SAI1_TXD7__GPIO4_IO19      0x1c4
+               >;
+       };
+
+       pinctrl_typec_mux: typec1muxgrp {
+               fsl,pins = <
+                       MX8MP_IOMUXC_SAI1_MCLK__GPIO4_IO20      0x16
+               >;
+       };
+
 	pinctrl_pwm1: pwm1grp {
                fsl,pins = <
                        MX8MP_IOMUXC_GPIO1_IO01__PWM1_OUT       0x116
