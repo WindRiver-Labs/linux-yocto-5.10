@@ -103,7 +103,11 @@ static const struct dev_pm_ops tidss_pm_ops = {
 
 static void tidss_release(struct drm_device *ddev)
 {
+	struct tidss_device *tidss = ddev->dev_private;
+
 	drm_kms_helper_poll_fini(ddev);
+
+	kfree(tidss);
 }
 
 DEFINE_DRM_GEM_CMA_FOPS(tidss_fops);
@@ -135,17 +139,25 @@ static int tidss_probe(struct platform_device *pdev)
 
 	dev_dbg(dev, "%s\n", __func__);
 
-	tidss = devm_drm_dev_alloc(&pdev->dev, &tidss_driver,
-				   struct tidss_device, ddev);
-	if (IS_ERR(tidss))
-		return PTR_ERR(tidss);
+	/* Can't use devm_* since drm_device's lifetime may exceed dev's */
+	tidss = kzalloc(sizeof(*tidss), GFP_KERNEL);
+	if (!tidss)
+		return -ENOMEM;
 
 	ddev = &tidss->ddev;
+
+	ret = devm_drm_dev_init(&pdev->dev, ddev, &tidss_driver);
+	if (ret) {
+		kfree(ddev);
+		return ret;
+	}
 
 	tidss->dev = dev;
 	tidss->feat = of_device_get_match_data(dev);
 
 	platform_set_drvdata(pdev, tidss);
+
+	ddev->dev_private = tidss;
 
 	ret = dispc_init(tidss);
 	if (ret) {
@@ -183,6 +195,14 @@ static int tidss_probe(struct platform_device *pdev)
 
 	drm_mode_config_reset(ddev);
 
+	if (dispc_has_writeback(tidss->dispc)) {
+		ret = tidss_wb_init(ddev);
+		if (ret)
+			dev_warn(dev, "failed to initialize writeback\n");
+		else
+			tidss->wb_initialized = true;
+	}
+
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		dev_err(dev, "failed to register DRM device\n");
@@ -196,6 +216,9 @@ static int tidss_probe(struct platform_device *pdev)
 	return 0;
 
 err_irq_uninstall:
+	if (tidss->wb_initialized)
+		tidss_wb_cleanup(ddev);
+
 	drm_irq_uninstall(ddev);
 
 err_runtime_suspend:
@@ -216,6 +239,9 @@ static int tidss_remove(struct platform_device *pdev)
 	dev_dbg(dev, "%s\n", __func__);
 
 	drm_dev_unregister(ddev);
+
+	if (tidss->wb_initialized)
+		tidss_wb_cleanup(ddev);
 
 	drm_atomic_helper_shutdown(ddev);
 

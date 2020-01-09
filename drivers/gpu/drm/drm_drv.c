@@ -661,7 +661,7 @@ static void devm_drm_dev_init_release(void *data)
 	drm_dev_put(data);
 }
 
-static int devm_drm_dev_init(struct device *parent,
+int devm_drm_dev_init(struct device *parent,
 			     struct drm_device *dev,
 			     struct drm_driver *driver)
 {
@@ -677,6 +677,8 @@ static int devm_drm_dev_init(struct device *parent,
 
 	return ret;
 }
+EXPORT_SYMBOL(devm_drm_dev_init);
+
 
 void *__devm_drm_dev_alloc(struct device *parent, struct drm_driver *driver,
 			   size_t size, size_t offset)
@@ -864,7 +866,7 @@ int drm_dev_register(struct drm_device *dev, unsigned long flags)
 	if (!driver->load)
 		drm_mode_config_validate(dev);
 
-	WARN_ON(!dev->managed.final_kfree);
+
 
 	if (drm_dev_needs_global_mutex(dev))
 		mutex_lock(&drm_global_mutex);
