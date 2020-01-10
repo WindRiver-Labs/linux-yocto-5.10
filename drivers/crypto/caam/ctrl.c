@@ -800,6 +800,7 @@ iomap_ctrl:
        }
 
        if (!of_machine_is_compatible("fsl,imx8mn") &&
+	   !of_machine_is_compatible("fsl,imx8mp") &&
            !of_machine_is_compatible("fsl,imx8mm") &&
            !of_machine_is_compatible("fsl,imx8mq") &&
            !of_machine_is_compatible("fsl,imx8qm") &&
