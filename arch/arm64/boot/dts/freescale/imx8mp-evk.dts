@@ -869,3 +869,7 @@
 &mix_gpu_ml {
        status = "okay";
 };
+
+&dsp {
+       status = "okay";
+};

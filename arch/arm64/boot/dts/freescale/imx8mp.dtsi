@@ -135,6 +135,11 @@
                        linux,cma-default;
                };
 
+		dsp_reserved: dsp@92400000 {
+                       no-map;
+                       reg = <0 0x92400000 0 0x2000000>;
+               };
+
        };
 
 	osc_32k: clock-osc-32k {
@@ -1508,6 +1513,25 @@
 			interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
 		};
 	};
+
+	dsp: dsp@3b6e8000 {
+                compatible = "fsl,imx8mp-dsp-v1";
+                memory-region = <&dsp_reserved>;
+                reg = <0x0 0x3B6E8000 0x0 0x88000>;
+                clocks = <&audiomix_clk IMX8MP_CLK_AUDIOMIX_OCRAMA_IPG>,
+                         <&audiomix_clk IMX8MP_CLK_AUDIOMIX_DSP_ROOT>,
+                         <&audiomix_clk IMX8MP_CLK_AUDIOMIX_DSPDBG_ROOT>,
+                         <&audiomix_clk IMX8MP_CLK_AUDIOMIX_MU2_ROOT>;
+                clock-names = "ocram", "core", "debug", "mu2";
+                fsl,dsp-firmware = "imx/dsp/hifi4.bin";
+                power-domains = <&audiomix_pd>;
+                mbox-names = "txdb0", "txdb1", "rxdb0", "rxdb1";
+                mboxes = <&mu2 2 0>,
+                        <&mu2 2 1>,
+                        <&mu2 3 0>,
+                        <&mu2 3 1>;
+                status = "disabled";
+        };
 
 	rpmsg: rpmsg{
                compatible = "fsl,imx8mq-rpmsg";
