@@ -7145,6 +7145,14 @@ int stmmac_dvr_probe(struct device *device,
 	if (ret)
 		goto error_hw_init;
 
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	if (priv->plat->has_netproxy) {
+		dev_info(priv->device, "Network Proxy supported\n");
+		device_set_wakeup_capable(priv->device, 1);
+		device_set_wakeup_enable(priv->device, 1);
+	}
+#endif
+
 	/* Only DWMAC core version 5.20 onwards supports HW descriptor prefetch.
 	 */
 	if (priv->synopsys_id < DWMAC_CORE_5_20)
