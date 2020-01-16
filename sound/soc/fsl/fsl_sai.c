@@ -1510,20 +1510,22 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 	num_domains = of_count_phandle_with_args(np, "power-domains",
 						 "#power-domain-cells");
-	for (i = 0; i < num_domains; i++) {
-		struct device *pd_dev;
-		struct device_link *link;
+	if (num_domains > 1) {
+		for (i = 0; i < num_domains; i++) {
+			struct device *pd_dev;
+			struct device_link *link;
 
-		pd_dev = dev_pm_domain_attach_by_id(&pdev->dev, i);
-		if (IS_ERR(pd_dev))
-			return PTR_ERR(pd_dev);
+			pd_dev = dev_pm_domain_attach_by_id(&pdev->dev, i);
+			if (IS_ERR(pd_dev))
+				return PTR_ERR(pd_dev);
 
-		link = device_link_add(&pdev->dev, pd_dev,
-			DL_FLAG_STATELESS |
-			DL_FLAG_PM_RUNTIME |
-			DL_FLAG_RPM_ACTIVE);
-		if (IS_ERR(link))
-			return PTR_ERR(link);
+			link = device_link_add(&pdev->dev, pd_dev,
+				DL_FLAG_STATELESS |
+				DL_FLAG_PM_RUNTIME |
+				DL_FLAG_RPM_ACTIVE);
+			if (IS_ERR(link))
+				return PTR_ERR(link);
+		}
 	}
 
 	sai->pll8k_clk = devm_clk_get(&pdev->dev, "pll8k");
@@ -1627,6 +1629,12 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 		regmap_update_bits(gpr, IOMUXC_GPR1, MCLK_DIR(index),
 				   MCLK_DIR(index));
+	}
+
+	if (of_find_property(np, "fsl,sai-mclk-direction-output", NULL) &&
+	    sai->verid.id >= FSL_SAI_VERID_0301) {
+		regmap_update_bits(sai->regmap, FSL_SAI_MCTL,
+				   FSL_SAI_MCTL_MCLK_EN, FSL_SAI_MCTL_MCLK_EN);
 	}
 
 	sai->dma_params_rx.chan_name = "rx";
