@@ -501,6 +501,7 @@ struct spi_controller {
 	u32			min_speed_hz;
 	u32			max_speed_hz;
 
+#define SPI_MASTER_BOTH_CS	BIT(8)		/* assert both chip selects */
 	/* other constraints relevant to this driver */
 	u16			flags;
 #define SPI_CONTROLLER_HALF_DUPLEX	BIT(0)	/* can't do full duplex */
