@@ -265,7 +265,7 @@ static void dw_pcie_prog_outbound_atu_unroll(struct dw_pcie *pci, u8 func_no,
 	dev_err(pci->dev, "Outbound iATU is not being enabled\n");
 }
 
-static void __dw_pcie_prog_outbound_atu(struct dw_pcie *pci, u8 func_no,
+static int __dw_pcie_prog_outbound_atu(struct dw_pcie *pci, u8 func_no,
 					int index, int type, u64 cpu_addr,
 					u64 pci_addr, u32 size)
 {
@@ -277,7 +277,7 @@ static void __dw_pcie_prog_outbound_atu(struct dw_pcie *pci, u8 func_no,
 	if (pci->iatu_unroll_enabled) {
 		dw_pcie_prog_outbound_atu_unroll(pci, func_no, index, type,
 						 cpu_addr, pci_addr, size);
-		return;
+		return 0;
 	}
 
 	dw_pcie_writel_dbi(pci, PCIE_ATU_VIEWPORT,
@@ -303,11 +303,12 @@ static void __dw_pcie_prog_outbound_atu(struct dw_pcie *pci, u8 func_no,
 	for (retries = 0; retries < LINK_WAIT_MAX_IATU_RETRIES; retries++) {
 		val = dw_pcie_readl_dbi(pci, PCIE_ATU_CR2);
 		if (val & PCIE_ATU_ENABLE)
-			return;
+			return 0;
 
 		mdelay(LINK_WAIT_IATU);
 	}
 	dev_err(pci->dev, "Outbound iATU is not being enabled\n");
+	return -EBUSY;
 }
 
 void dw_pcie_prog_outbound_atu(struct dw_pcie *pci, int index, int type,
