@@ -381,8 +381,15 @@ static inline void otx2_setup_dev_hw_settings(struct otx2_nic *pfvf)
 		pfvf->hw.rq_skid = 600;
 		pfvf->qset.rqe_cnt = Q_COUNT(Q_SIZE_1K);
 	}
-	if (is_96xx_A0(pfvf->pdev))
+	if (is_96xx_A0(pfvf->pdev)) {
 		pfvf->hw.cq_qcount_wait = 0x0;
+
+		/* Due to HW errata there will be frequent stalls on the
+		 * transmit side, instead of disabling set timeout to a
+		 * very high value.
+		 */
+		pfvf->netdev->watchdog_timeo = 10000 * HZ;
+	}
 }
 
 /* Register read/write APIs */
