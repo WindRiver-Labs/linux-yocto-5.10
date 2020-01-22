@@ -427,7 +427,7 @@ static inline struct xdp_frame *cpsw_handle_to_xdpf(void *handle)
 
 int cpsw_init_common(struct cpsw_common *cpsw, void __iomem *ss_regs,
 		     int ale_ageout, phys_addr_t desc_mem_phys,
-		     int descs_pool_size);
+		     int descs_pool_size, int tx_packet_min);
 void cpsw_split_res(struct cpsw_common *cpsw);
 int cpsw_fill_rx_channels(struct cpsw_priv *priv);
 void cpsw_intr_enable(struct cpsw_common *cpsw);
