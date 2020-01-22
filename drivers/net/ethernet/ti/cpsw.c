@@ -498,7 +498,8 @@ static void _cpsw_adjust_link(struct cpsw_slave *slave,
 
 		/* enable forwarding */
 		cpsw_ale_control_set(cpsw->ale, slave_port,
-				     ALE_PORT_STATE, ALE_PORT_STATE_FORWARD);
+				     ALE_PORT_STATE,
+				     priv->port_state[slave_port]);
 
 		*link = true;
 
@@ -611,6 +612,7 @@ static void cpsw_slave_open(struct cpsw_slave *slave, struct cpsw_priv *priv)
 	slave->mac_control = 0;	/* no link yet */
 
 	slave_port = cpsw_get_slave_port(slave->slave_num);
+	priv->port_state[slave_port] = ALE_PORT_STATE_FORWARD;
 
 	if (cpsw->data.dual_emac)
 		cpsw_add_dual_emac_def_ale_entries(priv, slave, slave_port);

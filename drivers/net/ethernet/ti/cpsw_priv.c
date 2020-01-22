@@ -19,6 +19,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/skbuff.h>
 #include <net/page_pool.h>
+#include <linux/net_switch_config.h>
 #include <net/pkt_cls.h>
 
 #include "cpsw.h"
@@ -705,6 +706,8 @@ static int cpsw_hwtstamp_set(struct net_device *dev, struct ifreq *ifr)
 }
 #endif /*CONFIG_TI_CPTS*/
 
+#include "cpsw_switch_ioctl.c"
+
 int cpsw_ndo_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 {
 	struct cpsw_priv *priv = netdev_priv(dev);
@@ -719,6 +722,8 @@ int cpsw_ndo_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 		return cpsw_hwtstamp_set(dev, req);
 	case SIOCGHWTSTAMP:
 		return cpsw_hwtstamp_get(dev, req);
+    case SIOCSWITCHCONFIG:
+		return cpsw_switch_config_ioctl(dev, req, cmd);	
 	}
 
 	if (!cpsw->slaves[slave_no].phy)
