@@ -181,6 +181,10 @@ static ssize_t tmc_read(struct file *file, char __user *data, size_t len,
 	if (actual <= 0)
 		return 0;
 
+	if ((drvdata->etr_options & CSETR_QUIRK_SECURE_BUFF) &&
+ 		tmc_copy_secure_buffer(drvdata, bufp, len))
+ 		return -EFAULT;
+
 	if (copy_to_user(data, bufp, actual)) {
 		dev_dbg(&drvdata->csdev->dev,
 			"%s: copy_to_user failed\n", __func__);
@@ -458,6 +462,9 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	drvdata->base = base;
 
 	spin_lock_init(&drvdata->spinlock);
+
+	/* Enable fixes for Silicon issues */
+	drvdata->etr_options = coresight_get_etr_quirks(OCTEONTX_CN9XXX_ETR);
 
 	devid = readl_relaxed(drvdata->base + CORESIGHT_DEVID);
 	drvdata->config_type = BMVAL(devid, 6, 7);
