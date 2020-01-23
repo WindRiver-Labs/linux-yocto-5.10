@@ -81,6 +81,9 @@
 
 #define is_k2g_pci_dev(pdev)		((pdev)->device == PCI_DEVICE_ID_TI_K2G)
 
+#define is_j721e_pci_dev(pdev)         \
+		((pdev)->device == PCI_DEVICE_ID_TI_J721E)
+
 #define PCI_DEVICE_ID_RENESAS_R8A774A1		0x0028
 #define PCI_DEVICE_ID_RENESAS_R8A774B1		0x002b
 #define PCI_DEVICE_ID_RENESAS_R8A774C0		0x002d
@@ -840,10 +843,9 @@ static int pci_endpoint_test_probe(struct pci_dev *pdev,
 
 	pci_set_master(pdev);
 
-	if (!pci_endpoint_test_alloc_irq_vectors(test, irq_type)) {
-		err = -EINVAL;
-		goto err_disable_irq;
-	}
+	if (!(is_am654_pci_dev(pdev) || is_j721e_pci_dev(pdev))) {
+		if (!pci_endpoint_test_alloc_irq_vectors(test, irq_type))
+			goto err_disable_irq;
 
 	for (bar = 0; bar < PCI_STD_NUM_BARS; bar++) {
 		if (pci_resource_flags(pdev, bar) & IORESOURCE_MEM) {
