@@ -15,3 +15,4 @@ obj-$(CONFIG_TI_K3_UDMA_DESC_POOL)	+= k3-navss-desc-pool.o
 obj-$(CONFIG_TI_K3_SOCINFO)		+= k3-socinfo.o
 obj-$(CONFIG_TI_PRUSS)			+= pruss.o
 obj-$(CONFIG_POWER_AVS_OMAP)		+= smartreflex.o
+obj-$(CONFIG_TI_PAT)			+= ti-pat.o
