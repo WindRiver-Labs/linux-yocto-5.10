@@ -3633,24 +3633,16 @@ void rvu_nix_lf_teardown(struct rvu *rvu, u16 pcifunc, int blkaddr, int nixlf)
 
 static int rvu_nix_lf_ptp_tx_cfg(struct rvu *rvu, u16 pcifunc, bool enable)
 {
-	struct rvu_hwinfo *hw = rvu->hw;
-	struct rvu_block *block;
-	int blkaddr;
-	int nixlf;
+	int blkaddr, nixlf, err;
 	u64 cfg;
 
 	/* Silicon does not support enabling time stamp in higig mode */
 	if (rvu_cgx_is_higig2_enabled(rvu, rvu_get_pf(pcifunc)))
 		return NIX_AF_ERR_PTP_CONFIG_FAIL;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
-	if (blkaddr < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
-
-	block = &hw->block[blkaddr];
-	nixlf = rvu_get_lf(rvu, block, pcifunc, 0);
-	if (nixlf < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
+	err = nix_get_nixlf(rvu, pcifunc, &nixlf, &blkaddr);
+	if (err)
+		return err;
 
 	cfg = rvu_read64(rvu, blkaddr, NIX_AF_LFX_TX_CFG(nixlf));
 
@@ -3660,7 +3652,6 @@ static int rvu_nix_lf_ptp_tx_cfg(struct rvu *rvu, u16 pcifunc, bool enable)
 		cfg &= ~NIX_AF_LFX_TX_CFG_PTP_EN;
 
 	rvu_write64(rvu, blkaddr, NIX_AF_LFX_TX_CFG(nixlf), cfg);
-
 	return 0;
 }
 
@@ -3743,7 +3734,6 @@ int rvu_mbox_handler_nix_set_vlan_tpid(struct rvu *rvu,
 	    req->vlan_type != NIX_VLAN_TYPE_INNER)
 		return NIX_AF_ERR_PARAM;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
 	cfg = rvu_read64(rvu, blkaddr, NIX_AF_LFX_TX_CFG(nixlf));
 
 	if (req->vlan_type == NIX_VLAN_TYPE_OUTER)
@@ -3997,23 +3987,15 @@ int rvu_mbox_handler_nix_inline_ipsec_cfg(struct rvu *rvu,
 int rvu_mbox_handler_nix_inline_ipsec_lf_cfg(
 struct rvu *rvu, struct nix_inline_ipsec_lf_cfg *req, struct msg_rsp *rsp)
 {
-	struct rvu_hwinfo *hw = rvu->hw;
-	u16 pcifunc = req->hdr.pcifunc;
-	struct rvu_block *block;
-	int lf, blkaddr;
+	int lf, blkaddr, err;
 	u64 val;
 
 	if (!is_block_implemented(rvu->hw, BLKADDR_CPT0))
 		return 0;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
-	if (blkaddr < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
-
-	block = &hw->block[blkaddr];
-	lf = rvu_get_lf(rvu, block, pcifunc, 0);
-	if (lf < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
+	err = nix_get_nixlf(rvu, req->hdr.pcifunc, &lf, &blkaddr);
+	if (err)
+		return err;
 
 	if (req->enable) {
 		/* Set TT, TAG_CONST, SA_POW2_SIZE and LENM1_MAX */
@@ -4052,20 +4034,12 @@ void rvu_nix_reset_mac(struct rvu_pfvf *pfvf, int pcifunc)
 
 bool rvu_nix_is_ptp_tx_enabled(struct rvu *rvu, u16 pcifunc)
 {
-	struct rvu_hwinfo *hw = rvu->hw;
-	struct rvu_block *block;
-	int blkaddr;
-	int nixlf;
+	int blkaddr, nixlf, err;
 	u64 cfg;
 
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
-	if (blkaddr < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
-
-	block = &hw->block[blkaddr];
-	nixlf = rvu_get_lf(rvu, block, pcifunc, 0);
-	if (nixlf < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
+	err = nix_get_nixlf(rvu, pcifunc, &nixlf, &blkaddr);
+	if (err)
+		return false;
 
 	cfg = rvu_read64(rvu, blkaddr, NIX_AF_LFX_TX_CFG(nixlf));
 	return (cfg & BIT_ULL(32));
