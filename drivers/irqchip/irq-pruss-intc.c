@@ -101,6 +101,8 @@ struct pruss_intc_match_data {
  * @soc_config: cached PRUSS INTC IP configuration data
  * @dev: PRUSS INTC device pointer
  * @lock: mutex to serialize interrupts mapping
+ * @shared_intr: bit-map denoting if the MPU host interrupt is shared
+ * @invalid_intr: bit-map denoting if host interrupt is not connected to MPU
  */
 struct pruss_intc {
 	struct pruss_intc_map_record event_channel[MAX_PRU_SYS_EVENTS];
@@ -111,6 +113,8 @@ struct pruss_intc {
 	const struct pruss_intc_match_data *soc_config;
 	struct device *dev;
 	struct mutex lock; /* PRUSS INTC lock */
+	u16 shared_intr;
+	u16 invalid_intr;
 };
 
 /**
@@ -523,8 +527,9 @@ static int pruss_intc_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct pruss_intc *intc;
 	struct pruss_host_irq_data *host_data;
-	int i, irq, ret;
+	int i, irq, ret, count;
 	u8 max_system_events, irqs_reserved = 0;
+	u8 temp_intr[MAX_NUM_HOST_IRQS] = { 0 };
 
 	data = of_device_get_match_data(dev);
 	if (!data)
@@ -544,15 +549,38 @@ static int pruss_intc_probe(struct platform_device *pdev)
 	if (IS_ERR(intc->base))
 		return PTR_ERR(intc->base);
 
-	ret = of_property_read_u8(dev->of_node, "ti,irqs-reserved",
-				  &irqs_reserved);
+	count = of_property_read_variable_u8_array(dev->of_node,
+						   "ti,irqs-reserved",
+						   temp_intr, 0,
+						   MAX_NUM_HOST_IRQS);
+	if (count < 0 && count != -EINVAL)
+		return count;
+	count = (count == -EINVAL ? 0 : count);
+	for (i = 0; i < count; i++) {
+		if (temp_intr[i] < MAX_NUM_HOST_IRQS) {
+			intc->invalid_intr |= BIT(temp_intr[i]);
+		} else {
+			dev_warn(dev, "ignoring invalid reserved irq %d\n",
+				 temp_intr[i]);
+		}
+		temp_intr[i] = 0;
+	}
 
-	/*
-	 * The irqs-reserved is used only for some SoC's therefore not having
-	 * this property is still valid
-	 */
-	if (ret < 0 && ret != -EINVAL)
-		return ret;
+	count = of_property_read_variable_u8_array(dev->of_node,
+						   "ti,irqs-shared",
+						   temp_intr, 0,
+						   MAX_NUM_HOST_IRQS);
+	if (count < 0 && count != -EINVAL)
+		return count;
+	count = (count == -EINVAL ? 0 : count);
+	for (i = 0; i < count; i++) {
+		if (temp_intr[i] < MAX_NUM_HOST_IRQS) {
+			intc->shared_intr |= BIT(temp_intr[i]);
+		} else {
+			dev_warn(dev, "ignoring invalid shared irq %d\n",
+				 temp_intr[i]);
+		}
+	}
 
 	pruss_intc_init(intc);
 
@@ -564,11 +592,14 @@ static int pruss_intc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	for (i = 0; i < MAX_NUM_HOST_IRQS; i++) {
-		if (irqs_reserved & BIT(i))
+		if (intc->invalid_intr & BIT(i))
 			continue;
 
 		irq = platform_get_irq_byname(pdev, irq_names[i]);
 		if (irq <= 0) {
+			if (intc->shared_intr & BIT(i))
+				continue;
+
 			ret = (irq == 0) ? -EINVAL : irq;
 			goto fail_irq;
 		}
