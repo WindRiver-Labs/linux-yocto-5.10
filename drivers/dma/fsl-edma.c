@@ -681,7 +681,7 @@ static int fsl_edma_suspend_late(struct device *dev)
 		/* Make sure chan is idle or will force disable. */
 		if (unlikely(!fsl_chan->idle)) {
 			dev_warn(dev, "WARN: There is non-idle channel.");
-			fsl_edma_disable_request(fsl_chan);
+			fsl_edma->socdata->ops->edma_disable_request(fsl_chan);
 			fsl_edma_chan_mux(fsl_chan, 0, false);
 		}
 
@@ -710,7 +710,7 @@ static int fsl_edma_resume_early(struct device *dev)
 			fsl_edma_chan_mux(fsl_chan, fsl_chan->slave_id, true);
 	}
 
-	fsl_edma_enable_arbitration(fsl_edma);
+	fsl_edma->socdata->ops->edma_enable_arbitration(fsl_edma);
 
 	return 0;
 }
