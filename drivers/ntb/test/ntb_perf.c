@@ -569,6 +569,7 @@ static int perf_setup_inbuf(struct perf_peer *peer)
 {
 	resource_size_t xlat_align, size_align, size_max;
 	struct perf_ctx *perf = peer->perf;
+	struct pci_dev *pdev = perf->ntb->pdev;
 	int ret;
 
 	/* Get inbound MW parameters */

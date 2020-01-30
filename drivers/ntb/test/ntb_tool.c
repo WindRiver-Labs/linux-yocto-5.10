@@ -576,6 +576,7 @@ static int tool_setup_mw(struct tool_ctx *tc, int pidx, int widx,
 {
 	resource_size_t size, addr_align, size_align;
 	struct tool_mw *inmw = &tc->peers[pidx].inmws[widx];
+	struct pci_dev *pdev = tc->ntb->pdev;
 	char buf[TOOL_BUF_LEN];
 	int ret;
 
