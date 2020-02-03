@@ -15,6 +15,7 @@
 #include "rvu_struct.h"
 #include "common.h"
 #include "mbox.h"
+#include "npc.h"
 #include "rvu_validation.h"
 
 /* PCI device IDs */
@@ -409,7 +410,7 @@ struct npc_kpu_profile_adapter {
 	u64				version;
 	const struct npc_lt_def_cfg	*lt_def;
 	const struct npc_kpu_profile_action	*ikpu; /* array[pkinds] */
-	const struct npc_kpu_profile	*kpu; /* array[kpus] */
+	struct npc_kpu_profile	*kpu; /* array[kpus] */
 	const struct npc_mcam_kex	*mkex;
 	bool				custom; /* true if loadable profile used */
 	size_t				pkinds;
@@ -461,9 +462,12 @@ struct rvu {
 	struct mutex		cgx_cfg_lock; /* serialize cgx configuration */
 
 	char mkex_pfl_name[MKEX_NAME_LEN]; /* Configured MKEX profile name */
+	char kpu_pfl_name[KPU_NAME_LEN]; /* Configured KPU profile name */
 
 	/* Firmware data */
 	struct rvu_fwdata	*fwdata;
+	void			*kpu_fwdata;
+	size_t			kpu_fwdata_sz;
 
 	/* NPC KPU data */
 	struct npc_kpu_profile_adapter kpu;
