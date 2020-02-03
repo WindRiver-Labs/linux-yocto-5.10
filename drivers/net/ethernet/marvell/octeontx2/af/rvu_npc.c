@@ -26,7 +26,6 @@
 #define NIXLF_BCAST_ENTRY	1
 #define NIXLF_PROMISC_ENTRY	2
 
-#define NPC_PARSE_RESULT_DMAC_OFFSET	8
 #define NPC_HW_TSTAMP_OFFSET		8
 #define NPC_KEX_CHAN_MASK	0xFFFULL
 #define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
@@ -953,6 +952,10 @@ static void npc_load_mkex_profile(struct rvu *rvu, int blkaddr,
 	void *mkex_prfl_addr = NULL;
 	u64 prfl_addr, prfl_sz;
 
+        /* Order of precedence (high to low):
+         * 1. Via mkex_profile, loaded from ATF.
+         * 2. Built-in KEX profile from npc_mkex_default.
+         */
 	/* If user not selected mkex profile */
 	if (!strncmp(mkex_profile, def_pfl_name, MKEX_NAME_LEN))
 		goto program_mkex;
@@ -975,6 +978,7 @@ static void npc_load_mkex_profile(struct rvu *rvu, int blkaddr,
 		/* Compare with mkex mod_param name string */
 		if (mcam_kex->mkex_sign == MKEX_SIGN &&
 		    !strncmp(mcam_kex->name, mkex_profile, MKEX_NAME_LEN)) {
+			/* If profile is valid, switch to it. */
 			if (!is_parse_nibble_config_valid(rvu, mcam_kex))
 				rvu->kpu.mkex = mcam_kex;
 			goto program_mkex;
@@ -1104,6 +1108,7 @@ static void npc_program_kpu_profile(struct rvu *rvu, int blkaddr, int kpu,
 
 static int npc_prepare_default_kpu(struct npc_kpu_profile_adapter *profile)
 {
+	profile->custom = 0;
 	profile->name = def_pfl_name;
 	profile->version = NPC_KPU_PROFILE_VER;
 	profile->ikpu = ikpu_action_entries;
@@ -1355,8 +1360,7 @@ int rvu_npc_init(struct rvu *rvu)
 	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX), rx_kex);
 
 	nibble_ena = rvu_npc_get_tx_nibble_cfg(rvu, nibble_ena);
-	if (!nibble_ena) {
-		nibble_ena = 0x249200;
+	if (nibble_ena) {
 		tx_kex &= ~NPC_PARSE_NIBBLE;
 		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
 	}

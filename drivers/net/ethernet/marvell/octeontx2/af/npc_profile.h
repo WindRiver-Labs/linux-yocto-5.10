@@ -13415,6 +13415,14 @@ static const struct npc_mcam_kex npc_mkex_default = {
 				/* Ethertype: 2 bytes, KW0[47:32] */
 				KEX_LD_CFG(0x01, 0xc, 0x1, 0x0, 0x4),
 			},
+			/* Layer A: HiGig2: */
+			[NPC_LT_LA_HIGIG2_ETHER] = {
+			    /* Classification: 2 bytes, KW1[15:0] */
+			    KEX_LD_CFG(0x01, 0x8, 0x1, 0x0, NPC_KEXOF_DMAC),
+			    /* VID: 2 bytes, KW1[31:16] */
+			    KEX_LD_CFG(0x01, 0xc, 0x1, 0x0,
+				       NPC_KEXOF_DMAC + 2),
+			},
 		},
 		[NPC_LID_LB] = {
 			/* Layer B: Single VLAN (CTAG) */
@@ -13476,6 +13484,13 @@ static const struct npc_mcam_kex npc_mkex_default = {
 				KEX_LD_CFG(0x01, 0x0, 0x1, 0x0, 0x4),
 				/* DMAC: 6 bytes, KW1[63:16] */
 				KEX_LD_CFG(0x05, 0x8, 0x1, 0x0, 0xa),
+			},
+			/* Layer A: HiGig2: */
+			[NPC_LT_LA_IH_NIX_HIGIG2_ETHER] = {
+				/* PF_FUNC: 2B , KW0 [47:32] */
+				KEX_LD_CFG(0x01, 0x0, 0x1, 0x0, 0x4),
+				/* VID: 2 bytes, KW1[31:16] */
+				KEX_LD_CFG(0x01, 0x10, 0x1, 0x0, 0xa),
 			},
 		},
 		[NPC_LID_LB] = {

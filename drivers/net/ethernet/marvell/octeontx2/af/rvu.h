@@ -411,6 +411,7 @@ struct npc_kpu_profile_adapter {
 	const struct npc_kpu_profile_action	*ikpu; /* array[pkinds] */
 	const struct npc_kpu_profile	*kpu; /* array[kpus] */
 	const struct npc_mcam_kex	*mkex;
+	bool				custom; /* true if loadable profile used */
 	size_t				pkinds;
 	size_t				kpus;
 };
