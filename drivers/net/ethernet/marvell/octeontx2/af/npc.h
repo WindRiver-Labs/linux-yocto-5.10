@@ -156,7 +156,7 @@ struct npc_kpu_profile_cam {
 	u16 dp1_mask;
 	u16 dp2;
 	u16 dp2_mask;
-};
+} __packed;
 
 struct npc_kpu_profile_action {
 	u8 errlev;
@@ -176,7 +176,7 @@ struct npc_kpu_profile_action {
 	u8 mask;
 	u8 right;
 	u8 shift;
-};
+} __packed;
 
 struct npc_kpu_profile {
 	int cam_entries;
