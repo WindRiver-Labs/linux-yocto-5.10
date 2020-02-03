@@ -26,7 +26,6 @@
 #define NIXLF_BCAST_ENTRY	1
 #define NIXLF_PROMISC_ENTRY	2
 
-#define NPC_PARSE_RESULT_DMAC_OFFSET	8
 #define NPC_HW_TSTAMP_OFFSET		8
 
 #define NPC_KEX_CHAN_MASK	0xFFFULL
@@ -949,7 +948,9 @@ static void npc_load_mkex_profile(struct rvu *rvu, int blkaddr,
 		/* Compare with mkex mod_param name string */
 		if (mcam_kex->mkex_sign == MKEX_SIGN &&
 		    !strncmp(mcam_kex->name, mkex_profile, MKEX_NAME_LEN)) {
+			/* If profile is valid, switch to it. */
 			if (!is_parse_nibble_config_valid(rvu, mcam_kex))
+				rvu->kpu.mkex = mcam_kex;
 			goto program_mkex;
 		}
 
@@ -1328,8 +1329,10 @@ int rvu_npc_init(struct rvu *rvu)
 
 	/* Extract Ltypes LID_LA to LID_LE */
 	nibble_ena = rvu_npc_get_tx_nibble_cfg(rvu, nibble_ena);
-	if (!nibble_ena)
-		nibble_ena = 0x249200;
+	if (nibble_ena) {
+		tx_kex &= ~NPC_PARSE_NIBBLE;
+		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
+	}
 	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX), tx_kex);
 
 	err = npc_mcam_rsrcs_init(rvu, blkaddr);

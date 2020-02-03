@@ -3377,12 +3377,15 @@ int rvu_nix_init(struct rvu *rvu)
 		if (is_block_implemented(rvu->hw, BLKADDR_CPT0)) {
 			/* Config IPSec headers identification */
 			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_IPSECX(0),
-				    (NPC_LID_LD << 8) |
-				    (NPC_LT_LD_ESP << 4) | 0x0F);
+				    (ltdefs->rx_ipsec[0].lid << 8) |
+				    (ltdefs->rx_ipsec[0].ltype_match << 4) |
+				    ltdefs->rx_ipsec[0].ltype_mask);
 
 			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_IPSECX(1),
-				    (8 << 12) | (NPC_LID_LG << 8) |
-				    (NPC_LT_LH_TU_ESP << 4) | 0x0F);
+				    (ltdefs->rx_ipsec[1].spi_offset << 12) |
+				    (ltdefs->rx_ipsec[1].lid << 8) |
+				    (ltdefs->rx_ipsec[1].ltype_match << 4) |
+				    ltdefs->rx_ipsec[1].ltype_mask);
 		}
 	}
 	return 0;
