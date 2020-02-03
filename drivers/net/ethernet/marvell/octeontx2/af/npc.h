@@ -354,24 +354,14 @@ struct npc_mcam_kex {
 	u64 intf_ld_flags[NPC_MAX_INTF][NPC_MAX_LD][NPC_MAX_LFL];
 } __packed;
 
-struct rvu_npc_mcam_rule {
-	struct flow_msg packet;
-	struct flow_msg mask;
-	u8 intf;
-	union {
-		struct nix_tx_action tx_action;
-		struct nix_rx_action rx_action;
-	};
-	u64 vtag_action;
-	struct list_head list;
-	u64 features;
-	u16 owner;
-	u16 entry;
-	u16 cntr;
-	bool has_cntr;
-	u8 default_rule;
-	bool enable;
-};
+struct npc_kpu_fwdata {
+	int	entries;
+	/* What follows is:
+	 * struct npc_kpu_profile_cam[entries];
+	 * struct npc_kpu_profile_action[entries];
+	 */
+	u8	data[0];
+} __packed;
 
 struct npc_lt_def {
 	u8	ltype_mask;
@@ -404,6 +394,52 @@ struct npc_lt_def_cfg {
 	struct npc_lt_def	pck_oip4;
 	struct npc_lt_def	pck_oip6;
 	struct npc_lt_def	pck_iip4;
+};
+
+/* Loadable KPU profile firmware data */
+struct npc_kpu_profile_fwdata {
+#define KPU_SIGN	0x00666f727075706b
+#define KPU_NAME_LEN	32
+/** Maximum number of custom KPU entries supported by the built-in profile. */
+#define KPU_MAX_CST_ENT	2
+	/* KPU Profle Header */
+	u64	signature; /* "kpuprof\0" (8 bytes/ASCII characters) */
+	u8	name[KPU_NAME_LEN]; /* KPU Profile name */
+	u64	version; /* KPU profile version */
+	u8	kpus;
+	u8	reserved[7];
+
+	/* Default MKEX profile to be used with this KPU profile. May be
+	 * overridden with mkex_profile module parameter. Format is same as for
+	 * the MKEX profile to streamline processing.
+	 */
+	struct npc_mcam_kex	mkex;
+	/* LTYPE values for specific HW offloaded protocols. */
+	struct npc_lt_def_cfg	lt_def;
+	/* Dynamically sized data:
+	 *  Custom KPU CAM and ACTION configuration entries.
+	 * struct npc_kpu_fwdata kpu[kpus];
+	 */
+	u8	data[0];
+} __packed;
+
+struct rvu_npc_mcam_rule {
+	struct flow_msg packet;
+	struct flow_msg mask;
+	u8 intf;
+	union {
+		struct nix_tx_action tx_action;
+		struct nix_rx_action rx_action;
+	};
+	u64 vtag_action;
+	struct list_head list;
+	u64 features;
+	u16 owner;
+	u16 entry;
+	u16 cntr;
+	bool has_cntr;
+	u8 default_rule;
+	bool enable;
 };
 
 #endif /* NPC_H */
