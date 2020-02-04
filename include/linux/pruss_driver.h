@@ -24,16 +24,19 @@
  * @lock: mutex to serialize access to resources
  * @core_clk_mux: clk handle for PRUSS CORE_CLK_MUX
  * @iep_clk_mux: clk handle for PRUSS IEP_CLK_MUX
+ * @has_ocp_syscfg: flag to indicate if PRCM master standby/slave idle is
+ *		    supported
  */
 struct pruss {
 	struct device *dev;
 	void __iomem *cfg_base;
-	struct regmap *cfg_regmap;
+	struct regmap *cfg;
 	struct pruss_mem_region mem_regions[PRUSS_MEM_MAX];
 	struct pruss_mem_region *mem_in_use[PRUSS_MEM_MAX];
 	struct mutex lock; /* PRU resource lock */
 	struct clk *core_clk_mux;
 	struct clk *iep_clk_mux;
+	unsigned int has_ocp_syscfg : 1;
 };
 
 /**

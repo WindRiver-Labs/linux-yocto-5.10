@@ -22,6 +22,11 @@
 #include <linux/remoteproc.h>
 #include <linux/slab.h>
 
+#define PRUSS_CFG_IEPCLK	0x30
+#define ICSSG_CFG_CORE_SYNC	0x3c
+
+#define SYSCFG_STANDBY_INIT	BIT(4)
+#define SYSCFG_SUB_MWAIT_READY	BIT(5)
 /**
  * struct pruss_private_data - PRUSS driver private data
  * @has_no_sharedram: flag to indicate the absence of PRUSS Shared Data RAM
@@ -29,7 +34,7 @@
  */
 struct pruss_private_data {
 	bool has_no_sharedram;
-	bool has_core_mux_clock;
+	bool has_ocp_syscfg;
 };
 
 /**
@@ -211,6 +216,69 @@ int pruss_cfg_update(struct pruss *pruss, unsigned int reg,
 }
 EXPORT_SYMBOL_GPL(pruss_cfg_update);
 
+/**
+ * pruss_cfg_ocp_master_ports() - configure PRUSS OCP master ports
+ *
+ * This function programs the PRUSS_SYSCFG.STANDBY_INIT bit either to enable or
+ * disable the OCP master ports (applicable only on SoCs using OCP interconnect
+ * like the OMAP family). Clearing the bit achieves dual functionalities - one
+ * is to deassert the MStandby signal to the device PRCM, and the other is to
+ * enable OCP master ports to allow accesses outside of the PRU-ICSS. The
+ * function has to wait for the PRCM to acknowledge through the monitoring of
+ * the PRUSS_SYSCFG.SUB_MWAIT bit when enabling master ports. Setting the bit
+ * disables the master access, and also signals the PRCM that the PRUSS is ready
+ * for Standby.
+ *
+ * Returns 0 on success, or an error code otherwise. ETIMEDOUT is returned
+ * when the ready-state fails.
+ */
+int pruss_cfg_ocp_master_ports(struct pruss *pruss, bool enable)
+{
+	int ret;
+	u32 syscfg_val, i;
+	bool ready = false;
+
+	if (IS_ERR_OR_NULL(pruss))
+		return -EINVAL;
+
+	/* nothing to do on non OMAP-SoCs */
+	if (!pruss->has_ocp_syscfg)
+		return 0;
+
+	/* assert the MStandby signal during disable path */
+	if (!enable) {
+		return pruss_cfg_update(pruss, PRUSS_CFG_SYSCFG,
+					SYSCFG_STANDBY_INIT,
+					SYSCFG_STANDBY_INIT);
+	}
+
+	/* enable the OCP master ports and disable MStandby */
+	ret = pruss_cfg_update(pruss, PRUSS_CFG_SYSCFG,
+			       SYSCFG_STANDBY_INIT, 0);
+	if (ret)
+		return ret;
+
+	/* wait till we are ready for transactions - delay is arbitrary */
+	for (i = 0; i < 10; i++) {
+		ret = pruss_cfg_read(pruss, PRUSS_CFG_SYSCFG, &syscfg_val);
+		if (ret)
+			goto disable;
+		ready = !(syscfg_val & SYSCFG_SUB_MWAIT_READY);
+		if (ready)
+			return 0;
+		udelay(5);
+	}
+
+	dev_err(pruss->dev, "timeout waiting for SUB_MWAIT_READY\n");
+	ret = -ETIMEDOUT;
+
+disable:
+	pruss_cfg_update(pruss, PRUSS_CFG_SYSCFG, SYSCFG_STANDBY_INIT,
+			 SYSCFG_STANDBY_INIT);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(pruss_cfg_ocp_master_ports);
+
 static void pruss_of_free_clk_provider(void *data)
 {
 	struct device_node *clk_mux_np = data;
@@ -220,7 +288,7 @@ static void pruss_of_free_clk_provider(void *data)
 }
 
 static int pruss_clk_mux_setup(struct pruss *pruss, struct clk *clk_mux,
-			       char *mux_name, struct device_node *clks_np)
+			       char *mux_name, unsigned int reg_offset)
 {
 	struct device_node *clk_mux_np;
 	struct device *dev = pruss->dev;
@@ -228,12 +296,11 @@ static int pruss_clk_mux_setup(struct pruss *pruss, struct clk *clk_mux,
 	unsigned int num_parents;
 	const char **parent_names;
 	void __iomem *reg;
-	u32 reg_offset;
 	int ret;
 
-	clk_mux_np = of_get_child_by_name(clks_np, mux_name);
+	clk_mux_np = of_get_child_by_name(pruss->dev->of_node, mux_name);
 	if (!clk_mux_np) {
-		dev_err(dev, "%pOF is missing its '%s' node\n", clks_np,
+		dev_err(dev, "%pOF is missing its '%s' node\n", pruss->dev->of_node,
 			mux_name);
 		return -ENODEV;
 	}
@@ -261,9 +328,6 @@ static int pruss_clk_mux_setup(struct pruss *pruss, struct clk *clk_mux,
 		goto put_clk_mux_np;
 	}
 
-	ret = of_property_read_u32(clk_mux_np, "reg", &reg_offset);
-	if (ret)
-		goto put_clk_mux_np;
 
 	reg = pruss->cfg_base + reg_offset;
 
@@ -302,7 +366,6 @@ put_clk_mux_np:
 static int pruss_clk_init(struct pruss *pruss, struct device_node *cfg_node)
 {
 	const struct pruss_private_data *data;
-	struct device_node *clks_np;
 	struct device *dev = pruss->dev;
 	int ret = 0;
 
@@ -310,31 +373,20 @@ static int pruss_clk_init(struct pruss *pruss, struct device_node *cfg_node)
 	if (IS_ERR(data))
 		return -ENODEV;
 
-	clks_np = of_get_child_by_name(cfg_node, "clocks");
-	if (!clks_np) {
-		dev_err(dev, "%pOF is missing its 'clocks' node\n", clks_np);
-		return -ENODEV;
-	}
 
-	if (data && data->has_core_mux_clock) {
-		ret = pruss_clk_mux_setup(pruss, pruss->core_clk_mux,
-					  "coreclk-mux", clks_np);
-		if (ret) {
-			dev_err(dev, "failed to setup coreclk-mux\n");
-			goto put_clks_node;
-		}
+	ret = pruss_clk_mux_setup(pruss, pruss->core_clk_mux,
+					  "coreclk-mux", ICSSG_CFG_CORE_SYNC);
+	if (ret) {
+		dev_err(dev, "failed to setup coreclk-mux\n");
+		return ret;
 	}
 
 	ret = pruss_clk_mux_setup(pruss, pruss->iep_clk_mux, "iepclk-mux",
-				  clks_np);
+				  PRUSS_CFG_IEPCLK);
 	if (ret) {
 		dev_err(dev, "failed to setup iepclk-mux\n");
-		goto put_clks_node;
+		return ret;
 	}
-
-put_clks_node:
-	of_node_put(clks_np);
-
 	return ret;
 }
 
@@ -372,6 +424,7 @@ static int pruss_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	pruss->dev = dev;
+	pruss->has_ocp_syscfg = data->has_ocp_syscfg;
 	mutex_init(&pruss->lock);
 
 	child = of_get_child_by_name(np, "memories");
@@ -449,13 +502,13 @@ static int pruss_probe(struct platform_device *pdev)
 				     (u64)res.start);
 	regmap_conf.max_register = resource_size(&res) - 4;
 
-	pruss->cfg_regmap = devm_regmap_init_mmio(dev, pruss->cfg_base,
+	pruss->cfg = devm_regmap_init_mmio(dev, pruss->cfg_base,
 						  &regmap_conf);
 	kfree(regmap_conf.name);
-	if (IS_ERR(pruss->cfg_regmap)) {
+	if (IS_ERR(pruss->cfg)) {
 		dev_err(dev, "regmap_init_mmio failed for cfg, ret = %ld\n",
-			PTR_ERR(pruss->cfg_regmap));
-		ret = PTR_ERR(pruss->cfg_regmap);
+			PTR_ERR(pruss->cfg));
+		ret = PTR_ERR(pruss->cfg);
 		goto node_put;
 	}
 
@@ -506,7 +559,8 @@ static const struct pruss_private_data am437x_pruss0_data = {
 };
 
 static const struct pruss_private_data am65x_j721e_pruss_data = {
-	.has_core_mux_clock = true,
+	.has_no_sharedram = false,
+	.has_ocp_syscfg = false,
 };
 
 static const struct of_device_id pruss_of_match[] = {
