@@ -36,27 +36,25 @@
 
 #include "cdns-mhdp-core.h"
 
+#include "cdns-mhdp-j721e.h"
+
+#ifdef CONFIG_DRM_CDNS_MHDP_J721E
+static const struct mhdp_platform_ops mhdp_ti_j721e_ops = {
+	.init = cdns_mhdp_j721e_init,
+	.exit = cdns_mhdp_j721e_fini,
+	.enable = cdns_mhdp_j721e_enable,
+	.disable = cdns_mhdp_j721e_disable,
+};
+#endif
+
 static const struct of_device_id mhdp_ids[] = {
 	{ .compatible = "cdns,mhdp8546", },
+#ifdef CONFIG_DRM_CDNS_MHDP_J721E
+	{ .compatible = "ti,j721e-mhdp8546", .data = &mhdp_ti_j721e_ops },
+#endif
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mhdp_ids);
-
-static inline u32 get_unaligned_be24(const void *p)
-{
-	const u8 *_p = p;
-
-	return _p[0] << 16 | _p[1] << 8 | _p[2];
-}
-
-static inline void put_unaligned_be24(u32 val, void *p)
-{
-	u8 *_p = p;
-
-	_p[0] = val >> 16;
-	_p[1] = val >> 8;
-	_p[2] = val;
-}
 
 static int cdns_mhdp_mailbox_read(struct cdns_mhdp_device *mhdp)
 {
@@ -1025,7 +1023,7 @@ static const struct drm_connector_funcs cdns_mhdp_conn_funcs = {
 	.destroy = drm_connector_cleanup,
 };
 
-static int cdns_mhdp_attach(struct drm_bridge *bridge)
+static int cdns_mhdp_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct cdns_mhdp_device *mhdp = bridge_to_mhdp(bridge);
 	u32 bus_format = MEDIA_BUS_FMT_RGB121212_1X36;

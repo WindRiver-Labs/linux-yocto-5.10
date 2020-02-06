@@ -29,3 +29,6 @@ obj-y += analogix/
 obj-y += cadence/
 obj-y += synopsys/
 cdns-mhdp-objs := cdns-mhdp-core.o
+ifeq ($(CONFIG_DRM_CDNS_MHDP_J721E),y)
+	cdns-mhdp-objs += cdns-mhdp-j721e.o
+endif
