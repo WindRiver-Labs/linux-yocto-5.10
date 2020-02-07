@@ -715,6 +715,8 @@ struct gbe_slave {
 	struct phy			*serdes_phy;
 };
 
+#define MAX_SLAVES                                8
+
 struct gbe_priv {
 	struct device			*dev;
 	struct netcp_device		*netcp_device;
@@ -765,6 +767,12 @@ struct gbe_priv {
 	struct cpts                     *cpts;
 	int				rx_ts_enabled;
 	int				tx_ts_enabled;
+
+	struct kobject			kobj;
+	struct kobject			tx_pri_kobj;
+	struct kobject			pvlan_kobj;
+	struct kobject			port_ts_kobj[MAX_SLAVES];
+	struct kobject			stats_kobj;
 };
 
 struct gbe_intf {
@@ -3634,6 +3642,9 @@ static int set_gbenu_ethss_priv(struct gbe_priv *gbe_dev,
 	return 0;
 }
 
+/* Include the sysfs source as a HACK */
+#include "netcp_ethss_sysfs.c"
+
 static int gbe_probe(struct netcp_device *netcp_device, struct device *dev,
 		     struct device_node *node, void **inst_priv)
 {
@@ -3826,6 +3837,10 @@ static int gbe_probe(struct netcp_device *netcp_device, struct device *dev,
 	}
 	spin_unlock_bh(&gbe_dev->hw_stats_lock);
 
+	ret = gbe_create_sysfs_entries(gbe_dev);
+	if (ret)
+		goto free_sec_ports;
+
 	timer_setup(&gbe_dev->timer, netcp_ethss_timer, 0);
 	gbe_dev->timer.expires	 = jiffies + GBE_TIMER_INTERVAL;
 	add_timer(&gbe_dev->timer);
@@ -3913,6 +3928,7 @@ static int gbe_remove(struct netcp_device *netcp_device, void *inst_priv)
 	cpts_release(gbe_dev->cpts);
 	cpsw_ale_stop(gbe_dev->ale);
 	netcp_txpipe_close(&gbe_dev->tx_pipe);
+	gbe_remove_sysfs_entries(gbe_dev);
 	free_secondary_ports(gbe_dev);
 
 	if (!list_empty(&gbe_dev->gbe_intf_head))
