@@ -483,11 +483,18 @@ static int zynqmp_dp_init_phy(struct zynqmp_dp *dp)
 			return ret;
 		}
 	}
-
-	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_SUB_TX_INTR_DS,
-			ZYNQMP_DP_TX_INTR_ALL);
-	zynqmp_dp_clr(dp->iomem, ZYNQMP_DP_TX_PHY_CONFIG,
-		      ZYNQMP_DP_TX_PHY_CONFIG_ALL_RESET);
+	/* Wait for PLL to be locked for the primary (1st) lane */
+	if (dp->phy[0]) {
+		zynqmp_dp_write(dp->iomem, ZYNQMP_DP_SUB_TX_INTR_DS,
+				ZYNQMP_DP_TX_INTR_ALL);
+		zynqmp_dp_clr(dp->iomem, ZYNQMP_DP_TX_PHY_CONFIG,
+			      ZYNQMP_DP_TX_PHY_CONFIG_ALL_RESET);
+		ret = phy_power_on(dp->phy[i]);
+		if (ret) {
+			dev_err(dp->dev, "failed to lock pll\n");
+			return ret;
+		}
+	}
 
 	return 0;
 }
@@ -683,23 +690,25 @@ static void zynqmp_dp_adjust_train(struct zynqmp_dp *dp,
  */
 static int zynqmp_dp_update_vs_emph(struct zynqmp_dp *dp)
 {
-	u8 *train_set = dp->train_set;
-	u8 i, v_level, p_level;
+	unsigned int i;
 	int ret;
 
-	ret = drm_dp_dpcd_write(&dp->aux, DP_TRAINING_LANE0_SET, train_set,
+	ret = drm_dp_dpcd_write(&dp->aux, DP_TRAINING_LANE0_SET, dp->train_set,
 				dp->mode.lane_cnt);
 	if (ret < 0)
 		return ret;
 
 	for (i = 0; i < dp->mode.lane_cnt; i++) {
 		u32 reg = ZYNQMP_DP_SUB_TX_PHY_PRECURSOR_LANE_0 + i * 4;
+		union phy_configure_opts opts = { 0 };
+		u8 train = dp->train_set[i];
 
-		v_level = (train_set[i] & DP_TRAIN_VOLTAGE_SWING_MASK) >>
-			  DP_TRAIN_VOLTAGE_SWING_SHIFT;
-		p_level = (train_set[i] & DP_TRAIN_PRE_EMPHASIS_MASK) >>
-			  DP_TRAIN_PRE_EMPHASIS_SHIFT;
+		opts.dp.voltage[0] = (train & DP_TRAIN_VOLTAGE_SWING_MASK)
+				   >> DP_TRAIN_VOLTAGE_SWING_SHIFT;
+		opts.dp.pre[0] = (train & DP_TRAIN_PRE_EMPHASIS_MASK)
+			       >> DP_TRAIN_PRE_EMPHASIS_SHIFT;
 
+		phy_configure(dp->phy[i], &opts);
 		zynqmp_dp_write(dp->iomem, reg, 0x2);
 	}
 
