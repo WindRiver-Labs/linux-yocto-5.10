@@ -21,6 +21,7 @@
 #include <linux/string.h>
 #include <linux/zalloc.h>
 #include <subcmd/parse-options.h>
+#include "header.h"
 #include <api/fs/fs.h>
 #include "util.h"
 #include <asm/bug.h>
@@ -522,6 +523,9 @@ void metricgroup__print(bool metrics, bool metricgroups, char *filter,
                for (i = 0; ; i++) {
                        const char *g;
                        pe = &map->table[i];
+
+		       if (pe->socname && soc_version_check(pe->socname))
+				continue;
 
                        if (!pe->name && !pe->metric_group && !pe->metric_name)
                                break;
@@ -1158,6 +1162,8 @@ bool metricgroup__has_metric(const char *metric)
 		for (i = 0; ; i++) {
 			pe = &map->table[i];
 
+			if (pe->socname && soc_version_check(pe->socname))
+				continue;
 			if (!pe->name && !pe->metric_group && !pe->metric_name)
 				break;
 			if (!pe->metric_expr)
