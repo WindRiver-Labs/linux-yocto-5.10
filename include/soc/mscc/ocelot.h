@@ -815,6 +815,7 @@ int ocelot_rtag_parse_enable(struct ocelot *ocelot, u8 port);
 int ocelot_dscp_set(struct ocelot *ocelot, int port,
                    bool enable, const u8 dscp_ix,
                    struct tsn_qos_switch_dscp_conf *c);
+void ocelot_preempt_irq_clean(struct ocelot *ocelot);
 
 void ocelot_port_set_maxlen(struct ocelot *ocelot, int port, size_t sdu);
 int ocelot_get_max_mtu(struct ocelot *ocelot, int port);
