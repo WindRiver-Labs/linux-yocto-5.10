@@ -327,6 +327,9 @@ int dcss_dev_suspend(struct device *dev)
 	struct dcss_kms_dev *kms = container_of(ddev, struct dcss_kms_dev, base);
 	int ret;
 
+	if (!dcss)
+		return 0;
+
 	drm_bridge_connector_disable_hpd(kms->connector);
 
 	drm_mode_config_helper_suspend(ddev);
@@ -350,6 +353,9 @@ int dcss_dev_resume(struct device *dev)
 	struct dcss_dev *dcss = dcss_drv_dev_to_dcss(dev);
 	struct drm_device *ddev = dcss_drv_dev_to_drm(dev);
 	struct dcss_kms_dev *kms = container_of(ddev, struct dcss_kms_dev, base);
+
+	if (!dcss)
+		return 0;
 
 	if (pm_runtime_suspended(dev)) {
 		drm_mode_config_helper_resume(ddev);
@@ -378,6 +384,9 @@ int dcss_dev_runtime_suspend(struct device *dev)
 	struct dcss_dev *dcss = dcss_drv_dev_to_dcss(dev);
 	int ret;
 
+	if (!dcss)
+		return 0;
+
 	ret = dcss_ctxld_suspend(dcss->ctxld);
 	if (ret)
 		return ret;
@@ -392,6 +401,9 @@ int dcss_dev_runtime_suspend(struct device *dev)
 int dcss_dev_runtime_resume(struct device *dev)
 {
 	struct dcss_dev *dcss = dcss_drv_dev_to_dcss(dev);
+
+	if (!dcss)
+		return 0;
 
 	dcss_busfreq_enable(dcss);
 
