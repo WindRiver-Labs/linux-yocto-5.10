@@ -555,6 +555,12 @@
 };
 
 &iomuxc {
+	pinctrl_i2c2_synaptics_dsx_io: synaptics_dsx_iogrp {
+		fsl,pins = <
+			MX8MP_IOMUXC_GPIO1_IO09__GPIO1_IO09             0x16
+		>;
+	};
+
 	pinctrl_pdm: pdmgrp {
                fsl,pins = <
                        MX8MP_IOMUXC_SAI5_RXC__AUDIOMIX_CLK             0xd6
