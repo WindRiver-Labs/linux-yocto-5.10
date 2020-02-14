@@ -514,6 +514,12 @@ static void enetc_mac_config(struct enetc_hw *hw, phy_interface_t phy_mode)
 		val = ENETC_PM0_IFM_FULL_DPX | ENETC_PM0_IFM_IFMODE_XGMII;
 		enetc_port_wr(hw, ENETC_PM0_IF_MODE, val);
 	}
+
+	/* on LS1028A the MAC Rx FIFO defaults to value 2, which is too high and
+	* may lead to Rx lock-up under traffic.  Set it to 1 instead, as
+	* recommended by the hardware team.
+	*/
+	enetc_port_wr(hw, ENETC_PM0_RX_FIFO, ENETC_PM0_RX_FIFO_VAL);
 }
 
 static void enetc_mac_enable(struct enetc_hw *hw, bool en)
