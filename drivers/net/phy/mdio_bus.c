@@ -623,6 +623,7 @@ void mdiobus_unregister(struct mii_bus *bus)
 		mdiodev->device_free(mdiodev);
 	}
 
+reset_err:
 	/* Put PHYs in RESET to save power */
 	if (bus->reset_gpiod)
 		gpiod_set_value_cansleep(bus->reset_gpiod, 1);
