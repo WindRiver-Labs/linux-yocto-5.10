@@ -165,6 +165,12 @@
         };
 };
 
+&a53_opp_table {
+       opp-1200000000 {
+               opp-microvolt = <950000>;
+       };
+};
+
 &usbotg1 {
         picophy,pre-emp-curr-control = <3>;
         picophy,dc-vol-level-adjust = <7>;
