@@ -26,7 +26,7 @@ config SND_SOC_SOF_IMX_COMMON
 	  'select' statements at a higher level.
 
 config SND_SOC_SOF_IMX8_SUPPORT
-	bool "SOF support for i.MX8"
+	tristate "SOF support for i.MX8"
 	depends on IMX_SCU=y || IMX_SCU=SND_SOC_SOF_IMX_OF
 	depends on IMX_DSP=y || IMX_DSP=SND_SOC_SOF_IMX_OF
 	help
@@ -43,7 +43,7 @@ config SND_SOC_SOF_IMX8
 	  'select' statements at a higher level
 
 config SND_SOC_SOF_IMX8M_SUPPORT
-	bool "SOF support for i.MX8M"
+	tristate "SOF support for i.MX8M"
 	depends on IMX_DSP=y || IMX_DSP=SND_SOC_SOF_OF
 	help
 	  This adds support for Sound Open Firmware for NXP i.MX8M platforms
