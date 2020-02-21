@@ -150,11 +150,6 @@
                cpu-dai = <&micfil>;
        };
 
-	tcm@00800000 {
-               compatible = "fsl,tcm";
-               reg = <0x0 0x00800000 0 0x1000>;
-        };
-
 	lvds_backlight: lvds_backlight {
                 compatible = "pwm-backlight";
                 pwms = <&pwm2 0 100000>;
