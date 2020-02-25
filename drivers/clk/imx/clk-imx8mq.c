@@ -276,7 +276,7 @@ static struct clk_hw_onecell_data *clk_hw_data;
 static struct clk_hw **hws;
 
 static int __init imx_clk_init_on(struct device_node *np,
-				  struct clk * const clks[])
+				  struct clk_hw * const clks[])
 {
 	u32 *array;
 	int i, ret, elems;
@@ -293,7 +293,7 @@ static int __init imx_clk_init_on(struct device_node *np,
 		return ret;
 
 	for (i = 0; i < elems; i++) {
-		ret = clk_prepare_enable(clks[array[i]]);
+		ret = clk_prepare_enable(clks[array[i]]->clk);
 		if (ret)
 			pr_err("clk_prepare_enable failed %d\n", array[i]);
 	}
