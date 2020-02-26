@@ -596,3 +596,4 @@ module_exit(crypto_tls_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("TLS 1.0 record encryption");
+MODULE_ALIAS_CRYPTO("tls10");
