@@ -87,7 +87,7 @@ static int imx_scu_soc_probe(struct platform_device *pdev)
 		TKT340553_SW_WORKAROUND = true;
 	} else if (of_machine_is_compatible("fsl,imx8qxp"))
 		soc_dev_attr->soc_id = "i.MX8QXP";
-	else if (of_machine_is_compatible("fsl, imx8dxl"))
+	else if (of_machine_is_compatible("fsl,imx8dxl"))
 		soc_dev_attr->soc_id = "i.MX8DXL";
 
 	/* format revision value passed from SCU firmware */
@@ -124,27 +124,28 @@ static struct platform_driver imx_scu_soc_driver = {
 	.probe = imx_scu_soc_probe,
 };
 
-static int __init imx_scu_soc_init(void)
+static int __init imx_soc_init(void)
 {
-	struct platform_device *pdev;
-	struct device_node *np;
-	int ret;
+        struct platform_device *pdev;
+        struct device_node *np;
+        int ret;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,imx-scu");
-	if (!np)
-		return -ENODEV;
+        np = of_find_compatible_node(NULL, NULL, "fsl,imx-scu");
+        if (!np)
+                return -ENODEV;
 
-	of_node_put(np);
+        of_node_put(np);
 
-	ret = platform_driver_register(&imx_scu_soc_driver);
-	if (ret)
-		return ret;
+        ret = platform_driver_register(&imx_scu_soc_driver);
+        if (ret)
+                return ret;
 
-	pdev = platform_device_register_simple(IMX_SCU_SOC_DRIVER_NAME,
-					       -1, NULL, 0);
-	if (IS_ERR(pdev))
-		platform_driver_unregister(&imx_scu_soc_driver);
+        pdev = platform_device_register_simple(IMX_SCU_SOC_DRIVER_NAME,
+                                               -1, NULL, 0);
+        if (IS_ERR(pdev))
+                platform_driver_unregister(&imx_scu_soc_driver);
 
-	return PTR_ERR_OR_ZERO(pdev);
+        return PTR_ERR_OR_ZERO(pdev);
 }
-device_initcall(imx_scu_soc_init);
+device_initcall(imx_soc_init);
+
