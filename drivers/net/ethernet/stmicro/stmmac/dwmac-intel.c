@@ -724,6 +724,7 @@ static int ehl_pse0_common_data(struct pci_dev *pdev,
 	plat->bus_id = 2;
 	plat->addr64 = 32;
 	plat->dma_bit_mask = 32;
+	plat->is_pse = 1;
 
 	plat->clk_ptp_rate = 200000000;
 
@@ -773,6 +774,7 @@ static int ehl_pse1_common_data(struct pci_dev *pdev,
 	plat->bus_id = 3;
 	plat->addr64 = 32;
 	plat->dma_bit_mask = 32;
+	plat->is_pse = 1;
 
 	plat->clk_ptp_rate = 200000000;
 

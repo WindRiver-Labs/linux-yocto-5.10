@@ -887,8 +887,7 @@ static int stmmac_init_ptp(struct stmmac_priv *priv)
 		stmmac_config_sub_second_increment(priv,
 						   priv->ptpaddr,
 						   priv->plat->clk_ptp_rate,
-						   xmac, &sec_inc,
-						   priv->plat->is_hfpga);
+						   xmac, &sec_inc);
 		temp = div_u64(1000000000ULL, sec_inc);
 
 		/* Store sub second increment and flags for later use */
