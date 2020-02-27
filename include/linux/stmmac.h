@@ -296,6 +296,7 @@ struct plat_stmmacenet_data {
 	u32 legos;
 	u32 ftos;
 	u32 fgos;
+	bool is_pse;
 	struct mdio_board_info *intel_bi;
 	struct dwxpcs_platform_data *xpcs_pdata;
 	bool phy_wol_thru_pmc;

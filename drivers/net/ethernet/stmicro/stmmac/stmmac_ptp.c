@@ -258,6 +258,20 @@ void stmmac_ptp_register(struct stmmac_priv *priv)
 {
 	int i;
 
+	void __iomem *ioaddr = priv->hw->pcsr;
+	u32 gpio_value;
+
+	gpio_value = readl(ioaddr + GMAC_GPIO_STATUS);
+
+	if (priv->plat->is_pse) {
+		gpio_value &= ~PTP_PSE_CLK_FREQ_MASK;
+		gpio_value |= PTP_PSE_CLK_FREQ_200MHZ;
+	} else {
+		gpio_value &= ~GPO0;
+	}
+
+	writel(gpio_value, ioaddr + GMAC_GPIO_STATUS);
+
 	if (priv->plat->ptp_clk_freq_config)
 		priv->plat->ptp_clk_freq_config(priv);
 
