@@ -87,6 +87,57 @@ static u32 imx_mu_read(struct imx_mu_priv *priv, u32 offs)
 	return ioread32(priv->base + offs);
 }
 
+static int imx_mu_tx_waiting_write(struct imx_mu_priv *priv, u32 idx, u32 val)
+{
+	u32 timeout = 500;
+	u32 status;
+	u32 can_write;
+
+	dev_dbg(priv->dev, "Trying to write %.8x to idx %d\n", val, idx);
+
+	do {
+		status = imx_mu_read(priv, priv->dcfg->xSR);
+		can_write = status & IMX_MU_xSR_TEn(idx % 4);
+		timeout--;
+	} while (!can_write && timeout > 0);
+
+	if (timeout == 0) {
+		dev_err(priv->dev, "timeout trying to write %.8x at %d(%.8x)\n",
+			val, idx, status);
+		return -ETIME;
+	}
+
+	imx_mu_write(priv, val, priv->dcfg->xTR[idx % 4]);
+
+	return 0;
+}
+
+static int imx_mu_rx_waiting_read(struct imx_mu_priv *priv, u32 idx, u32 *val)
+{
+	u32 timeout = 500;
+	u32 status;
+	u32 can_read;
+
+	dev_dbg(priv->dev, "Trying to read from idx %d\n", idx);
+
+	do {
+		status = imx_mu_read(priv, priv->dcfg->xSR);
+		can_read = status & IMX_MU_xSR_RFn(idx % 4);
+		timeout--;
+	} while (!can_read && timeout > 0);
+
+	if (timeout == 0) {
+		dev_err(priv->dev, "timeout trying to read idx %d (%.8x)\n",
+			idx, status);
+		return -ETIME;
+	}
+
+	*val = imx_mu_read(priv, priv->dcfg->xRR[idx % 4]);
+	dev_dbg(priv->dev, "Read %.8x\n", *val);
+
+	return 0;
+}
+
 static u32 imx_mu_xcr_rmw(struct imx_mu_priv *priv, u32 set, u32 clr)
 {
 	unsigned long flags;
@@ -118,7 +169,9 @@ static int imx_mu_generic_tx(struct imx_mu_priv *priv,
 		tasklet_schedule(&cp->txdb_tasklet);
 		break;
 	default:
-		dev_warn_ratelimited(priv->dev, "Send data on wrong channel type: %d\n", cp->type);
+		dev_warn_ratelimited(priv->dev,
+				     "Send data on wrong channel type: %d\n",
+				     cp->type);
 		return -EINVAL;
 	}
 
@@ -217,6 +270,124 @@ static int imx_mu_scu_rx(struct imx_mu_priv *priv,
 	return 0;
 }
 
+static int imx_mu_generic_rxdb(struct imx_mu_priv *priv,
+			       struct imx_mu_con_priv *cp)
+{
+	imx_mu_write(priv, IMX_MU_xSR_GIPn(cp->idx), priv->dcfg->xSR);
+	mbox_chan_received_data(cp->chan, NULL);
+
+	return 0;
+}
+
+static int imx_mu_seco_tx(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp,
+			  void *data)
+{
+	struct imx_sc_rpc_msg_max *msg = data;
+	u32 *arg = data;
+	u32 byte_size;
+	int err;
+	int i;
+
+	dev_dbg(priv->dev, "Sending message\n");
+
+	switch (cp->type) {
+	case IMX_MU_TYPE_TXDB:
+		byte_size = msg->hdr.size * sizeof(u32);
+		if (byte_size > sizeof(*msg)) {
+			/*
+			 * The real message size can be different to
+			 * struct imx_sc_rpc_msg_max size
+			 */
+			dev_err(priv->dev,
+				"Exceed max msg size (%li) on TX, got: %i\n",
+				sizeof(*msg), byte_size);
+			return -EINVAL;
+		}
+
+		print_hex_dump_debug("from client ", DUMP_PREFIX_OFFSET, 4, 4,
+				     data, byte_size, false);
+
+		/* Send first word */
+		dev_dbg(priv->dev, "Sending header\n");
+		imx_mu_write(priv, *arg++, priv->dcfg->xTR[0]);
+
+		/* Send signaling */
+		dev_dbg(priv->dev, "Sending signaling\n");
+		imx_mu_xcr_rmw(priv, IMX_MU_xCR_GIRn(cp->idx), 0);
+
+		/* Send words to fill the mailbox */
+		for (i = 1; i < 4 && i < msg->hdr.size; i++) {
+			dev_dbg(priv->dev, "Sending word %d\n", i);
+			imx_mu_write(priv, *arg++, priv->dcfg->xTR[i % 4]);
+		}
+
+		/* Send rest of message waiting for remote read */
+		for (; i < msg->hdr.size; i++) {
+			dev_dbg(priv->dev, "Sending word %d\n", i);
+			err = imx_mu_tx_waiting_write(priv, i, *arg++);
+			if (err) {
+				dev_err(priv->dev, "Timeout tx %d\n", i);
+				return err;
+			}
+		}
+
+		/* Simulate hack for mbox framework */
+		tasklet_schedule(&cp->txdb_tasklet);
+
+		break;
+	default:
+		dev_warn_ratelimited(priv->dev,
+				     "Send data on wrong channel type: %d\n",
+				     cp->type);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int imx_mu_seco_rxdb(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp)
+{
+	struct imx_sc_rpc_msg_max msg;
+	u32 *data = (u32 *)&msg;
+	u32 byte_size;
+	int err;
+	int i;
+
+	dev_dbg(priv->dev, "Receiving message\n");
+
+	/* Read header */
+	dev_dbg(priv->dev, "Receiving header\n");
+	*data++ = imx_mu_read(priv, priv->dcfg->xRR[0]);
+	byte_size = msg.hdr.size * sizeof(u32);
+	if (byte_size > sizeof(msg)) {
+		dev_err(priv->dev, "Exceed max msg size (%li) on RX, got: %i\n",
+			sizeof(msg), byte_size);
+		return -EINVAL;
+	}
+
+	/* Read message waiting they are written */
+	for (i = 1; i < msg.hdr.size; i++) {
+		dev_dbg(priv->dev, "Receiving word %d\n", i);
+		err = imx_mu_rx_waiting_read(priv, i, data++);
+		if (err) {
+			dev_err(priv->dev, "Timeout rx %d\n", i);
+			return err;
+		}
+	}
+
+	/* Clear GIP */
+	imx_mu_write(priv, IMX_MU_xSR_GIPn(cp->idx), priv->dcfg->xSR);
+
+	print_hex_dump_debug("to client ", DUMP_PREFIX_OFFSET, 4, 4,
+			     &msg, byte_size, false);
+
+	/* send data to client */
+	dev_dbg(priv->dev, "Sending message to client\n");
+	mbox_chan_received_data(cp->chan, (void *)&msg);
+
+	return 0;
+}
+
 static void imx_mu_txdb_tasklet(unsigned long data)
 {
 	struct imx_mu_con_priv *cp = (struct imx_mu_con_priv *)data;
@@ -233,6 +404,8 @@ static irqreturn_t imx_mu_isr(int irq, void *p)
 
 	ctrl = imx_mu_read(priv, priv->dcfg->xCR);
 	val = imx_mu_read(priv, priv->dcfg->xSR);
+
+	dev_dbg(priv->dev, "isr: status: %.8x ctrl: %.8x\n", val, ctrl);
 
 	switch (cp->type) {
 	case IMX_MU_TYPE_TX:
@@ -260,8 +433,7 @@ static irqreturn_t imx_mu_isr(int irq, void *p)
 	} else if (val == IMX_MU_xSR_RFn(cp->idx)) {
 		priv->dcfg->rx(priv, cp);
 	} else if (val == IMX_MU_xSR_GIPn(cp->idx)) {
-		imx_mu_write(priv, IMX_MU_xSR_GIPn(cp->idx), priv->dcfg->xSR);
-		mbox_chan_received_data(chan, NULL);
+		priv->dcfg->rxdb(priv, cp);
 	} else {
 		dev_warn_ratelimited(priv->dev, "Not handled interrupt\n");
 		return IRQ_NONE;
@@ -360,7 +532,8 @@ static struct mbox_chan *imx_mu_scu_xlate(struct mbox_controller *mbox,
 	u32 type, idx, chan;
 
 	if (sp->args_count != 2) {
-		dev_err(mbox->dev, "Invalid argument count %d\n", sp->args_count);
+		dev_err(mbox->dev, "Invalid argument count %d\n",
+			sp->args_count);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -405,11 +578,35 @@ static struct mbox_chan * imx_mu_xlate(struct mbox_controller *mbox,
 	chan = type * 4 + idx;
 
 	if (chan >= mbox->num_chans) {
-		dev_err(mbox->dev, "Not supported channel number: %d. (type: %d, idx: %d)\n", chan, type, idx);
+		dev_err(mbox->dev,
+			"Not supported chan number: %d. (type: %d, idx: %d)\n",
+			chan, type, idx);
 		return ERR_PTR(-EINVAL);
 	}
 
 	return &mbox->chans[chan];
+}
+
+static struct mbox_chan * imx_mu_seco_xlate(struct mbox_controller *mbox,
+					    const struct of_phandle_args *sp)
+{
+	u32 type;
+
+	if (sp->args_count < 1) {
+		dev_err(mbox->dev, "Invalid argument count %d\n",
+			sp->args_count);
+		return ERR_PTR(-EINVAL);
+	}
+
+	type = sp->args[0]; /* channel type */
+
+	/* Only supports TXDB and RXDB */
+	if (type == IMX_MU_TYPE_TX || type == IMX_MU_TYPE_RX) {
+		dev_err(mbox->dev, "Invalid type: %d\n", type);
+		return ERR_PTR(-EINVAL);
+	}
+
+	return imx_mu_xlate(mbox, sp);
 }
 
 static void imx_mu_init_generic(struct imx_mu_priv *priv)
@@ -457,6 +654,12 @@ static void imx_mu_init_scu(struct imx_mu_priv *priv)
 
 	/* Set default MU configuration */
 	imx_mu_write(priv, 0, priv->dcfg->xCR);
+}
+
+static void imx_mu_seco_init(struct imx_mu_priv *priv)
+{
+	imx_mu_init_generic(priv);
+	priv->mbox.of_xlate = imx_mu_seco_xlate;
 }
 
 static int imx_mu_probe(struct platform_device *pdev)
@@ -551,8 +754,9 @@ static int imx_mu_remove(struct platform_device *pdev)
 }
 
 struct imx_mu_dcfg {
-       int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp, void *data);
-       int (*rx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
+	int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp,
+                 void *data);
+	int (*rxdb)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
        void (*init)(struct imx_mu_priv *priv);
        u32     xTR[4];         /* Transmit Registers */
        u32     xRR[4];         /* Receive Registers */
@@ -573,6 +777,7 @@ static const struct imx_mu_dcfg imx_mu_cfg_imx8_scu = {
 static const struct imx_mu_dcfg imx_mu_cfg_imx6sx = {
        .tx     = imx_mu_generic_tx,
        .rx     = imx_mu_generic_rx,
+	.rxdb   = imx_mu_generic_rxdb,
        .init   = imx_mu_init_generic,
        .xTR    = {0x0, 0x4, 0x8, 0xc},
        .xRR    = {0x10, 0x14, 0x18, 0x1c},
@@ -590,10 +795,20 @@ static const struct imx_mu_dcfg imx_mu_cfg_imx7ulp = {
        .xCR    = 0x64,
 };
 
+static const struct imx_mu_dcfg imx_mu_cfg_imx8_seco = {
+       .tx     = imx_mu_seco_tx,
+       .rxdb   = imx_mu_seco_rxdb,
+       .init   = imx_mu_seco_init,
+       .xTR    = {0x0, 0x4, 0x8, 0xc},
+       .xRR    = {0x10, 0x14, 0x18, 0x1c},
+       .xSR    = 0x20,
+       .xCR    = 0x24,
+};
+
 static const struct of_device_id imx_mu_dt_ids[] = {
 	{ .compatible = "fsl,imx7ulp-mu", .data = &imx_mu_cfg_imx7ulp },
 	{ .compatible = "fsl,imx6sx-mu", .data = &mx_mu_cfg_imx6sx },
-	{ .compatible = "fsl,imx8-mu-scu", .data = &imx_mu_cfg_imx8_scu },
+	{ .compatible = "fsl,imx8-mu-seco", .data = &imx_mu_cfg_imx8_seco },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, imx_mu_dt_ids);
