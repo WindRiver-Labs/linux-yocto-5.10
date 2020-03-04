@@ -72,16 +72,6 @@ struct imx_mu_priv {
 	bool			side_b;
 };
 
-struct imx_mu_dcfg {
-	int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp, void *data);
-	int (*rx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
-	void (*init)(struct imx_mu_priv *priv);
-	u32	xTR[4];		/* Transmit Registers */
-	u32	xRR[4];		/* Receive Registers */
-	u32	xSR;		/* Status Register */
-	u32	xCR;		/* Control Register */
-};
-
 static struct imx_mu_priv *to_imx_mu_priv(struct mbox_controller *mbox)
 {
 	return container_of(mbox, struct imx_mu_priv, mbox);
@@ -560,24 +550,14 @@ static int imx_mu_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct imx_mu_dcfg imx_mu_cfg_imx6sx = {
-	.tx	= imx_mu_generic_tx,
-	.rx	= imx_mu_generic_rx,
-	.init	= imx_mu_init_generic,
-	.xTR	= {0x0, 0x4, 0x8, 0xc},
-	.xRR	= {0x10, 0x14, 0x18, 0x1c},
-	.xSR	= 0x20,
-	.xCR	= 0x24,
-};
-
-static const struct imx_mu_dcfg imx_mu_cfg_imx7ulp = {
-	.tx	= imx_mu_generic_tx,
-	.rx	= imx_mu_generic_rx,
-	.init	= imx_mu_init_generic,
-	.xTR	= {0x20, 0x24, 0x28, 0x2c},
-	.xRR	= {0x40, 0x44, 0x48, 0x4c},
-	.xSR	= 0x60,
-	.xCR	= 0x64,
+struct imx_mu_dcfg {
+       int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp, void *data);
+       int (*rx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
+       void (*init)(struct imx_mu_priv *priv);
+       u32     xTR[4];         /* Transmit Registers */
+       u32     xRR[4];         /* Receive Registers */
+       u32     xSR;            /* Status Register */
+       u32     xCR;            /* Control Register */
 };
 
 static const struct imx_mu_dcfg imx_mu_cfg_imx8_scu = {
@@ -590,9 +570,29 @@ static const struct imx_mu_dcfg imx_mu_cfg_imx8_scu = {
 	.xCR	= 0x24,
 };
 
+static const struct imx_mu_dcfg imx_mu_cfg_imx6sx = {
+       .tx     = imx_mu_generic_tx,
+       .rx     = imx_mu_generic_rx,
+       .init   = imx_mu_init_generic,
+       .xTR    = {0x0, 0x4, 0x8, 0xc},
+       .xRR    = {0x10, 0x14, 0x18, 0x1c},
+       .xSR    = 0x20,
+       .xCR    = 0x24,
+};
+
+static const struct imx_mu_dcfg imx_mu_cfg_imx7ulp = {
+       .tx     = imx_mu_generic_tx,
+       .rx     = imx_mu_generic_rx,
+       .init   = imx_mu_init_generic,
+       .xTR    = {0x20, 0x24, 0x28, 0x2c},
+       .xRR    = {0x40, 0x44, 0x48, 0x4c},
+       .xSR    = 0x60,
+       .xCR    = 0x64,
+};
+
 static const struct of_device_id imx_mu_dt_ids[] = {
 	{ .compatible = "fsl,imx7ulp-mu", .data = &imx_mu_cfg_imx7ulp },
-	{ .compatible = "fsl,imx6sx-mu", .data = &imx_mu_cfg_imx6sx },
+	{ .compatible = "fsl,imx6sx-mu", .data = &mx_mu_cfg_imx6sx },
 	{ .compatible = "fsl,imx8-mu-scu", .data = &imx_mu_cfg_imx8_scu },
 	{ },
 };
