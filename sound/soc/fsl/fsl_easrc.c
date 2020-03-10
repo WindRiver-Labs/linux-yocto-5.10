@@ -1876,6 +1876,7 @@ static int fsl_easrc_probe(struct platform_device *pdev)
 	struct device_node *np;
 	void __iomem *regs;
 	int ret, irq;
+	u32 rstap = 0;
 
 	easrc = devm_kzalloc(dev, sizeof(*easrc), GFP_KERNEL);
 	if (!easrc)
@@ -1934,6 +1935,22 @@ static int fsl_easrc_probe(struct platform_device *pdev)
 
 	easrc_priv->rs_num_taps = EASRC_RS_32_TAPS;
 	easrc_priv->const_coeff = 0x3FF0000000000000;
+
+	of_property_read_u32(np, "fsl,asrc-rstap", &rstap);
+       switch (rstap) {
+       case 32:
+               easrc->rs_num_taps = EASRC_RS_32_TAPS;
+               break;
+       case 64:
+               easrc->rs_num_taps = EASRC_RS_64_TAPS;
+               break;
+       case 128:
+               easrc->rs_num_taps = EASRC_RS_128_TAPS;
+               break;
+       default:
+               easrc->rs_num_taps = EASRC_RS_32_TAPS;
+               break;
+       }
 
 	ret = of_property_read_u32(np, "fsl,asrc-rate", &easrc->asrc_rate);
 	if (ret) {
