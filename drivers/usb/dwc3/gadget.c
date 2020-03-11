@@ -180,6 +180,7 @@ static void dwc3_gadget_del_and_unmap_request(struct dwc3_ep *dep,
 	list_del(&req->list);
 	req->remaining = 0;
 	req->needs_extra_trb = false;
+	req->skip_remain_trbs = false;
 
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
@@ -2745,8 +2746,12 @@ static int dwc3_gadget_ep_reclaim_completed_trb(struct dwc3_ep *dep,
 	if ((trb->ctrl & DWC3_TRB_CTRL_HWO) && status != -ESHUTDOWN)
 		return 1;
 
-	if (event->status & DEPEVT_STATUS_SHORT && !chain)
-		return 1;
+	if (event->status & DEPEVT_STATUS_SHORT) {
+		if (chain)
+			req->skip_remain_trbs = true;
+		else
+			return 1;
+	}
 
 	if ((trb->ctrl & DWC3_TRB_CTRL_IOC) ||
 	    (trb->ctrl & DWC3_TRB_CTRL_LST))

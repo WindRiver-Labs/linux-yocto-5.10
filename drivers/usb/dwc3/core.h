@@ -908,6 +908,8 @@ struct dwc3_hwparams {
  *	or unaligned OUT)
  * @direction: IN or OUT direction flag
  * @mapped: true when request has been dma-mapped
+ * @skip_remain_trbs: true if a short packet received so the remain
+	chained trbs should be skipped.
  */
 struct dwc3_request {
 	struct usb_request	request;
@@ -936,6 +938,7 @@ struct dwc3_request {
 	unsigned int		needs_extra_trb:1;
 	unsigned int		direction:1;
 	unsigned int		mapped:1;
+	unsigned                skip_remain_trbs:1;
 };
 
 /*
