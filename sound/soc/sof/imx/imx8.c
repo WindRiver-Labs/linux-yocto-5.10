@@ -403,6 +403,18 @@ static int imx8_ipc_pcm_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+int imx8_dsp_resume(struct snd_sof_dev *sdev)
+{
+       /* nothing to do for now */
+       return 0;
+}
+
+int imx8_dsp_suspend(struct snd_sof_dev *sdev)
+{
+       /* nothing to do for now */
+       return 0;
+}
+
 static struct snd_soc_dai_driver imx8_dai[] = {
 {
 	.name = "esai0",
@@ -474,6 +486,12 @@ struct snd_sof_dsp_ops sof_imx8_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+
+	/* PM */
+       .suspend                = imx8_dsp_suspend,
+       .resume                 = imx8_dsp_resume,
+       .runtime_suspend        = imx8_dsp_suspend,
+       .runtime_resume         = imx8_dsp_resume,
 };
 EXPORT_SYMBOL(sof_imx8_ops);
 
@@ -523,6 +541,12 @@ struct snd_sof_dsp_ops sof_imx8x_ops = {
 			SNDRV_PCM_INFO_INTERLEAVED |
 			SNDRV_PCM_INFO_PAUSE |
 			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP
+
+	/* PM */
+       .suspend                = imx8_dsp_suspend,
+       .resume                 = imx8_dsp_resume,
+       .runtime_suspend        = imx8_dsp_suspend,
+       .runtime_resume         = imx8_dsp_resume,
 };
 EXPORT_SYMBOL(sof_imx8x_ops);
 
