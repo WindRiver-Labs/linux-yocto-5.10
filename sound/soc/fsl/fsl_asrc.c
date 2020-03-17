@@ -24,13 +24,13 @@
 #define IDEAL_RATIO_DECIMAL_DEPTH 26
 
 #define pair_err(fmt, ...) \
-	dev_err(&asrc->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
-
-#define pair_warn(fmt, ...) \
-	dev_warn(&asrc_priv->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
+        dev_err(&asrc->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
 
 #define pair_dbg(fmt, ...) \
-	dev_dbg(&asrc->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
+        dev_dbg(&asrc->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
+
+#define pair_warn(fmt, ...) \
+        dev_warn(&asrc->pdev->dev, "Pair %c: " fmt, 'A' + index, ##__VA_ARGS__)
 
 /* Corresponding to process_option */
 static unsigned int supported_asrc_rate[] = {
@@ -344,8 +344,6 @@ static int fsl_asrc_config_pair(struct fsl_asrc_pair *pair, bool p2p_in, bool p2
 	int pre_proc, post_proc;
 	struct clk *clk;
 	bool ideal;
-	enum asrc_word_width input_word_width;
-	enum asrc_word_width output_word_width;
 
 	if (!config) {
 		pair_err("invalid pair config\n");
@@ -704,10 +702,8 @@ static int fsl_asrc_dai_hw_params(struct snd_pcm_substream *substream,
 		config.input_sample_rate  = rate;
 		config.output_sample_rate = asrc->asrc_rate;
 
-		config.inclk = fsl_asrc_select_clk(asrc_priv,
-				config.input_sample_rate, IN);
-		config.outclk = fsl_asrc_select_clk(asrc_priv,
-				config.output_sample_rate, OUT);
+		fsl_asrc_select_clk(asrc_priv, pair,
+				config.input_sample_rate, config.output_sample_rate);
 
 		ret = fsl_asrc_config_pair(pair, false, true);
 		if (ret) {
@@ -720,14 +716,12 @@ static int fsl_asrc_dai_hw_params(struct snd_pcm_substream *substream,
 		config.input_sample_rate  = asrc->asrc_rate;
 		config.output_sample_rate = rate;
 
-		config.inclk = fsl_asrc_select_clk(asrc_priv,
-				config.input_sample_rate, IN);
-		config.outclk = fsl_asrc_select_clk(asrc_priv,
-				config.output_sample_rate, OUT);
+		fsl_asrc_select_clk(asrc_priv, pair,
+				config.input_sample_rate, config.output_sample_rate);
 
 		ret = fsl_asrc_config_pair(pair, true, false);
 		if (ret) {
-			dev_err(dai->dev, "fail to config asrc pair\n")
+			dev_err(dai->dev, "fail to config asrc pair\n");
 			return ret;
 		}
 	}
@@ -802,6 +796,10 @@ static int fsl_asrc_dai_probe(struct snd_soc_dai *dai)
 #define FSL_ASRC_FORMATS_TX	(SNDRV_PCM_FMTBIT_S24_LE | \
 				 SNDRV_PCM_FMTBIT_S16_LE | \
 				 SNDRV_PCM_FMTBIT_S8 | \
+				 SNDRV_PCM_FMTBIT_S24_3LE)
+
+#define FSL_ASRC_FORMATS	(SNDRV_PCM_FMTBIT_S24_LE | \
+				 SNDRV_PCM_FMTBIT_S16_LE | \
 				 SNDRV_PCM_FMTBIT_S24_3LE)
 
 static struct snd_soc_dai_driver fsl_asrc_dai = {
@@ -1099,7 +1097,7 @@ static int fsl_asrc_probe(struct platform_device *pdev)
 
 	asrc->paddr = res->start;
 
-	asrc->regmap = devm_regmap_init_mmio_clk(&pdev->dev, "mem", regs,
+	asrc_priv->regmap = devm_regmap_init_mmio_clk(&pdev->dev, NULL, regs,
 						 &fsl_asrc_regmap_config);
 	if (IS_ERR(asrc->regmap)) {
 		dev_err(&pdev->dev, "failed to init regmap\n");
@@ -1194,11 +1192,17 @@ static int fsl_asrc_probe(struct platform_device *pdev)
 		}
 	}
 
+	ret = clk_prepare_enable(asrc_priv->mem_clk);
+        if (ret)
+               return ret;
+
 	ret = fsl_asrc_init(asrc);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to init asrc %d\n", ret);
 		return ret;
 	}
+
+	clk_disable_unprepare(asrc_priv->mem_clk);
 
 	asrc->channel_avail = 10;
 
@@ -1246,12 +1250,6 @@ static int fsl_asrc_probe(struct platform_device *pdev)
 					      &fsl_asrc_dai, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register ASoC DAI\n");
-		return ret;
-	}
-
-	ret = fsl_asrc_m2m_init(asrc_priv);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to init m2m device %d\n", ret);
 		return ret;
 	}
 
