@@ -10,7 +10,6 @@
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
-#include <linux/pm_domain.h>
 #include <sound/dmaengine_pcm.h>
 #include <sound/pcm_params.h>
 
@@ -993,7 +992,6 @@ static int fsl_esai_probe(struct platform_device *pdev)
 	void __iomem *regs;
 	int irq, ret;
 	unsigned long irqflag = 0;
-	int i, num_domains = 0;
 
 	esai_priv = devm_kzalloc(&pdev->dev, sizeof(*esai_priv), GFP_KERNEL);
 	if (!esai_priv)
