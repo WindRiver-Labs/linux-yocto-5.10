@@ -210,6 +210,16 @@
 				"sys_pll1_800m", "dram_pll_div";
 	};
 
+	/* HSIO SS */
+        hsiomix_pd: hsiomix-pd {
+                        compatible = "fsl,imx8m-pm-domain";
+                        active-wakeup;
+                        rpm-always-on;
+                        #power-domain-cells = <0>;
+                        domain-index = <0>;
+                        domain-name = "hsiomix";
+        };
+
 	psci {
 		compatible = "arm,psci-1.0";
 		method = "smc";
