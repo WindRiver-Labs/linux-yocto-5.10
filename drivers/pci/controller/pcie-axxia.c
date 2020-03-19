@@ -135,6 +135,10 @@ static int trace;
 module_param(trace, int, 0660);
 MODULE_PARM_DESC(trace, "Trace PCI Accesses");
 
+static int msi_data_below_4g;
+module_param(msi_data_below_4g, int, 0660);
+MODULE_PARM_DESC(msi_data_below_4g, "Allocate MSI Data Below 4G");
+
 int
 axxia_is_x9(void)
 {
@@ -720,11 +724,17 @@ static const struct irq_domain_ops axxia_msi_domain_ops = {
 };
 
 #endif
-void axxia_dw_pcie_msi_init(struct pcie_port *pp)
+static void axxia_dw_pcie_msi_init(struct pcie_port *pp)
 {
 	u64 msi_target;
 
-	pp->msi_data = __get_free_pages(GFP_KERNEL, 0);
+	if (msi_data_below_4g) {
+		pp->msi_data = __get_free_pages(GFP_DMA, 0);
+		dev_info(pp->dev, "Allocated MSI Data Below 4G\n");
+	} else {
+		pp->msi_data = __get_free_pages(GFP_KERNEL, 0);
+		dev_info(pp->dev, "Allocated MSI Data\n");
+	}
 
 	msi_target = virt_to_phys((void *)pp->msi_data);
 	dev_info(pp->dev,
@@ -1518,6 +1528,12 @@ int axxia_pcie_host_init(struct pcie_port *pp)
 	unsigned long mem_offset;
 	LIST_HEAD(res);
 	int i;
+
+#ifdef CONFIG_PCI_AXXIA_DW_MSI_DATA_BELOW_4G
+	msi_data_below_4g = 1;
+#else
+	msi_data_below_4g = 0;
+#endif
 
 	/* Find the address cell size and the number of cells in order to get
 	 * the untranslated address.
