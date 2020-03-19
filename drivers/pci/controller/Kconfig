@@ -23,6 +23,16 @@ config PCI_AXXIA_DW
 	 XLF/AXC67xx families of devices.
 	 Only RootComplex mode is supported.
 
+config PCI_AXXIA_DW_MSI_DATA_BELOW_4G
+       bool "Allocate MSI Data Below 4G"
+       depends on PCI_AXXIA_DW
+       default y
+       help
+        In the Axxia PCIe DesignWare controller, as endpoints may
+	only support 32 bit addressing, limit the allocation of	MSI
+	data to the first 4G of memory. The module parameter is
+	msi_data_below_4g.
+
 config PCI_MVEBU
 	bool "Marvell EBU PCIe controller"
 	depends on ARCH_MVEBU || ARCH_DOVE || COMPILE_TEST
