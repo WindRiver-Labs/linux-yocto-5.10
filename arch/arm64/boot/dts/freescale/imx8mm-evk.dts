@@ -75,6 +75,16 @@
 	};
 };
 
+&sai2 {
+       #sound-dai-cells = <0>;
+       pinctrl-names = "default";
+       pinctrl-0 = <&pinctrl_sai2>;
+       assigned-clocks = <&clk IMX8MM_CLK_SAI2>;
+       assigned-clock-parents = <&clk IMX8MM_AUDIO_PLL1_OUT>;
+       assigned-clock-rates = <24576000>;
+       status = "okay";
+};
+
 &usdhc1 {
 	pinctrl-names = "default", "state_100mhz", "state_200mhz";
 	pinctrl-0 = <&pinctrl_usdhc1>, <&pinctrl_usdhc1_gpio>;
@@ -122,6 +132,30 @@
                 gpio-controller;
                 #gpio-cells = <2>;
                 vcc-supply = <&buck4_reg>;
+        };
+
+	bt_sco_codec: bt_sco_codec {
+                #sound-dai-cells = <0>;
+                compatible = "linux,bt-sco";
+        };
+
+        sound-bt-sco {
+                compatible = "simple-audio-card";
+                simple-audio-card,name = "bt-sco-audio";
+                simple-audio-card,format = "i2s";
+                simple-audio-card,bitclock-inversion;
+                simple-audio-card,frame-master = <&btcpu>;
+                simple-audio-card,bitclock-master = <&btcpu>;
+
+                btcpu: simple-audio-card,cpu {
+                        sound-dai = <&sai2>;
+                        dai-tdm-slot-num = <2>;
+                        dai-tdm-slot-width = <16>;
+                };
+
+                simple-audio-card,codec {
+                        sound-dai = <&bt_sco_codec>;
+                };
         };
 
 	sound-wm8524 {
@@ -203,6 +237,15 @@
 };
 
 &iomuxc {
+	pinctrl_sai2: sai2grp {
+		fsl,pins = <
+			MX8MM_IOMUXC_SAI2_TXC_SAI2_TX_BCLK      0xd6
+			MX8MM_IOMUXC_SAI2_TXFS_SAI2_TX_SYNC     0xd6
+			MX8MM_IOMUXC_SAI2_TXD0_SAI2_TX_DATA0    0xd6
+			MX8MM_IOMUXC_SAI2_RXD0_SAI2_RX_DATA0    0xd6
+		>;
+	};
+
 	pinctrl_csi_pwn: csi_pwn_grp {
                 fsl,pins = <
                         MX8MM_IOMUXC_GPIO1_IO07_GPIO1_IO7               0x19
