@@ -214,7 +214,8 @@ int rproc_elf_load_segments(struct rproc *rproc, const struct firmware *fw)
 
 		/* put the segment where the remote processor expects it */
 		if (filesz)
-			memcpy(ptr, elf_data + offset, filesz);
+			rproc_memcpy(rproc, ptr, elf_data + phdr->p_offset,
+                                    filesz, 0);
 
 	}
 
