@@ -361,7 +361,7 @@ static void kick_trng(struct device *dev, int ent_delay)
 	 * properly invalidate the entropy in the entropy register and
 	 * force re-generation.
 	 */
-	clrsetbits_32(&r4tst->rtmctl, 0, RTMCTL_PRGM | RTMCTL_ACC);
+	clrsetbits_32(&r4tst->rtmctl, 0, RTMCTL_PRGM);
 
 	/*
 	 * Performance-wise, it does not make sense to
@@ -391,8 +391,7 @@ start_rng:
 	 * select raw sampling in both entropy shifter
 	 * and statistical checker; ; put RNG4 into run mode
 	 */
-	clrsetbits_32(&r4tst->rtmctl, RTMCTL_PRGM | RTMCTL_ACC,
-		      RTMCTL_SAMP_MODE_RAW_ES_SC);
+	clrsetbits_32(&r4tst->rtmctl, RTMCTL_PRGM, RTMCTL_SAMP_MODE_RAW_ES_SC);
 }
 
 static int caam_get_era_from_hw(struct caam_perfmon __iomem *perfmon)
