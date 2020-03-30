@@ -30,6 +30,8 @@
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <dt-bindings/firmware/imx/rsrc.h>
+#include <linux/firmware/imx/svc/misc.h>
 
 #define DRV_NAME			"flexcan"
 
@@ -62,6 +64,7 @@
 #define FLEXCAN_MCR_IDAM_B		(0x1 << 8)
 #define FLEXCAN_MCR_IDAM_C		(0x2 << 8)
 #define FLEXCAN_MCR_IDAM_D		(0x3 << 8)
+#define FLEXCAN_QUIRK_USE_SCFW                    BIT(10) /* Use System Controller Firmware */
 
 /* FLEXCAN control register (CANCTRL) bits */
 #define FLEXCAN_CTRL_PRESDIV(x)		(((x) & 0xff) << 24)
@@ -434,30 +437,6 @@ static const struct can_bittiming_const flexcan_bittiming_const = {
 	.sjw_max = 4,
 	.brp_min = 1,
 	.brp_max = 256,
-	.brp_inc = 1,
-};
-
-static const struct can_bittiming_const flexcan_fd_bittiming_const = {
-	.name = DRV_NAME,
-	.tseg1_min = 2,
-	.tseg1_max = 96,
-	.tseg2_min = 2,
-	.tseg2_max = 32,
-	.sjw_max = 16,
-	.brp_min = 1,
-	.brp_max = 1024,
-	.brp_inc = 1,
-};
-
-static const struct can_bittiming_const flexcan_fd_data_bittiming_const = {
-	.name = DRV_NAME,
-	.tseg1_min = 2,
-	.tseg1_max = 39,
-	.tseg2_min = 2,
-	.tseg2_max = 8,
-	.sjw_max = 4,
-	.brp_min = 1,
-	.brp_max = 1024,
 	.brp_inc = 1,
 };
 
@@ -1605,8 +1584,7 @@ static int flexcan_chip_start(struct net_device *dev)
 	/* FDCTRL */
 	if (priv->can.ctrlmode_supported & CAN_CTRLMODE_FD) {
 		reg_fdctrl = priv->read(&regs->fdctrl) & ~FLEXCAN_FDCTRL_FDRATE;
-		reg_fdctrl &= ~FLEXCAN_FDCTRL_TDCEN;
-		reg_fdctrl &= ~(FLEXCAN_FDCTRL_MBDSR1(0x3) | FLEXCAN_FDCTRL_MBDSR0(0x3));
+		reg_fdctrl &= ~(FLEXCAN_FDCTRL_MBDSR1 | FLEXCAN_FDCTRL_MBDSR0);
 		reg_mcr = priv->read(&regs->mcr) & ~FLEXCAN_MCR_FDEN;
 		reg_ctrl2 = priv->read(&regs->ctrl2) & ~FLEXCAN_CTRL2_ISOCANFDEN;
 
@@ -1616,7 +1594,7 @@ static int flexcan_chip_start(struct net_device *dev)
 		 */
 		if (priv->can.ctrlmode & CAN_CTRLMODE_FD) {
 			reg_fdctrl |= FLEXCAN_FDCTRL_FDRATE;
-			reg_fdctrl |= FLEXCAN_FDCTRL_MBDSR1(0x3) | FLEXCAN_FDCTRL_MBDSR0(0x3);
+			reg_fdctrl |= FLEXCAN_FDCTRL_MBDSR1 | FLEXCAN_FDCTRL_MBDSR0;
 			reg_mcr |= FLEXCAN_MCR_FDEN;
 
 			if (!(priv->can.ctrlmode & CAN_CTRLMODE_FD_NON_ISO))
