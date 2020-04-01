@@ -125,7 +125,7 @@
                                <48000>,
                                <96000>,
                                <192000>;
-               status = "disabled";
+		status = "okay";
        };
 
 	sound-wm8960 {
@@ -281,6 +281,10 @@
        };
 };
 
+&aud2htx {
+       status = "okay";
+};
+
 &clk {
        init-on-array = <IMX8MP_CLK_HSIO_ROOT>;
 	codec: wm8960@1a {
@@ -291,6 +295,10 @@
                wlf,shared-lrclk;
                SPKVDD1-supply = <&reg_audio_pwr>;
        };
+};
+
+&irqsteer_hdmi {
+       status = "okay";
 };
 
 &i2c2 {
@@ -419,11 +427,35 @@
        status = "okay";
 };
 
+&hdmimix_clk {
+       status = "okay";
+};
+
+&hdmimix_reset {
+       status = "okay";
+};
+
+&hdmi_pavi {
+       status = "okay";
+};
+
+&hdmi {
+       status = "okay";
+};
+
+&hdmiphy {
+       status = "okay";
+};
+
 &lcdif1 {
        status = "okay";
 };
 
 &lcdif2 {
+       status = "okay";
+};
+
+&lcdif3 {
        status = "okay";
 };
 
