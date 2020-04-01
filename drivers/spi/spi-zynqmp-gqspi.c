@@ -1152,7 +1152,7 @@ static int zynqmp_qspi_exec_op(struct spi_mem *mem,
 
 	if (op->data.nbytes) {
 		if (mem->spi->master->flags & SPI_MASTER_DATA_STRIPE) {
-			if (update_stripe(op->cmd.opcode)) {
+			if (update_stripe(op)) {
 				genfifoentry |= GQSPI_GENFIFO_STRIPE;
 			}
 		}
