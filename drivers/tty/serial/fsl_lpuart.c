@@ -1011,7 +1011,7 @@ static irqreturn_t lpuart_int(int irq, void *dev_id)
 
 	sts = readb(sport->port.membase + UARTSR1);
 
-	if (sts & UARTSR1_OR) {
+	if (sts & UARTSR1_OR && !sport->lpuart_dma_rx_use) {
 		lpuart_handle_rx_overrun(sport);
 		return IRQ_HANDLED;
 	}

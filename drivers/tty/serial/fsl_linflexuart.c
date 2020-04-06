@@ -1,17 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale linflexuart serial port driver
  *
  * Copyright 2012-2016 Freescale Semiconductor, Inc.
- *
- * (C) Copyright 2017-2019 NXP
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * Copyright 2017-2020 NXP
  */
 
-#if defined(CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
+#if defined(CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE) && \
+	defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
 #endif
 
@@ -57,6 +53,7 @@
 #define GCR	0x004C	/* Global control register			*/
 #define UARTPTO	0x0050	/* UART preset timeout register			*/
 #define UARTCTO	0x0054	/* UART current timeout register		*/
+
 /* The offsets for DMARXE/DMATXE in master mode only			*/
 #define DMATXE	0x0058	/* DMA Tx enable register			*/
 #define DMARXE	0x005C	/* DMA Rx enable register			*/
@@ -70,7 +67,7 @@
 #define LINFLEXD_LINCR1_BF		BIT(7)
 
 #define LINFLEXD_LINSR_LINS_INITMODE	BIT(12)
-#define LINFLEXD_LINSR_LINS_MASK	(0xF<<12)
+#define LINFLEXD_LINSR_LINS_MASK	(0xF << 12)
 
 #define LINFLEXD_LINIER_SZIE		BIT(15)
 #define LINFLEXD_LINIER_OCIE		BIT(14)
@@ -87,16 +84,16 @@
 #define LINFLEXD_LINIER_DTIE		BIT(1)
 #define LINFLEXD_LINIER_HRIE		BIT(0)
 
-#define LINFLEXD_UARTCR_OSR_MASK	(0xF<<24)
+#define LINFLEXD_UARTCR_OSR_MASK	(0xF << 24)
 #define LINFLEXD_UARTCR_OSR(uartcr)	(((uartcr) \
 					& LINFLEXD_UARTCR_OSR_MASK) >> 24)
 
 #define LINFLEXD_UARTCR_ROSE		BIT(23)
 
-#define LINFLEXD_UARTCR_SBUR_MASK	(0x3<<17)
-#define LINFLEXD_UARTCR_SBUR_1SBITS	(0x0<<17)
-#define LINFLEXD_UARTCR_SBUR_2SBITS	(0x1<<17)
-#define LINFLEXD_UARTCR_SBUR_3SBITS	(0x2<<17)
+#define LINFLEXD_UARTCR_SBUR_MASK	(0x3 << 17)
+#define LINFLEXD_UARTCR_SBUR_1SBITS	(0x0 << 17)
+#define LINFLEXD_UARTCR_SBUR_2SBITS	(0x1 << 17)
+#define LINFLEXD_UARTCR_SBUR_3SBITS	(0x2 << 17)
 
 #define LINFLEXD_UARTCR_RFBM		BIT(9)
 #define LINFLEXD_UARTCR_TFBM		BIT(8)
@@ -129,7 +126,8 @@
 #define LINFLEXD_UARTSR_DRFRFE		BIT(2)
 #define LINFLEXD_UARTSR_DTFTFF		BIT(1)
 #define LINFLEXD_UARTSR_NF		BIT(0)
-#define LINFLEXD_UARTSR_PE		(LINFLEXD_UARTSR_PE0|LINFLEXD_UARTSR_PE1|LINFLEXD_UARTSR_PE2|LINFLEXD_UARTSR_PE3)
+#define LINFLEXD_UARTSR_PE		(LINFLEXD_UARTSR_PE0 | \
+	LINFLEXD_UARTSR_PE1 | LINFLEXD_UARTSR_PE2 | LINFLEXD_UARTSR_PE3)
 
 #define LINFLEXD_GCR_STOP_MASK		BIT(1)
 #define LINFLEXD_GCR_STOP_1SBITS	(0 << 1)
@@ -141,6 +139,11 @@
 
 #define LINFLEXD_UARTCR_TXFIFO_SIZE	(4)
 #define LINFLEXD_UARTCR_RXFIFO_SIZE	(4)
+
+#define LINFLEXD_UARTSR_PE		(LINFLEXD_UARTSR_PE0 |\
+					 LINFLEXD_UARTSR_PE1 |\
+					 LINFLEXD_UARTSR_PE2 |\
+					 LINFLEXD_UARTSR_PE3)
 
 #define LINFLEX_LDIV_MULTIPLIER		(16)
 
@@ -156,7 +159,7 @@
 #define PREINIT_DELAY			2000 /* us */
 #endif
 
-#define prd_info(a)	;//pr_info(a);
+#define prd_info(a) /* pr_info(a) */
 
 #ifdef CONFIG_CONSOLE_POLL
 struct linflex_poll_ctx {
@@ -207,7 +210,7 @@ MODULE_DEVICE_TABLE(of, linflex_dt_ids);
 #ifdef CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE
 static struct uart_port *earlycon_port;
 static bool linflex_earlycon_same_instance;
-static spinlock_t init_lock;
+static DEFINE_SPINLOCK(init_lock);
 static bool during_init;
 
 static struct {
@@ -571,20 +574,17 @@ static irqreturn_t linflex_rxint(int irq, void *dev_id)
 		flg = TTY_NORMAL;
 		sport->port.icount.rx++;
 
-		if (status & (LINFLEXD_UARTSR_BOF|LINFLEXD_UARTSR_SZF|LINFLEXD_UARTSR_FEF|LINFLEXD_UARTSR_PE)) {
+		if (status & (LINFLEXD_UARTSR_BOF | LINFLEXD_UARTSR_SZF |
+				LINFLEXD_UARTSR_FEF | LINFLEXD_UARTSR_PE)) {
 
-			if (status & LINFLEXD_UARTSR_SZF) {
+			if (status & LINFLEXD_UARTSR_SZF)
 				status |= LINFLEXD_UARTSR_SZF;
-			}
-			if (status & LINFLEXD_UARTSR_BOF) {
+			if (status & LINFLEXD_UARTSR_BOF)
 				status |= LINFLEXD_UARTSR_BOF;
-			}
-			if (status & LINFLEXD_UARTSR_FEF) {
+			if (status & LINFLEXD_UARTSR_FEF)
 				status |= LINFLEXD_UARTSR_FEF;
-			}
-			if (status & LINFLEXD_UARTSR_PE) {
+			if (status & LINFLEXD_UARTSR_PE)
 				status |=  LINFLEXD_UARTSR_PE;
-			}
 		}
 
 		writel(status | LINFLEXD_UARTSR_RMB | LINFLEXD_UARTSR_DRFRFE,
@@ -595,7 +595,7 @@ static irqreturn_t linflex_rxint(int irq, void *dev_id)
 			continue;
 
 #ifdef SUPPORT_SYSRQ
-			sport->port.sysrq = 0;
+		sport->port.sysrq = 0;
 #endif
 		tty_insert_flip_char(port, rx, flg);
 	}
@@ -615,9 +615,9 @@ static irqreturn_t linflex_int(int irq, void *dev_id)
 	status = readl(sport->port.membase + UARTSR);
 
 	if ((status & LINFLEXD_UARTSR_DRFRFE) && !sport->dma_rx_use)
-			linflex_rxint(irq, dev_id);
+		linflex_rxint(irq, dev_id);
 	if ((status & LINFLEXD_UARTSR_DTFTFF) && !sport->dma_tx_use)
-			linflex_txint(irq, dev_id);
+		linflex_txint(irq, dev_id);
 
 	return IRQ_HANDLED;
 }
@@ -645,9 +645,11 @@ static unsigned int linflex_get_mctrl(struct uart_port *port)
 static void linflex_set_mctrl(struct uart_port *port, unsigned int mctrl)
 {
 }
+
 static void linflex_break_ctl(struct uart_port *port, int break_state)
 {
 }
+
 static void linflex_setup_watermark(struct linflex_port *sport)
 {
 	unsigned long cr, ier, cr1, dmarxe, dmatxe;
@@ -921,7 +923,7 @@ linflex_ldiv_multiplier(struct linflex_port *sport)
 
 static void
 linflex_set_termios(struct uart_port *port, struct ktermios *termios,
-			struct ktermios *old )
+			struct ktermios *old)
 {
 #ifndef CONFIG_S32V234_PALLADIUM
 	/*on Palladium we trust the configuration provided by u-boot*/
@@ -938,7 +940,7 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 	cr = old_cr = readl(sport->port.membase + UARTCR);
 
 	/* Enter initialization mode by setting INIT bit */
-	cr1=readl(sport->port.membase + LINCR1);
+	cr1 = readl(sport->port.membase + LINCR1);
 	cr1 |= LINFLEXD_LINCR1_INIT;
 	writel(cr1, sport->port.membase + LINCR1);
 
@@ -958,7 +960,7 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 	/* enter the UART into configuration mode */
 
 	while ((termios->c_cflag & CSIZE) != CS8 &&
-	(termios->c_cflag & CSIZE) != CS7) {
+	       (termios->c_cflag & CSIZE) != CS7) {
 		termios->c_cflag &= ~CSIZE;
 		termios->c_cflag |= old_csize;
 		old_csize = CS8;
@@ -971,7 +973,7 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 
 	if ((termios->c_cflag & CSIZE) == CS8) {
 		/* Word length: WL1WL0:01 */
-		cr = (old_cr | LINFLEXD_UARTCR_WL0)& ~LINFLEXD_UARTCR_WL1;
+		cr = (old_cr | LINFLEXD_UARTCR_WL0) & ~LINFLEXD_UARTCR_WL1;
 	}
 
 	if (termios->c_cflag & CMSPAR) {
@@ -1010,9 +1012,11 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 	if ((termios->c_cflag & PARENB)) {
 		cr |= LINFLEXD_UARTCR_PCE;
 		if (termios->c_cflag & PARODD)
-			cr = (cr | LINFLEXD_UARTCR_PC0)&(~LINFLEXD_UARTCR_PC1);
+			cr = (cr | LINFLEXD_UARTCR_PC0) &
+			     (~LINFLEXD_UARTCR_PC1);
 		else
-			cr = cr & (~LINFLEXD_UARTCR_PC1 & ~LINFLEXD_UARTCR_PC0);
+			cr = cr & (~LINFLEXD_UARTCR_PC1 &
+				   ~LINFLEXD_UARTCR_PC0);
 	} else {
 		cr &= ~LINFLEXD_UARTCR_PCE;
 	}
@@ -1027,8 +1031,11 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 	sport->port.read_status_mask = 0;
 
 	if (termios->c_iflag & INPCK)
-		sport->port.read_status_mask |=	(LINFLEXD_UARTSR_FEF | LINFLEXD_UARTSR_PE0|LINFLEXD_UARTSR_PE1
-										|LINFLEXD_UARTSR_PE2|LINFLEXD_UARTSR_PE3);
+		sport->port.read_status_mask |=	(LINFLEXD_UARTSR_FEF |
+						 LINFLEXD_UARTSR_PE0 |
+						 LINFLEXD_UARTSR_PE1 |
+						 LINFLEXD_UARTSR_PE2 |
+						 LINFLEXD_UARTSR_PE3);
 	if (termios->c_iflag & (IGNBRK | BRKINT | PARMRK))
 		sport->port.read_status_mask |= LINFLEXD_UARTSR_FEF;
 
@@ -1038,6 +1045,7 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 		sport->port.ignore_status_mask |= LINFLEXD_UARTSR_PE;
 	if (termios->c_iflag & IGNBRK) {
 		sport->port.ignore_status_mask |= LINFLEXD_UARTSR_PE;
+
 		/*
 		 * if we're ignoring parity and break indicators,
 		 * ignore overruns too (for real raw support).
@@ -1075,11 +1083,12 @@ linflex_set_termios(struct uart_port *port, struct ktermios *termios,
 	writel(cr1, sport->port.membase + LINCR1);
 
 	/* Workaround for driver hanging when running the 'reboot'
-	command because of the DTFTFF bit in UARTSR not being cleared.
-	The issue is assumed to be caused by a hardware bug.
-	Only apply the workaround after the boot sequence is
-	assumed to be complete.*/
-	if ((jiffies - INITIAL_JIFFIES) / HZ > (unsigned long)10)
+	 * command because of the DTFTFF bit in UARTSR not being cleared.
+	 * The issue is assumed to be caused by a hardware bug.
+	 * Only apply the workaround after the boot sequence is
+	 * assumed to be complete.
+	 */
+	if ((jiffies - INITIAL_JIFFIES) / HZ > 10)
 		linflex_string_write(sport, "", 1);
 
 	spin_unlock_irqrestore(&sport->port.lock, flags);
@@ -1108,14 +1117,15 @@ static void linflex_config_port(struct uart_port *port, int flags)
 		port->type = PORT_LINFLEXUART;
 }
 
-static int linflex_verify_port(struct uart_port *port, struct serial_struct *ser)
+static int linflex_verify_port(struct uart_port *port,
+				struct serial_struct *ser)
 {
 	if ((ser->type != PORT_UNKNOWN && ser->type != PORT_LINFLEXUART) ||
-	    (port->irq != ser->irq) ||
-	    (ser->io_type != UPIO_MEM) ||
-	    (port->uartclk / 16 != ser->baud_base) ||
-	    (port->iobase != ser->port) ||
-	    (ser->hub6 != 0))
+		(port->irq != ser->irq) ||
+		(ser->io_type != UPIO_MEM) ||
+		(port->uartclk / 16 != ser->baud_base) ||
+		(port->iobase != ser->port) ||
+		(ser->hub6 != 0))
 		return -EINVAL;
 
 	return 0;
@@ -1213,7 +1223,8 @@ static int linflex_poll_getchar(struct uart_port *port)
 
 	if (!sport->dma_rx_use) {
 		/* Buffer mode: wait until the bytes programmed
-		   in RDFL are received */
+		 * in RDFL are received
+		 */
 		while ((readl(port->membase + UARTSR) &
 					LINFLEXD_UARTSR_DRFRFE)
 				!= LINFLEXD_UARTSR_DRFRFE)
@@ -1236,7 +1247,6 @@ static int linflex_poll_getchar(struct uart_port *port)
 	return ret;
 }
 #endif
-
 
 static const struct uart_ops linflex_pops = {
 	.tx_empty	= linflex_tx_empty,
@@ -1395,7 +1405,6 @@ linflex_console_get_options(struct linflex_port *sport, int *baud,
 	unsigned int uartclk, baud_raw;
 #endif
 
-	prd_info("8\n");
 	cr = readl(sport->port.membase + UARTCR);
 	cr &= LINFLEXD_UARTCR_RXEN | LINFLEXD_UARTCR_TXEN;
 
@@ -1427,7 +1436,8 @@ linflex_console_get_options(struct linflex_port *sport, int *baud,
 	baud_raw = uartclk / (linflex_ldiv_multiplier(sport) * ibr);
 
 	if (*baud != baud_raw)
-		pr_info("Serial: Console linflex rounded baud rate from %d to %d\n",
+		pr_info(
+		"Serial: Console linflex rounded baud rate from %d to %d\n",
 			baud_raw, *baud);
 #endif
 #endif
@@ -1567,7 +1577,7 @@ static int linflex_probe(struct platform_device *pdev)
 	}
 	if (ret >= UART_NR) {
 		dev_err(&pdev->dev, "driver limited to %d serial ports\n",
-				UART_NR);
+			UART_NR);
 		return -ENOMEM;
 	}
 
@@ -1633,12 +1643,12 @@ static int linflex_probe(struct platform_device *pdev)
 	sport->dma_tx_chan = dma_request_slave_channel(sport->port.dev, "tx");
 	if (!sport->dma_tx_chan)
 		dev_info(sport->port.dev,
-			"DMA tx channel request failed, operating without tx DMA\n");
+		"DMA tx channel request failed, operating without tx DMA\n");
 
 	sport->dma_rx_chan = dma_request_slave_channel(sport->port.dev, "rx");
 	if (!sport->dma_rx_chan)
 		dev_info(sport->port.dev,
-			"DMA rx channel request failed, operating without rx DMA\n");
+		"DMA rx channel request failed, operating without rx DMA\n");
 
 	sport->txfifo_size = LINFLEXD_UARTCR_TXFIFO_SIZE;
 	sport->rxfifo_size = LINFLEXD_UARTCR_RXFIFO_SIZE;
@@ -1649,6 +1659,7 @@ static int linflex_probe(struct platform_device *pdev)
 static int linflex_remove(struct platform_device *pdev)
 {
 	struct linflex_port *sport = platform_get_drvdata(pdev);
+
 	uart_remove_one_port(&linflex_reg, &sport->port);
 
 	clk_disable_unprepare(sport->clk);
@@ -1667,6 +1678,7 @@ static int linflex_remove(struct platform_device *pdev)
 static int linflex_suspend(struct device *dev)
 {
 	struct linflex_port *sport = dev_get_drvdata(dev);
+
 	uart_suspend_port(&linflex_reg, &sport->port);
 
 	return 0;
@@ -1675,6 +1687,7 @@ static int linflex_suspend(struct device *dev)
 static int linflex_resume(struct device *dev)
 {
 	struct linflex_port *sport = dev_get_drvdata(dev);
+
 	uart_resume_port(&linflex_reg, &sport->port);
 
 	return 0;
@@ -1699,6 +1712,7 @@ static int __init linflex_serial_init(void)
 	int ret;
 
 	prd_info("serial: Freescale linflex driver\n");
+
 	ret = uart_register_driver(&linflex_reg);
 	if (ret)
 		return ret;
