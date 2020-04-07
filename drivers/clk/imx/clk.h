@@ -158,11 +158,9 @@ static inline struct clk *imx_clk_gate_shared(const char *name,
 	to_clk(imx_clk_hw_sscg_pll(name, parent_names, num_parents, parent,\
 				bypass1, bypass2, base, flags))
 
-struct clk *imx_clk_pll14xx(const char *name, const char *parent_name,
-		 void __iomem *base, const struct imx_pll14xx_clk *pll_clk);
-
-#define imx_clk_pll14xx(name, parent_name, base, pll_clk) \
-	to_clk(imx_clk_hw_pll14xx(name, parent_name, base, pll_clk))
+struct clk *imx_dev_clk_pll14xx(struct device *dev, const char *name,
+                                const char *parent_name, void __iomem *base,
+                                const struct imx_pll14xx_clk *pll_clk);
 
 struct clk_hw *imx_dev_clk_hw_pll14xx(struct device *dev, const char *name,
 				const char *parent_name, void __iomem *base,
@@ -676,4 +674,7 @@ struct clk_hw *imx_clk_hw_divider_gate(const char *name, const char *parent_name
 		unsigned long flags, void __iomem *reg, u8 shift, u8 width,
 		u8 clk_divider_flags, const struct clk_div_table *table,
 		spinlock_t *lock);
+
+void clk_set_delta_k(struct clk_hw *hw, short int delta_k);
+void clk_get_pll_setting(struct clk_hw *hw, u32 *pll_div_ctrl0, u32 *pll_div_ctrl1);
 #endif
