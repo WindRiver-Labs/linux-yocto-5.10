@@ -211,10 +211,15 @@ static void __stmmac_disable_all_queues(struct stmmac_priv *priv)
 			continue;
 		}
 
-		if (queue < rx_queues_cnt)
+		if (queue < rx_queues_cnt) {
+			napi_synchronize(&ch->rx_napi);
 			napi_disable(&ch->rx_napi);
-		if (queue < tx_queues_cnt)
+		}
+		if (queue < tx_queues_cnt) {
+			napi_synchronize(&ch->tx_napi);
 			napi_disable(&ch->tx_napi);
+		}
+
 	}
 }
 
@@ -7083,7 +7088,7 @@ void stmmac_clean_all_tx_rings(struct stmmac_priv *priv)
 	u32 queue;
 
 	for (queue = 0; queue < tx_count; queue++) {
-		struct stmmac_tx_queue *tx_q = get_tx_queue(priv, queue);
+		struct stmmac_tx_queue *tx_q = &priv->tx_queue[queue];
 
 		stmmac_clean_tx_queue(priv, tx_q);
 	}
@@ -7568,6 +7573,8 @@ int stmmac_suspend(struct device *dev)
 
 	netif_device_detach(ndev);
 
+	netif_carrier_off(priv->dev);
+
 	stmmac_disable_all_queues(priv);
 
 	/* Remove phy converter */
@@ -7862,8 +7869,6 @@ int stmmac_resume(struct device *dev)
 
 	phylink_mac_change(priv->phylink, true);
 
-	netif_device_attach(ndev);
-
 	/* Start phy converter after MDIO bus IRQ handling is up */
 	if (priv->plat->setup_phy_conv) {
 		ret = priv->plat->setup_phy_conv(priv->mii, priv->phy_conv_irq,
@@ -7875,6 +7880,8 @@ int stmmac_resume(struct device *dev)
 				   __func__, ret);
 		}
 	}
+
+	netif_device_attach(ndev);
 #endif /* ndef CONFIG_STMMAC_NETWORK_PROXY */
 	return 0;
 }
