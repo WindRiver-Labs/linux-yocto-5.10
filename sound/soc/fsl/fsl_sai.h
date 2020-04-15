@@ -19,12 +19,6 @@
 /* SAI Register Map Register */
 #define FSL_SAI_VERID	0x00 /* SAI Version ID Register */
 #define FSL_SAI_PARAM	0x04 /* SAI Parameter Register */
-#define FSL_SAI_TCSR(ofs)	(0x00 + ofs) /* SAI Transmit Control */
-#define FSL_SAI_TCR1(ofs)	(0x04 + ofs) /* SAI Transmit Configuration 1 */
-#define FSL_SAI_TCR2(ofs)	(0x08 + ofs) /* SAI Transmit Configuration 2 */
-#define FSL_SAI_TCR3(ofs)	(0x0c + ofs) /* SAI Transmit Configuration 3 */
-#define FSL_SAI_TCR4(ofs)	(0x10 + ofs) /* SAI Transmit Configuration 4 */
-#define FSL_SAI_TCR5(ofs)	(0x14 + ofs) /* SAI Transmit Configuration 5 */
 #define FSL_SAI_TCSR(offset) (0x00 + offset) /* SAI Transmit Control */
 #define FSL_SAI_TCR1(offset) (0x04 + offset) /* SAI Transmit Configuration 1 */
 #define FSL_SAI_TCR2(offset) (0x08 + offset) /* SAI Transmit Configuration 2 */
@@ -53,12 +47,6 @@
 #define FSL_SAI_TTCTN	0x74 /* SAI Transmit Timestamp Counter Register */
 #define FSL_SAI_TBCTN	0x78 /* SAI Transmit Bit Counter Register */
 #define FSL_SAI_TTCAP	0x7C /* SAI Transmit Timestamp Capture */
-#define FSL_SAI_RCSR	(0x80 + ofs) /* SAI Receive Control */
-#define FSL_SAI_RCR1	(0x84 + ofs)/* SAI Receive Configuration 1 */
-#define FSL_SAI_RCR2	(0x88 + ofs) /* SAI Receive Configuration 2 */
-#define FSL_SAI_RCR3	(0x8c + ofs) /* SAI Receive Configuration 3 */
-#define FSL_SAI_RCR4	(0x90 + ofs) /* SAI Receive Configuration 4 */
-#define FSL_SAI_RCR5	(0x94 + ofs) /* SAI Receive Configuration 5 */
 #define FSL_SAI_RCSR(offset) (0x80 + offset) /* SAI Receive Control */
 #define FSL_SAI_RCR1(offset) (0x84 + offset) /* SAI Receive Configuration 1 */
 #define FSL_SAI_RCR2(offset) (0x88 + offset) /* SAI Receive Configuration 2 */
@@ -91,12 +79,6 @@
 #define FSL_SAI_MCTL	0x100 /* SAI MCLK Control Register */
 #define FSL_SAI_MDIV	0x104 /* SAI MCLK Divide Register */
 
-#define FSL_SAI_xCSR(tx)	(tx ? FSL_SAI_TCSR(ofs) : FSL_SAI_RCSR(ofs))
-#define FSL_SAI_xCR1(tx)	(tx ? FSL_SAI_TCR1(ofs) : FSL_SAI_RCR1(ofs))
-#define FSL_SAI_xCR2(tx)	(tx ? FSL_SAI_TCR2(ofs) : FSL_SAI_RCR2(ofs))
-#define FSL_SAI_xCR3(tx)	(tx ? FSL_SAI_TCR3(ofs) : FSL_SAI_RCR3(ofs))
-#define FSL_SAI_xCR4(tx)	(tx ? FSL_SAI_TCR4(ofs) : FSL_SAI_RCR4(ofs))
-#define FSL_SAI_xCR5(tx)	(tx ? FSL_SAI_TCR5(ofs) : FSL_SAI_RCR5(ofs))
 #define FSL_SAI_xDR(tx)	(tx ? FSL_SAI_TDR(ofs) : FSL_SAI_RDR(ofs))
 #define FSL_SAI_xFR(tx)	(tx ? FSL_SAI_TFR(ofs) : FSL_SAI_RFR(ofs))
 #define FSL_SAI_xCSR(tx, off)  (tx ? FSL_SAI_TCSR(off) : FSL_SAI_RCSR(off))
@@ -244,15 +226,23 @@
 
 #define SAI_FLAG_PMQOS   BIT(0)
 
+//struct fsl_sai_soc_data {
+//       unsigned int fifo_depth;
+//       unsigned int fifos;
+//       unsigned int dataline;
+//       unsigned int flags;
+//       unsigned char reg_offset;
+//       bool imx;
+//       /* True for EDMA because it needs period size multiple of maxburst */
+  //     bool constrain_period_size;
+//};
+
 struct fsl_sai_soc_data {
-       unsigned int fifo_depth;
-       unsigned int fifos;
-       unsigned int dataline;
-       unsigned int flags;
-       unsigned char reg_offset;
-       bool imx;
-       /* True for EDMA because it needs period size multiple of maxburst */
-       bool constrain_period_size;
+        bool use_imx_pcm;
+        bool use_edma;
+        bool mclk0_is_mclk1;
+        unsigned int fifo_depth;
+        unsigned int reg_offset;
 };
 
 /**
@@ -290,6 +280,7 @@ struct fsl_sai_dl_cfg {
 struct fsl_sai {
 	struct platform_device *pdev;
 	struct regmap *regmap;
+	struct regmap *regmap_gpr;
 	struct clk *bus_clk;
 	struct clk *mclk_clk[FSL_SAI_MCLK_MAX];
 	struct clk *pll8k_clk;
@@ -302,7 +293,10 @@ struct fsl_sai {
 	bool synchronous[2];
 	bool is_stream_opened[2];
 	bool is_dsd;
+	bool monitor_spdif;
+	bool monitor_spdif_start;
 
+	int gpr_idx;
 	int pcm_dl_cfg_cnt;
 	int dsd_dl_cfg_cnt;
 	struct fsl_sai_dl_cfg *pcm_dl_cfg;
@@ -316,6 +310,9 @@ struct fsl_sai {
 	unsigned int slot_width;
 	unsigned int bitclk_ratio;
 
+	const struct fsl_sai_soc_data *soc_data;
+	bool is_slave_mode;
+	unsigned int bclk_ratio;
 	struct snd_soc_dai_driver cpu_dai_drv;
 	struct snd_dmaengine_dai_dma_data dma_params_rx;
 	struct snd_dmaengine_dai_dma_data dma_params_tx;
@@ -326,6 +323,8 @@ struct fsl_sai {
 	struct fsl_sai_verid verid;
 	struct fsl_sai_param param;
 };
+
+const struct attribute_group *fsl_sai_get_dev_attribute_group(bool monitor_spdif);
 
 #define TX 1
 #define RX 0
