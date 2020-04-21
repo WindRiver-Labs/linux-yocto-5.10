@@ -1116,7 +1116,7 @@ static int imx_ldb_bind(struct device *dev, struct device *master, void *data)
 			of_match_device(imx_ldb_dt_ids, dev);
 	const struct devtype *devtype = of_id->data;
 	struct device_node *auxldb_np = NULL, *child;
-	struct imx_ldb *imx_ldb;
+	struct imx_ldb *imx_ldb = dev_get_drvdata(dev);
 	int dual;
 	int ret;
 	int i;
