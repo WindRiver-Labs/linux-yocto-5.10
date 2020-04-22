@@ -2,6 +2,7 @@
 //
 // Copyright (c) 2013-2014 Freescale Semiconductor, Inc
 // Copyright (c) 2017 Sysam, Angelo Dureghello  <angelo@sysam.it>
+// Copyright 2020 NXP
 
 #include <linux/dmapool.h>
 #include <linux/module.h>
@@ -165,7 +166,7 @@ int fsl_edma_terminate_all(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
-	fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
+	fsl_chan->edma->drvdata->ops->edma_disable_request(fsl_chan);
 	fsl_chan->edesc = NULL;
 	fsl_chan->idle = true;
 	vchan_get_all_descriptors(&fsl_chan->vchan, &head);
@@ -182,7 +183,7 @@ int fsl_edma_pause(struct dma_chan *chan)
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
 	if (fsl_chan->edesc) {
-		fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
+		fsl_chan->edma->drvdata->ops->edma_disable_request(fsl_chan);
 		fsl_chan->status = DMA_PAUSED;
 		fsl_chan->idle = true;
 	}
@@ -198,7 +199,7 @@ int fsl_edma_resume(struct dma_chan *chan)
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
 	if (fsl_chan->edesc) {
-		fsl_chan->edma->socdata->ops->edma_enable_request(fsl_chan);
+		fsl_chan->edma->drvdata->ops->edma_enable_request(fsl_chan);
 		fsl_chan->status = DMA_IN_PROGRESS;
 		fsl_chan->idle = false;
 	}
@@ -272,9 +273,9 @@ static size_t fsl_edma_desc_residue(struct fsl_edma_chan *fsl_chan,
 		struct virt_dma_desc *vdesc, bool in_progress)
 {
 	struct fsl_edma_desc *edesc = fsl_chan->edesc;
-	const struct fsl_edma_soc_data *socdata = fsl_chan->edma->socdata;
+	const struct fsl_edma_drvdata *drvdata = fsl_chan->edma->drvdata;
 	struct fsl_edma_hw_tcd *hw_tcd = (struct fsl_edma_hw_tcd *)
-		socdata->ops->edma_get_tcd_addr(fsl_chan);
+		drvdata->ops->edma_get_tcd_addr(fsl_chan);
 	enum dma_transfer_direction dir = edesc->dirn;
 	dma_addr_t cur_addr, dma_addr;
 	size_t len, size;
@@ -291,7 +292,7 @@ static size_t fsl_edma_desc_residue(struct fsl_edma_chan *fsl_chan,
 	if (dir == DMA_MEM_TO_DEV)
 		cur_addr = edma_readl(fsl_chan->edma, &hw_tcd->saddr);
 	else
-		cur_addr = edma_readl(fsl_chan->edma, &hw_tcd->saddr);
+		cur_addr = edma_readl(fsl_chan->edma, &hw_tcd->daddr);
 
 	/* figure out the finished and calculate the residue */
 	for (i = 0; i < fsl_chan->edesc->n_tcds; i++) {
@@ -348,9 +349,9 @@ static void fsl_edma_set_tcd_regs(struct fsl_edma_chan *fsl_chan,
 				  struct fsl_edma_tcd *tcd)
 {
 	struct fsl_edma_engine *edma = fsl_chan->edma;
-	const struct fsl_edma_soc_data *socdata = fsl_chan->edma->socdata;
+	const struct fsl_edma_drvdata *drvdata = fsl_chan->edma->drvdata;
 	struct fsl_edma_hw_tcd *hw_tcd = (struct fsl_edma_hw_tcd *)
-		socdata->ops->edma_get_tcd_addr(fsl_chan);
+		drvdata->ops->edma_get_tcd_addr(fsl_chan);
 
 	/*
 	 * TCD parameters are stored in struct fsl_edma_tcd in little
@@ -600,7 +601,7 @@ void fsl_edma_xfer_desc(struct fsl_edma_chan *fsl_chan)
 		return;
 	fsl_chan->edesc = to_fsl_edma_desc(vdesc);
 	fsl_edma_set_tcd_regs(fsl_chan, fsl_chan->edesc->tcd[0].vtcd);
-	fsl_chan->edma->socdata->ops->edma_enable_request(fsl_chan);
+	fsl_chan->edma->drvdata->ops->edma_enable_request(fsl_chan);
 	fsl_chan->status = DMA_IN_PROGRESS;
 	fsl_chan->idle = false;
 }
@@ -644,7 +645,7 @@ void fsl_edma_free_chan_resources(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
-	fsl_chan->edma->socdata->ops->edma_disable_request(fsl_chan);
+	fsl_chan->edma->drvdata->ops->edma_disable_request(fsl_chan);
 	fsl_edma_chan_mux(fsl_chan, 0, false);
 	fsl_chan->edesc = NULL;
 	vchan_get_all_descriptors(&fsl_chan->vchan, &head);

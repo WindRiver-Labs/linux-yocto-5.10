@@ -436,14 +436,14 @@ static struct fsl_edma_ops fsl_edma3_ops = {
 	.edma_get_tcd_addr = fsl_edma3_get_tcd_addr,
 };
 
-static struct fsl_edma_soc_data fsl_edma_s32gen1_data = {
+static struct fsl_edma_drvdata fsl_edma_s32gen1_data = {
 	.n_irqs = ARRAY_SIZE(s32gen1_edma_irqs),
 	.irqs = s32gen1_edma_irqs,
 	.mux_channel_mapping = s32v234_mux_channel_mapping,
 	.ops = &fsl_edma3_ops,
 };
 
-static struct fsl_edma_soc_data fsl_edma_s32v234_data = {
+static struct fsl_edma_drvdata fsl_edma_s32v234_data = {
 	.n_irqs = ARRAY_SIZE(s32v234_edma_irqs),
 	.irqs = s32v234_edma_irqs,
 	.mux_channel_mapping = s32v234_mux_channel_mapping,
@@ -476,7 +476,7 @@ MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
 static inline int is_s32gen1_edma(struct fsl_edma_engine *data)
 {
-	return data->socdata == &fsl_edma_s32gen1_data;
+	return data->drvdata == &fsl_edma_s32gen1_data;
 }
 
 static inline int is_s32v234_edma(struct fsl_edma_engine *data)
@@ -524,7 +524,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 
 	fsl_edma->drvdata = drvdata;
 	fsl_edma->n_chans = chans;
-	fsl_edma->socdata = of_id->data;
+
 	mutex_init(&fsl_edma->fsl_edma_mutex);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -628,7 +628,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 		struct fsl_edma_chan *fsl_chan = &fsl_edma->chans[i];
 
 		hw_tcd = (struct fsl_edma_hw_tcd *)
-			fsl_edma->socdata->ops->edma_get_tcd_addr(fsl_chan);
+			fsl_edma->drvdata->ops->edma_get_tcd_addr(fsl_chan);
 
 		edma_writew(fsl_edma, 0x0, &hw_tcd->csr);
 		fsl_edma_chan_mux(fsl_chan, 0, false);
@@ -655,7 +655,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	}
 
 	/* enable round robin arbitration */
-	fsl_edma->socdata->ops->edma_enable_arbitration(fsl_edma);
+	fsl_edma->drvdata->ops->edma_enable_arbitration(fsl_edma);
 
 	return 0;
 }
@@ -687,7 +687,7 @@ static int fsl_edma_suspend_late(struct device *dev)
 		/* Make sure chan is idle or will force disable. */
 		if (unlikely(!fsl_chan->idle)) {
 			dev_warn(dev, "WARN: There is non-idle channel.");
-			fsl_edma->socdata->ops->edma_disable_request(fsl_chan);
+			fsl_edma->drvdata->ops->edma_disable_request(fsl_chan);
 			fsl_edma_chan_mux(fsl_chan, 0, false);
 		}
 
@@ -716,7 +716,7 @@ static int fsl_edma_resume_early(struct device *dev)
 			fsl_edma_chan_mux(fsl_chan, fsl_chan->slave_id, true);
 	}
 
-	fsl_edma->socdata->ops->edma_enable_arbitration(fsl_edma);
+	fsl_edma->drvdata->ops->edma_enable_arbitration(fsl_edma);
 
 	return 0;
 }

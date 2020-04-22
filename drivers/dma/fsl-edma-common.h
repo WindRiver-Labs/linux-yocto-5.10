@@ -223,6 +223,7 @@ struct fsl_edma_drvdata {
 	bool			mux_swap;
 	int			(*setup_irq)(struct platform_device *pdev,
 					     struct fsl_edma_engine *fsl_edma);
+	struct		fsl_edma_ops	*ops;
 };
 
 struct fsl_edma_irq {
