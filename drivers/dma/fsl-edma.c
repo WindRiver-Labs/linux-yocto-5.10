@@ -361,6 +361,16 @@ static unsigned vf610_mux_channel_mapping(u32 channel_id)
 	return channel_id;
 }
 
+static unsigned int s32v234_mux_channel_mapping(u32 channel_id)
+{
+	return 4 * (channel_id/4) + ((4 - channel_id % 4) - 1);
+}
+
+static unsigned int vf610_mux_channel_mapping(u32 channel_id)
+{
+	return channel_id;
+}
+
 static void fsl_edma_irq_exit(
 		struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
 {
@@ -714,7 +724,7 @@ static int fsl_edma_resume_early(struct device *dev)
 		fsl_chan = &fsl_edma->chans[i];
 		fsl_chan->pm_state = RUNNING;
 		hw_tcd = (struct fsl_edma_hw_tcd *)
-			fsl_edma->socdata->ops->edma_get_tcd_addr(fsl_chan);
+			fsl_edma->drvdata->ops->edma_get_tcd_addr(fsl_chan);
 
 		edma_writew(fsl_edma, 0x0, &hw_tcd->csr);
 		if (fsl_chan->slave_id != 0)
