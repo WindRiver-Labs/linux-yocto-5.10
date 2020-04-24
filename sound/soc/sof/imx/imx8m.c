@@ -22,6 +22,16 @@
 #define MBOX_OFFSET	0x800000
 #define MBOX_SIZE	0x1000
 
+#define IMX8M_DSP_CLK_NUM      5
+
+static const char *imx8m_dsp_clks[IMX8M_DSP_CLK_NUM] = {
+        "ocram",
+        "core",
+        "debug",
+        "sdma3",
+        "sai3_ipg",
+};
+
 struct imx8m_priv {
 	struct device *dev;
 	struct snd_sof_dev *sdev;
