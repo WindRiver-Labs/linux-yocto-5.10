@@ -149,7 +149,7 @@ static int imx8m_probe(struct snd_sof_dev *sdev)
 	int ret = 0;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
+	if (!priv->pd_dev)
 		return -ENOMEM;
 
 	sdev->pdata->hw_pdata = priv;
