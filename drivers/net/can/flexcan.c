@@ -479,6 +479,7 @@ static struct flexcan_devtype_data fsl_s32v234_devtype_data = {
 	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR |
 		FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
 		FLEXCAN_QUIRK_SUPPORT_FD,
+		FLEXCAN_QUIRK_SETUP_STOP_MODE,
 	.n_irqs = ARRAY_SIZE(s32v234_flexcan_irqs),
 	.irqs = s32v234_flexcan_irqs,
 };
@@ -486,7 +487,8 @@ static struct flexcan_devtype_data fsl_s32v234_devtype_data = {
 static struct flexcan_devtype_data fsl_s32gen1_devtype_data = {
 	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR |
 		FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
-		FLEXCAN_QUIRK_TIMESTAMP_SUPPORT_FD,
+		FLEXCAN_QUIRK_SUPPORT_FD,
+		FLEXCAN_QUIRK_SETUP_STOP_MODE,
 	.n_irqs = ARRAY_SIZE(s32gen1_flexcan_irqs),
 	.irqs = s32gen1_flexcan_irqs,
 };
