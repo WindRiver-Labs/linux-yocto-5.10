@@ -772,8 +772,8 @@ static int __init pll_debug_init(void)
 
        return 0;
 }
-#endif /* CONFIG_DEBUG_FS */
 late_initcall(pll_debug_init);
+#endif /* CONFIG_DEBUG_FS */
 
 MODULE_AUTHOR("Bai Ping <ping.bai@nxp.com>");
 MODULE_DESCRIPTION("NXP i.MX8MM clock driver");
