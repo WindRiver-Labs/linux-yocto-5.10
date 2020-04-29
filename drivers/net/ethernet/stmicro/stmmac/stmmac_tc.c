@@ -858,12 +858,21 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 static int tc_setup_etf(struct stmmac_priv *priv,
 			struct tc_etf_qopt_offload *qopt)
 {
+	if (!(priv->tx_queue[qopt->queue].tbs & STMMAC_TBS_AVAIL))
+		return -EOPNOTSUPP;
+
+	if (priv->speed == SPEED_10)
+		return -EOPNOTSUPP;
+
 	if (!priv->dma_cap.tbssel)
 		return -EOPNOTSUPP;
 	if (qopt->queue >= priv->plat->tx_queues_to_use)
 		return -EINVAL;
 	if (!(priv->tx_queue[qopt->queue].tbs & STMMAC_TBS_AVAIL))
-		return -EINVAL;
+		return -EOPNOTSUPP;
+
+	if (priv->speed == SPEED_10)
+		return -EOPNOTSUPP;
 
 	if (qopt->enable)
 		priv->tx_queue[qopt->queue].tbs |= STMMAC_TBS_EN;
@@ -872,6 +881,7 @@ static int tc_setup_etf(struct stmmac_priv *priv,
 
 	netdev_info(priv->dev, "%s ETF for Queue %d\n",
 		    qopt->enable ? "enabled" : "disabled", qopt->queue);
+
 	return 0;
 }
 

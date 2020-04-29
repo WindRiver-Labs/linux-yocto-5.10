@@ -240,7 +240,6 @@ struct stmmac_priv {
 	bool eee_sw_timer_en;
 	unsigned int mode;
 	unsigned int chain_mode;
-	int enhanced_tx_desc;
 	int extend_desc;
 	struct hwtstamp_config tstamp_config;
 	struct ptp_clock *ptp_clock;

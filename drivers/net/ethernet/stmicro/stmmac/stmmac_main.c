@@ -3698,6 +3698,12 @@ int stmmac_open(struct net_device *dev)
 
 		/* Setup per-TXQ tbs flag before TX descriptor alloc */
 		tx_q->tbs |= tbs_en ? STMMAC_TBS_AVAIL : 0;
+		if (stmmac_enable_tbs(priv, priv->ioaddr, tbs_en, chan)) {
+			tx_q->tbs &= ~STMMAC_TBS_AVAIL;
+			netdev_err(priv->dev,
+				   "%s: TxQ %d TBS enablement failed\n",
+				   __func__, chan);
+		}
 	}
 
 	ret = alloc_dma_desc_resources(priv);
@@ -7028,8 +7034,6 @@ int stmmac_dvr_probe(struct device *device,
 	if (priv->hw->tsn_info.cap.tbs_support && priv->plat->tsn_tbs_en) {
 		stmmac_set_tsn_feat(priv, priv->hw, ndev, TSN_FEAT_ID_TBS,
 				    true);
-		priv->enhanced_tx_desc = 1;
-		priv->mode = STMMAC_ENHANCED_TX_MODE;
 		dev_info(priv->device, "TBS feature enabled\n");
 	}
 

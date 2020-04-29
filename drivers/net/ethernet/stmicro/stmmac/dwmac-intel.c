@@ -533,8 +533,12 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 
 		/* Disable Priority config by default */
 		plat->tx_queues_cfg[i].use_prio = false;
-		/* Default TX Q0 to use TSO and rest TXQ for TBS */
-		if (i > 0)
+
+		/* Enable per queue TBS support on half of the Tx Queues.
+		 * For examples, if tx_queue_to_use = 8, then Tx Queue 4, 5, 6,
+		 * and 7 will have TBS support.
+		 */
+		if (plat->tsn_tbs_en && i >= (plat->tx_queues_to_use / 2))
 			plat->tx_queues_cfg[i].tbs_en = 1;
 	}
 
