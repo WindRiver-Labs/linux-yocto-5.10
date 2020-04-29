@@ -598,6 +598,24 @@ static void dwmac5_dma_init_tx_chan(void __iomem *ioaddr,
 	writel(dma_tx_phy, ioaddr + DMA_CHAN_TX_BASE_ADDR(chan));
 }
 
+static int dwmac5_enable_tbs(void __iomem *ioaddr, bool en, u32 chan)
+{
+	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+	if (en)
+		value |= DMA_CONTROL_EDSE;
+	else
+		value &= ~DMA_CONTROL_EDSE;
+
+	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+	value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan)) & DMA_CONTROL_EDSE;
+	if (en && !value)
+		return -EIO;
+
+	return 0;
+}
+
 const struct stmmac_dma_ops dwmac5_dma_ops = {
 	.reset = dwmac4_dma_reset,
 	.init = dwmac4_dma_init,
@@ -624,4 +642,5 @@ const struct stmmac_dma_ops dwmac5_dma_ops = {
 	.enable_tso = dwmac4_enable_tso,
 	.qmode = dwmac4_qmode,
 	.set_bfsize = dwmac4_set_bfsize,
+	.enable_tbs = dwmac5_enable_tbs,
 };
