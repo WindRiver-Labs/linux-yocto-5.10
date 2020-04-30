@@ -1545,7 +1545,7 @@ static int fsl_sai_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "fail to create sys group\n");
 	}
 
-	clk_disable_unprepare(sai->bus_clk);
+	pm_runtime_put_sync(&pdev->dev);
 
 	sai->dma_params_rx.chan_name = "rx";
 	sai->dma_params_tx.chan_name = "tx";
@@ -1558,9 +1558,8 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sai);
 
-	ret = clk_prepare_enable(sai->bus_clk);
-       if (ret)
-               return ret;
+	pm_runtime_enable(&pdev->dev);
+        pm_runtime_get_sync(&pdev->dev);
 
 	/* Get sai version */
 	ret = fsl_sai_check_version(&pdev->dev);
@@ -1578,7 +1577,6 @@ static int fsl_sai_probe(struct platform_device *pdev)
 	if (ret < 0)
 		dev_warn(&pdev->dev, "Error reading SAI version: %d\n", ret);
 
-	pm_runtime_enable(&pdev->dev);
 	regcache_cache_only(sai->regmap, true);
 
 	ret = devm_snd_soc_register_component(&pdev->dev, &fsl_component,
