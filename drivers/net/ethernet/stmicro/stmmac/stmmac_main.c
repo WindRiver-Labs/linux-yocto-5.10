@@ -7240,8 +7240,12 @@ int stmmac_dvr_probe(struct device *device,
 		priv->dma_cap.addr64 = priv->plat->addr64;
 
 	if (priv->dma_cap.addr64) {
+		if (priv->plat->dma_bit_mask)
+			priv->dma_cap.addr64 = priv->plat->dma_bit_mask;
+
 		ret = dma_set_mask_and_coherent(device,
 				DMA_BIT_MASK(priv->dma_cap.addr64));
+
 		if (!ret) {
 			dev_info(priv->device, "Using %d bits DMA width\n",
 				 priv->dma_cap.addr64);

@@ -264,6 +264,7 @@ struct plat_stmmacenet_data {
 	bool vlan_fail_q_en;
 	u8 vlan_fail_q;
 	unsigned int eee_usecs_rate;
+	u32 dma_bit_mask;
 	struct pci_dev *pdev;
 	bool has_crossts;
 	int int_snapshot_num;
