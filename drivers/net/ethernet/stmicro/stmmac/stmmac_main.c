@@ -3390,19 +3390,6 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 	/* set TX and RX rings length */
 	stmmac_set_rings_length(priv);
 
-	/* Enable TSO */
-	if (priv->tso) {
-		for (chan = 0; chan < tx_cnt; chan++) {
-			struct stmmac_tx_queue *tx_q = &priv->tx_queue[chan];
-
-			/* TSO and TBS cannot co-exist */
-			if (tx_q->tbs & STMMAC_TBS_AVAIL)
-				continue;
-
-			stmmac_enable_tso(priv, priv->ioaddr, 1, chan);
-		}
-	}
-
 	/* Enable Split Header */
 	sph_en = (priv->hw->rx_csum > 0) && priv->sph;
 	for (chan = 0; chan < rx_cnt; chan++)
@@ -3413,17 +3400,20 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 	if (priv->dma_cap.vlins)
 		stmmac_enable_vlan(priv, priv->hw, STMMAC_VLAN_INSERT);
 
-	/* TBS */
-	for (chan = 0; chan < tx_cnt; chan++) {
-		struct stmmac_tx_queue *tx_q = &priv->tx_queue[chan];
-		int enable = tx_q->tbs & STMMAC_TBS_AVAIL;
-
-		stmmac_enable_tbs(priv, priv->ioaddr, enable, chan);
-	}
-
 	/* Configure real RX and TX queues */
 	netif_set_real_num_rx_queues(dev, priv->plat->rx_queues_to_use);
 	netif_set_real_num_tx_queues(dev, priv->plat->tx_queues_to_use);
+
+	/* TSO and TBS are mutually exclusive. Only enable TSO when TBS is not
+	 * available in that particular Tx Queue.
+	 */
+	for (chan = 0; chan < tx_cnt; chan++) {
+		struct stmmac_tx_queue *tx_q = &priv->tx_queue[chan];
+		if (tx_q->tbs & STMMAC_TBS_AVAIL)
+			stmmac_enable_tbs(priv, priv->ioaddr, 1, chan);
+		else if (priv->tso)
+			stmmac_enable_tso(priv, priv->ioaddr, 1, chan);
+	}
 
 	/* Start the ball rolling... */
 	stmmac_start_all_dma(priv);
@@ -4398,8 +4388,12 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (priv->tx_path_in_lpi_mode && priv->eee_sw_timer_en)
 		stmmac_disable_eee_mode(priv);
 
-	/* Manage oversized TCP frames for GMAC4 device */
-	if (skb_is_gso(skb) && priv->tso) {
+	/* Manage oversized TCP frames for GMAC4/GMAC5 device.
+	 * TSO feature is mutually exclusive with TBS feature which is using
+	 * enhanced descriptor. Therefore, we only implement TCP segmentation
+	 * on Tx Queues which have no TBS support.
+	 */
+	if (skb_is_gso(skb) && priv->tso && !(tx_q->tbs & STMMAC_TBS_AVAIL)) {
 		if (gso & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6))
 			return stmmac_tso_xmit(skb, dev);
 		if (priv->plat->has_gmac4 && (gso & SKB_GSO_UDP_L4))
