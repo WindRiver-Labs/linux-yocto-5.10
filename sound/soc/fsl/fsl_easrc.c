@@ -1236,7 +1236,7 @@ static int fsl_easrc_set_ctx_organziation(struct fsl_asrc_pair *ctx)
  * Returns a negative number on error and >=0 as context id
  * on success
  */
-static int fsl_easrc_request_context(int channels, struct fsl_asrc_pair *ctx)
+int fsl_easrc_request_context(int channels, struct fsl_asrc_pair *ctx)
 {
 	enum asrc_pair_index index = ASRC_INVALID_PAIR;
 	struct fsl_asrc *easrc = ctx->asrc;
@@ -1281,7 +1281,7 @@ static int fsl_easrc_request_context(int channels, struct fsl_asrc_pair *ctx)
  *
  * This funciton is mainly doing the revert thing in request context
  */
-static void fsl_easrc_release_context(struct fsl_asrc_pair *ctx)
+void fsl_easrc_release_context(struct fsl_asrc_pair *ctx)
 {
 	unsigned long lock_flags;
 	struct fsl_asrc *easrc;
@@ -1371,7 +1371,7 @@ static int fsl_easrc_stop_context(struct fsl_asrc_pair *ctx)
 	return 0;
 }
 
-static struct dma_chan *fsl_easrc_get_dma_channel(struct fsl_asrc_pair *ctx,
+struct dma_chan *fsl_easrc_get_dma_channel(struct fsl_asrc_pair *ctx,
 						  bool dir)
 {
 	struct fsl_asrc *easrc = ctx->asrc;
@@ -1383,6 +1383,7 @@ static struct dma_chan *fsl_easrc_get_dma_channel(struct fsl_asrc_pair *ctx,
 
 	return dma_request_slave_channel(&easrc->pdev->dev, name);
 };
+EXPORT_SYMBOL_GPL(fsl_easrc_get_dma_channel);
 
 static const unsigned int easrc_rates[] = {
 	8000, 11025, 12000, 16000,
@@ -1899,7 +1900,7 @@ static int fsl_easrc_probe(struct platform_device *pdev)
 
 	easrc->paddr = res->start;
 
-	easrc->regmap = devm_regmap_init_mmio_clk(dev, "mem", regs,
+	easrc->regmap = devm_regmap_init_mmio_clk(&pdev->dev, NULL, regs,
 						  &fsl_easrc_regmap_config);
 	if (IS_ERR(easrc->regmap)) {
 		dev_err(dev, "failed to init regmap");
@@ -1935,22 +1936,6 @@ static int fsl_easrc_probe(struct platform_device *pdev)
 
 	easrc_priv->rs_num_taps = EASRC_RS_32_TAPS;
 	easrc_priv->const_coeff = 0x3FF0000000000000;
-
-	of_property_read_u32(np, "fsl,asrc-rstap", &rstap);
-       switch (rstap) {
-       case 32:
-               easrc->rs_num_taps = EASRC_RS_32_TAPS;
-               break;
-       case 64:
-               easrc->rs_num_taps = EASRC_RS_64_TAPS;
-               break;
-       case 128:
-               easrc->rs_num_taps = EASRC_RS_128_TAPS;
-               break;
-       default:
-               easrc->rs_num_taps = EASRC_RS_32_TAPS;
-               break;
-       }
 
 	ret = of_property_read_u32(np, "fsl,asrc-rate", &easrc->asrc_rate);
 	if (ret) {
