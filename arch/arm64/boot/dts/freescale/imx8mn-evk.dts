@@ -169,6 +169,10 @@
        cpu-supply = <&buck2_reg>;
 };
 
+&snvs_pwrkey {
+       status = "okay";
+};
+
 &usbotg1 {
         picophy,pre-emp-curr-control = <3>;
         picophy,dc-vol-level-adjust = <7>;
