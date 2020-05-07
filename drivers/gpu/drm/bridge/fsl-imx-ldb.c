@@ -7,6 +7,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <drm/bridge/fsl_imx_ldb.h>
 #include <drm/drmP.h>
@@ -120,6 +121,9 @@ static void ldb_bridge_enable(struct drm_bridge *bridge)
 	struct ldb_channel *ldb_ch = bridge_to_ldb_ch(bridge);
 	struct ldb *ldb = ldb_ch->ldb;
 
+	if (pm_runtime_enabled(ldb->dev))
+		pm_runtime_get_sync(ldb->dev);
+
 	regmap_write(ldb->regmap, ldb->ctrl_reg, ldb->ldb_ctrl);
 }
 
@@ -134,9 +138,12 @@ static void ldb_bridge_disable(struct drm_bridge *bridge)
 		ldb->ldb_ctrl &= ~LDB_CH1_MODE_EN_MASK;
 
 	regmap_write(ldb->regmap, ldb->ctrl_reg, ldb->ldb_ctrl);
+
+	if (pm_runtime_enabled(ldb->dev))
+		pm_runtime_put(ldb->dev);
 }
 
-static int ldb_bridge_attach(struct drm_bridge *bridge)
+static int ldb_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct ldb_channel *ldb_ch = bridge_to_ldb_ch(bridge);
 	struct ldb *ldb = ldb_ch->ldb;
@@ -150,7 +157,7 @@ static int ldb_bridge_attach(struct drm_bridge *bridge)
 		return 0;
 
 	return drm_bridge_attach(bridge->encoder,
-				ldb_ch->next_bridge, &ldb_ch->bridge);
+				ldb_ch->next_bridge, &ldb_ch->bridge, flags);
 }
 
 static const struct drm_bridge_funcs ldb_bridge_funcs = {
@@ -167,6 +174,7 @@ int ldb_bind(struct ldb *ldb, struct drm_encoder **encoder)
 	struct device_node *child;
 	int ret = 0;
 	int i;
+	int flags = 0;
 
 	ldb->regmap = syscon_regmap_lookup_by_phandle(np, "gpr");
 	if (IS_ERR(ldb->regmap)) {
@@ -174,8 +182,14 @@ int ldb_bind(struct ldb *ldb, struct drm_encoder **encoder)
 		return PTR_ERR(ldb->regmap);
 	}
 
+	if (pm_runtime_enabled(dev))
+		pm_runtime_get_sync(dev);
+
 	/* disable LDB by resetting the control register to POR default */
 	regmap_write(ldb->regmap, ldb->ctrl_reg, 0);
+
+	if (pm_runtime_enabled(dev))
+		pm_runtime_put(dev);
 
 	ldb->dual = of_property_read_bool(np, "fsl,dual-channel");
 	if (ldb->dual)
@@ -233,8 +247,7 @@ int ldb_bind(struct ldb *ldb, struct drm_encoder **encoder)
 		if (ldb_ch->panel) {
 			ldb_ch->next_bridge =
 					devm_drm_panel_bridge_add(dev,
-						ldb_ch->panel,
-						DRM_MODE_CONNECTOR_LVDS);
+						ldb_ch->panel);
 			if (IS_ERR(ldb_ch->next_bridge)) {
 				ret = PTR_ERR(ldb_ch->next_bridge);
 				goto free_child;
@@ -245,7 +258,7 @@ int ldb_bind(struct ldb *ldb, struct drm_encoder **encoder)
 		ldb_ch->bridge.funcs = &ldb_bridge_funcs;
 		ldb_ch->bridge.of_node = child;
 
-		ret = drm_bridge_attach(encoder[i], &ldb_ch->bridge, NULL);
+		ret = drm_bridge_attach(encoder[i], &ldb_ch->bridge, NULL, flags);
 		if (ret) {
 			dev_err(dev,
 				"failed to attach bridge with encoder: %d\n",
