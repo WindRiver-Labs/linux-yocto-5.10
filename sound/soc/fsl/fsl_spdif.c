@@ -22,6 +22,7 @@
 #include <sound/asoundef.h>
 #include <sound/dmaengine_pcm.h>
 #include <sound/soc.h>
+#include <linux/clk-provider.h>
 
 #include "fsl_spdif.h"
 #include "imx-pcm.h"
@@ -130,6 +131,8 @@ struct fsl_spdif_priv {
 	struct snd_dmaengine_dai_dma_data dma_params_rx;
 	/* regcache for SRPC */
 	u32 regcache_srpc;
+	struct clk *pll8k_clk;
+	struct clk *pll11k_clk;
 };
 
 static struct fsl_spdif_soc_data fsl_spdif_vf610 = {
@@ -165,6 +168,15 @@ static struct fsl_spdif_soc_data fsl_spdif_imx6sx = {
 	.constrain_period_size = true,
 };
 
+static struct fsl_spdif_soc_data fsl_spdif_imx8qm = {
+        .imx = true,
+        .shared_root_clock = true,
+        .interrupts = 2,
+        .tx_burst = 2,          /* Applied for EDMA */
+        .rx_burst = 2,          /* Applied for EDMA */
+        .tx_formats = SNDRV_PCM_FMTBIT_S24_LE,  /* Applied for EDMA */
+};
+
 /* Check if clk is a root clock that does not share clock source with others */
 static inline bool fsl_spdif_can_set_clk_rate(struct fsl_spdif_priv *spdif, int clk)
 {
@@ -177,7 +189,8 @@ static struct fsl_spdif_soc_data fsl_spdif_imx8mm = {
 	.rx_burst = FSL_SPDIF_RXFIFO_WML,
 	.interrupts = 1,
 	.tx_formats = FSL_SPDIF_FORMATS_PLAYBACK,
-	.rx_rates = (FSL_SPDIF_RATES_CAPTURE | SNDRV_PCM_RATE_192000),
+	.rx_rates = (FSL_SPDIF_RATES_CAPTURE | SNDRV_PCM_RATE_88200 |
+		     SNDRV_PCM_RATE_176400 | SNDRV_PCM_RATE_192000),
 	.constrain_period_size = false,
 };
 
@@ -449,6 +462,7 @@ static int spdif_set_sample_rate(struct snd_pcm_substream *substream,
 	u32 stc, mask, rate;
 	u16 sysclk_df;
 	u8 clk, txclk_df;
+	int ret;
 
 	switch (sample_rate) {
 	case 32000:
@@ -671,67 +685,6 @@ static int fsl_spdif_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int fsl_spdif_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
-                int clk_id, unsigned int freq, int dir)
-{
-        struct fsl_spdif_priv *data = snd_soc_dai_get_drvdata(cpu_dai);
-        struct platform_device *pdev = data->pdev;
-        struct device *dev = &pdev->dev;
-        struct clk *clk, *p, *pll = 0, *npll = 0;
-        u64 ratio = freq;
-        int ret, i;
-        bool reparent = false;
-
-        if (dir != SND_SOC_CLOCK_OUT || freq == 0 || clk_id != STC_TXCLK_SPDIF_ROOT)
-                return 0;
-
-        if (data->pll8k_clk == NULL || data->pll11k_clk == NULL)
-                return 0;
-
-        clk = data->txclk[clk_id];
-        if (IS_ERR_OR_NULL(clk)) {
-                dev_err(dev, "no rxtx%d clock in devicetree\n", clk_id);
-                return PTR_ERR(clk);
-        }
-
-        p = clk;
-        while (p && data->pll8k_clk && data->pll11k_clk) {
-                struct clk *pp = clk_get_parent(p);
-
-                if (clk_is_match(pp, data->pll8k_clk) ||
-                    clk_is_match(pp, data->pll11k_clk)) {
-                        pll = pp;
-                        break;
-                }
-                p = pp;
-        }
-
-        npll = (do_div(ratio, 8000) ? data->pll11k_clk : data->pll8k_clk);
-        reparent = (pll && !clk_is_match(pll, npll));
-
-        clk_disable_unprepare(clk);
-        if (reparent) {
-                ret = clk_set_parent(p, npll);
-                if (ret < 0)
-                        dev_warn(cpu_dai->dev, "failed to set parent %s: %d\n",
-                                 __clk_get_name(npll), ret);
-        }
-
-        ret = clk_set_rate(clk, freq);
-        if (ret < 0)
-                dev_warn(cpu_dai->dev, "failed to set clock rate (%u): %d\n",
-                         freq, ret);
-        clk_prepare_enable(clk);
-
-        for (i = 0; i < SPDIF_TXRATE_MAX; i++) {
-                ret = fsl_spdif_probe_txclk(data, i);
-                if (ret)
-                        return ret;
-        }
-
-        return 0;
-}
-
 static const struct snd_soc_dai_ops fsl_spdif_dai_ops = {
 	.startup = fsl_spdif_startup,
 	.hw_params = fsl_spdif_hw_params,
@@ -878,6 +831,18 @@ static int fsl_spdif_qget(struct snd_kcontrol *kcontrol,
 }
 
 /* Valid bit information */
+static int fsl_spdif_vbit_info(struct snd_kcontrol *kcontrol,
+                                struct snd_ctl_elem_info *uinfo)
+{
+        uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+        uinfo->count = 1;
+        uinfo->value.integer.min = 0;
+        uinfo->value.integer.max = 1;
+
+        return 0;
+}
+
+/* Valid bit information */
 /* Get valid good bit from interrupt status register */
 static int fsl_spdif_rx_vbit_get(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
@@ -912,35 +877,6 @@ static int fsl_spdif_tx_vbit_get(struct snd_kcontrol *kcontrol,
 
 static int fsl_spdif_tx_vbit_put(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
-	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
-	struct regmap *regmap = spdif_priv->regmap;
-	u32 val = (1 - ucontrol->value.integer.value[0]) << SCR_VAL_OFFSET;
-
-	regmap_update_bits(regmap, REG_SPDIF_SCR, SCR_VAL_MASK, val);
-
-	return 0;
-}
-
-static int fsl_spdif_tx_vbit_get(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
-	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
-	struct regmap *regmap = spdif_priv->regmap;
-	u32 val;
-
-	regmap_read(regmap, REG_SPDIF_SCR, &val);
-	val = (val & SCR_VAL_MASK) >> SCR_VAL_OFFSET;
-	val = 1 - val;
-	ucontrol->value.integer.value[0] = val;
-
-	return 0;
-}
-
-static int fsl_spdif_tx_vbit_put(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_dai *cpu_dai = snd_kcontrol_chip(kcontrol);
 	struct fsl_spdif_priv *spdif_priv = snd_soc_dai_get_drvdata(cpu_dai);
@@ -1405,6 +1341,67 @@ static int fsl_spdif_probe_txclk(struct fsl_spdif_priv *spdif_priv,
 				spdif_priv->sysclk_df[index], rate[index]);
 	dev_dbg(&pdev->dev, "the best rate for %dHz sample rate is %dHz\n",
 			rate[index], spdif_priv->txrate[index]);
+
+	return 0;
+}
+
+static int fsl_spdif_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
+                int clk_id, unsigned int freq, int dir)
+{
+        struct fsl_spdif_priv *data = snd_soc_dai_get_drvdata(cpu_dai);
+        struct platform_device *pdev = data->pdev;
+        struct device *dev = &pdev->dev;
+        struct clk *clk, *p, *pll = 0, *npll = 0;
+        u64 ratio = freq;
+        int ret, i;
+        bool reparent = false;
+
+        if (dir != SND_SOC_CLOCK_OUT || freq == 0 || clk_id != STC_TXCLK_SPDIF_ROOT)
+                return 0;
+
+        if (data->pll8k_clk == NULL || data->pll11k_clk == NULL)
+                return 0;
+
+        clk = data->txclk[clk_id];
+        if (IS_ERR_OR_NULL(clk)) {
+                dev_err(dev, "no rxtx%d clock in devicetree\n", clk_id);
+                return PTR_ERR(clk);
+        }
+
+        p = clk;
+        while (p && data->pll8k_clk && data->pll11k_clk) {
+                struct clk *pp = clk_get_parent(p);
+
+                if (clk_is_match(pp, data->pll8k_clk) ||
+                    clk_is_match(pp, data->pll11k_clk)) {
+                        pll = pp;
+                        break;
+                }
+                p = pp;
+        }
+
+        npll = (do_div(ratio, 8000) ? data->pll11k_clk : data->pll8k_clk);
+        reparent = (pll && !clk_is_match(pll, npll));
+
+        clk_disable_unprepare(clk);
+        if (reparent) {
+                ret = clk_set_parent(p, npll);
+                if (ret < 0)
+                        dev_warn(cpu_dai->dev, "failed to set parent %s: %d\n",
+                                 __clk_get_name(npll), ret);
+        }
+
+        ret = clk_set_rate(clk, freq);
+        if (ret < 0)
+                dev_warn(cpu_dai->dev, "failed to set clock rate (%u): %d\n",
+                         freq, ret);
+        clk_prepare_enable(clk);
+
+        for (i = 0; i < SPDIF_TXRATE_MAX; i++) {
+                ret = fsl_spdif_probe_txclk(data, i);
+                if (ret)
+                        return ret;
+        }
 
 	return 0;
 }
