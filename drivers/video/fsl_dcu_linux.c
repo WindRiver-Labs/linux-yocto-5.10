@@ -1485,11 +1485,14 @@ void fsl_dcu_init_memory_pool(struct platform_device *pdev)
 		goto dcu_use_default_pool;
 	}
 
-	dma_release_declared_memory(&pdev->dev);
+	if(pdev->dev.dma_mem) {
+		dma_release_coherent_memory(pdev->dev.dma_mem);
+		pdev->dev.dma_mem = NULL;
+	}
+
 	if (dma_declare_coherent_memory(
 			&pdev->dev, dcu_mem_start,
-			dcu_mem_start, dcu_mem_len,
-			DMA_MEMORY_EXCLUSIVE)) {
+			dcu_mem_start, dcu_mem_len)) {
 		dev_err(&dcu_pdev->dev, "DCU: memory pool creation error\n");
 		devm_release_mem_region(&pdev->dev, dcu_mem_start,
 			dcu_mem_len);
