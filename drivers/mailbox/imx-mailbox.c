@@ -76,6 +76,18 @@ struct imx_mu_priv {
 	bool			side_b;
 };
 
+struct imx_mu_dcfg {
+        int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp,
+                 void *data);
+	int (*rx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
+        int (*rxdb)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
+       void (*init)(struct imx_mu_priv *priv);
+       u32     xTR[4];         /* Transmit Registers */
+       u32     xRR[4];         /* Receive Registers */
+       u32     xSR;            /* Status Register */
+       u32     xCR;            /* Control Register */
+};
+
 static struct imx_mu_priv *to_imx_mu_priv(struct mbox_controller *mbox)
 {
 	return container_of(mbox, struct imx_mu_priv, mbox);
@@ -300,9 +312,7 @@ static int imx_mu_seco_tx(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp,
 			 * The real message size can be different to
 			 * struct imx_sc_rpc_msg_max size
 			 */
-			dev_err(priv->dev,
-				"Exceed max msg size (%li) on TX, got: %i\n",
-				sizeof(*msg), byte_size);
+			dev_err(priv->dev, "Maximal message size (%zu bytes) exceeded on TX; got: %i bytes\n", sizeof(*msg), byte_size);
 			return -EINVAL;
 		}
 
@@ -362,8 +372,7 @@ static int imx_mu_seco_rxdb(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp
 	*data++ = imx_mu_read(priv, priv->dcfg->xRR[0]);
 	byte_size = msg.hdr.size * sizeof(u32);
 	if (byte_size > sizeof(msg)) {
-		dev_err(priv->dev, "Exceed max msg size (%li) on RX, got: %i\n",
-			sizeof(msg), byte_size);
+		dev_err(priv->dev, "Maximal message size (%zu bytes) exceeded on RX; got: %i bytes\n", sizeof(msg), byte_size);
 		err = -EINVAL;
 		goto error;
 	}
@@ -762,17 +771,6 @@ static int imx_mu_remove(struct platform_device *pdev)
 	return 0;
 }
 
-struct imx_mu_dcfg {
-	int (*tx)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp,
-                 void *data);
-	int (*rxdb)(struct imx_mu_priv *priv, struct imx_mu_con_priv *cp);
-       void (*init)(struct imx_mu_priv *priv);
-       u32     xTR[4];         /* Transmit Registers */
-       u32     xRR[4];         /* Receive Registers */
-       u32     xSR;            /* Status Register */
-       u32     xCR;            /* Control Register */
-};
-
 static const struct imx_mu_dcfg imx_mu_cfg_imx8_scu = {
 	.tx	= imx_mu_scu_tx,
 	.rx	= imx_mu_scu_rx,
@@ -816,7 +814,7 @@ static const struct imx_mu_dcfg imx_mu_cfg_imx8_seco = {
 
 static const struct of_device_id imx_mu_dt_ids[] = {
 	{ .compatible = "fsl,imx7ulp-mu", .data = &imx_mu_cfg_imx7ulp },
-	{ .compatible = "fsl,imx6sx-mu", .data = &mx_mu_cfg_imx6sx },
+	{ .compatible = "fsl,imx6sx-mu", .data = &imx_mu_cfg_imx6sx },
 	{ .compatible = "fsl,imx8-mu-seco", .data = &imx_mu_cfg_imx8_seco },
 	{ },
 };
