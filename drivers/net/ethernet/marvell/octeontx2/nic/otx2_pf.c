@@ -1635,7 +1635,7 @@ int otx2_open(struct net_device *netdev)
 		if (!(pf->flags & OTX2_FLAG_MCAM_ENTRIES_ALLOC)) {
 			err = otx2_alloc_mcam_entries(pf);
 			if (err)
-				goto err_free_cints;
+				goto err_tx_stop_queues;
 		}
 	}
 
