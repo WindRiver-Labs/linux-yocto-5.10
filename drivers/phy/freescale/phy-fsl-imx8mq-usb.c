@@ -15,7 +15,6 @@
 #define PHY_CTRL0			0x0
 #define PHY_CTRL0_REF_CLKDIV2          BIT(1)
 #define PHY_CTRL0_REF_SSP_EN		BIT(2)
-#define PHY_CTRL0_FSEL_MASK            GENMASK(5, 10)
 #define PHY_CTRL0_FSEL_24M             0x2a
 #define PHY_CTRL0_FSEL_100M            0x27
 #define PHY_CTRL0_SSC_RANGE_MASK       GENMASK(21, 23)
