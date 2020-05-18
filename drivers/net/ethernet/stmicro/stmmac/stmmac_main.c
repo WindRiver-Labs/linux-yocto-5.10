@@ -577,6 +577,7 @@ static void stmmac_get_rx_hwtstamp(struct stmmac_priv *priv, struct dma_desc *p,
 				   struct dma_desc *np, struct sk_buff *skb)
 {
 	struct skb_shared_hwtstamps *shhwtstamp = NULL;
+	void __iomem *ptpaddr = priv->ptpaddr;
 	struct dma_desc *desc = p;
 	u64 adjust = 0;
 	u64 ns = 0;
@@ -598,12 +599,17 @@ static void stmmac_get_rx_hwtstamp(struct stmmac_priv *priv, struct dma_desc *p,
 		}
 
 		netdev_dbg(priv->dev, "get valid RX hw timestamp %llu\n", ns);
-		shhwtstamp = skb_hwtstamps(skb);
-		memset(shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
-		shhwtstamp->hwtstamp = ns_to_ktime(ns);
 	} else  {
 		netdev_dbg(priv->dev, "cannot get RX hw timestamp\n");
+		/* RX HW T/S invalid, fallback to current PTP time instead
+		 * of not updating hwtstamp (which can be valid stale data
+		 * from past)
+		 */
+		stmmac_get_systime(priv, ptpaddr, &ns);
 	}
+	shhwtstamp = skb_hwtstamps(skb);
+	memset(shhwtstamp, 0, sizeof(struct skb_shared_hwtstamps));
+	shhwtstamp->hwtstamp = ns_to_ktime(ns);
 }
 
 /**
