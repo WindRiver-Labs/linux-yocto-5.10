@@ -375,6 +375,7 @@ struct sdma_desc {
 struct sdma_channel {
 	struct virt_dma_chan		vc;
 	struct sdma_desc		*desc;
+	struct list_head                terminated_node;
 	struct sdma_engine		*sdma;
 	unsigned int			channel;
 	enum dma_transfer_direction		direction;
@@ -1220,9 +1221,6 @@ static void sdma_channel_terminate_work(struct work_struct *work)
 {
 	struct sdma_channel *sdmac = container_of(work, struct sdma_channel,
 						  terminate_worker);
-	unsigned long flags;
-	LIST_HEAD(head);
-
 	/*
 	 * According to NXP R&D team a delay of one BD SDMA cost time
 	 * (maximum is 1ms) should be added after disable of the channel
@@ -1231,10 +1229,7 @@ static void sdma_channel_terminate_work(struct work_struct *work)
 	 */
 	usleep_range(1000, 2000);
 
-	spin_lock_irqsave(&sdmac->vc.lock, flags);
-	vchan_get_all_descriptors(&sdmac->vc, &head);
-	spin_unlock_irqrestore(&sdmac->vc.lock, flags);
-	vchan_dma_desc_free_list(&sdmac->vc, &head);
+	vchan_dma_desc_free_list(&sdmac->vc, &sdmac->terminated_node);
 }
 
 static int sdma_terminate_all(struct dma_chan *chan)
@@ -2377,6 +2372,7 @@ static int sdma_probe(struct platform_device *pdev)
 
 		sdmac->channel = i;
 		sdmac->vc.desc_free = sdma_desc_free;
+		INIT_LIST_HEAD(&sdmac->terminated_node);
 		INIT_WORK(&sdmac->terminate_worker,
 				sdma_channel_terminate_work);
 		/*
