@@ -1146,7 +1146,9 @@ static int spi_nor_erase_sector(struct spi_nor *nor, u32 addr)
 
 		return spi_mem_exec_op(nor->spimem, &op);
 	} else if (nor->controller_ops->erase) {
+#ifndef CONFIG_SOC_S32GEN1
 		return nor->controller_ops->erase(nor, addr);
+#endif
 	}
 
 	/*
@@ -2253,6 +2255,7 @@ int spi_nor_hwcaps_read2cmd(u32 hwcaps)
 		{ SNOR_HWCAPS_READ_1_8_8,	SNOR_CMD_READ_1_8_8 },
 		{ SNOR_HWCAPS_READ_8_8_8,	SNOR_CMD_READ_8_8_8 },
 		{ SNOR_HWCAPS_READ_1_8_8_DTR,	SNOR_CMD_READ_1_8_8_DTR },
+		{ SNOR_HWCAPS_READ_8_8_8_DTR,   SNOR_CMD_READ_8_8_8_DTR },
 	};
 
 	return spi_nor_hwcaps2cmd(hwcaps, hwcaps_read2cmd,
@@ -2778,6 +2781,14 @@ static void spi_nor_info_init_params(struct spi_nor *nor)
 	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP],
 				SPINOR_OP_PP, SNOR_PROTO_1_1_1);
 
+	if (info->flags & SPI_NOR_OCTAL_DTR_READ) {
+		params->hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8_DTR;
+		spi_nor_set_read_settings(
+				&params->reads[SNOR_CMD_READ_8_8_8_DTR],
+				0, 20, SPINOR_OP_READ_8_8_8_DTR,
+				SNOR_PROTO_8_8_8_DTR);
+	}
+
 	/*
 	 * Sector Erase settings. Sort Erase Types in ascending order, with the
 	 * smallest erase size starting at BIT(0).
@@ -3061,6 +3072,7 @@ static const struct flash_info *spi_nor_get_flash_info(struct spi_nor *nor,
 	 * If caller has specified name of flash model that can normally be
 	 * detected using JEDEC, let's verify it.
 	 */
+#ifndef CONFIG_SOC_S32GEN1
 	if (name && info->id_len) {
 		const struct flash_info *jinfo;
 
@@ -3080,6 +3092,7 @@ static const struct flash_info *spi_nor_get_flash_info(struct spi_nor *nor,
 			info = jinfo;
 		}
 	}
+#endif
 
 	return info;
 }
@@ -3091,6 +3104,11 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	struct device *dev = nor->dev;
 	struct mtd_info *mtd = &nor->mtd;
 	struct device_node *np = spi_nor_get_flash_node(nor);
+#ifdef CONFIG_SOC_S32GEN1
+	struct spi_nor_hwcaps hwcaps_s32gen1 = {
+		.mask = SNOR_HWCAPS_PP,
+	};
+#endif
 	int ret;
 	int i;
 
@@ -3102,6 +3120,15 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	nor->reg_proto = SNOR_PROTO_1_1_1;
 	nor->read_proto = SNOR_PROTO_1_1_1;
 	nor->write_proto = SNOR_PROTO_1_1_1;
+
+#ifdef CONFIG_SOC_S32GEN1
+	hwcaps_s32gen1.mask |= SNOR_HWCAPS_READ_1_1_8;
+	hwcaps_s32gen1.mask |= (SNOR_HWCAPS_READ_1_8_8 |
+			SNOR_HWCAPS_READ_1_8_8_DTR |
+			SNOR_HWCAPS_READ_8_8_8_DTR |
+			SNOR_HWCAPS_PP_1_1_8 |
+			SNOR_HWCAPS_PP_1_8_8);
+#endif
 
 	/*
 	 * We need the bounce buffer early to read/write registers when going
@@ -3197,7 +3224,11 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	 * - set the number of dummy cycles (mode cycles + wait states).
 	 * - set the SPI protocols for register and memory accesses.
 	 */
+#ifdef CONFIG_SOC_S32GEN1
+	ret = spi_nor_setup(nor, &hwcaps_s32gen1);
+#else
 	ret = spi_nor_setup(nor, hwcaps);
+#endif
 	if (ret)
 		return ret;
 

@@ -2,6 +2,7 @@
 /*
  * Copyright (C) 2005, Intec Automation Inc.
  * Copyright (C) 2014, Freescale Semiconductor, Inc.
+ * Copyright 2020 NXP
  */
 
 #ifndef __LINUX_MTD_SPI_NOR_INTERNAL_H
@@ -62,6 +63,7 @@ enum spi_nor_read_command_index {
 	SNOR_CMD_READ_1_8_8,
 	SNOR_CMD_READ_8_8_8,
 	SNOR_CMD_READ_1_8_8_DTR,
+	SNOR_CMD_READ_8_8_8_DTR,
 
 	SNOR_CMD_READ_MAX
 };
@@ -311,6 +313,8 @@ struct flash_info {
 					 * BP3 is bit 6 of status register.
 					 * Must be used with SPI_NOR_4BIT_BP.
 					 */
+
+#define SPI_NOR_OCTAL_DTR_READ	BIT(19) /* Flash supports DTR Octal Read */
 
 	/* Part specific fixup hooks. */
 	const struct spi_nor_fixups *fixups;
