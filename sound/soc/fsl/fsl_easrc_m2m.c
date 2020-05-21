@@ -2,8 +2,8 @@
 // Copyright 2019 NXP
 
 struct fsl_easrc_m2m {
-	struct fsl_easrc *easrc;
-	struct fsl_easrc_context *ctx;
+	struct fsl_asrc *easrc;
+	struct fsl_asrc_pair *ctx;
 	struct completion complete[2];
 	struct dma_block dma_block[2];
 	unsigned int ctx_hold;
@@ -16,7 +16,7 @@ struct fsl_easrc_m2m {
 	spinlock_t lock;  /* protect mem resource */
 };
 
-void fsl_easrc_get_status(struct fsl_easrc_context *ctx,
+void fsl_easrc_get_status(struct fsl_asrc_pair *ctx,
 			  struct asrc_status_flags *flags)
 {
 	flags->overload_error = 0;
@@ -77,8 +77,8 @@ static int fsl_easrc_dmaconfig(struct fsl_easrc_m2m *m2m,
 			       bool dir, int bits)
 {
 	struct dma_async_tx_descriptor *desc = m2m->desc[dir];
-	struct fsl_easrc *easrc = m2m->easrc;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc *easrc = m2m->easrc;
+	struct fsl_asrc_pair* ctx = m2m->ctx;
 	struct device *dev = &easrc->pdev->dev;
 	unsigned int sg_nent = m2m->sg_nodes[dir];
 	struct scatterlist *sg = m2m->sg[dir];
@@ -173,7 +173,7 @@ static int fsl_easrc_dmaconfig(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_calc_outbuf_len(struct fsl_easrc_m2m *m2m,
 				      struct asrc_convert_buffer *pbuf)
 {
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	unsigned int out_length;
 	unsigned int in_width, out_width;
 	unsigned int channels = ctx->channels;
@@ -200,9 +200,9 @@ static long fsl_easrc_prepare_io_buffer(struct fsl_easrc_m2m *m2m,
 					struct asrc_convert_buffer *buf,
 					bool dir)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct dma_chan *dma_chan = ctx->dma_chan[dir];
 	unsigned int *dma_len = &m2m->dma_block[dir].length;
 	unsigned int *sg_nodes = &m2m->sg_nodes[dir];
@@ -253,7 +253,7 @@ static long fsl_easrc_prepare_io_buffer(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_prepare_buffer(struct fsl_easrc_m2m *m2m,
 				     struct asrc_convert_buffer *buf)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
 	int ret;
 
@@ -274,7 +274,7 @@ static long fsl_easrc_prepare_buffer(struct fsl_easrc_m2m *m2m,
 
 int fsl_easrc_process_buffer_pre(struct fsl_easrc_m2m *m2m, bool dir)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
 
 	if (!wait_for_completion_interruptible_timeout(&m2m->complete[dir],
@@ -291,7 +291,7 @@ int fsl_easrc_process_buffer_pre(struct fsl_easrc_m2m *m2m, bool dir)
 
 static unsigned int fsl_easrc_get_output_FIFO_size(struct fsl_easrc_m2m *m2m)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	enum asrc_pair_index index = m2m->ctx->index;
 	u32 val;
 
@@ -304,9 +304,9 @@ static unsigned int fsl_easrc_get_output_FIFO_size(struct fsl_easrc_m2m *m2m)
 
 static void fsl_easrc_read_last_FIFO(struct fsl_easrc_m2m *m2m)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct dma_block *output = &m2m->dma_block[OUT];
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	enum asrc_pair_index index = m2m->ctx->index;
 	u32 i, reg, size, t_size = 0, width;
 	u32 *reg32 = NULL;
@@ -354,7 +354,7 @@ retry:
 static long fsl_easrc_process_buffer(struct fsl_easrc_m2m *m2m,
 				     struct asrc_convert_buffer *buf)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
 	unsigned long lock_flags;
 	int ret;
@@ -419,7 +419,7 @@ void fsl_easrc_submit_dma(struct fsl_easrc_m2m *m2m)
 static long fsl_easrc_ioctl_req_context(struct fsl_easrc_m2m *m2m,
 					void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
 	struct asrc_req req;
 	unsigned long lock_flags;
@@ -458,8 +458,8 @@ static long fsl_easrc_ioctl_req_context(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_config_context(struct fsl_easrc_m2m *m2m,
 					   void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc *easrc = m2m->easrc;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	enum asrc_pair_index index = m2m->ctx->index;
 	struct device *dev = &easrc->pdev->dev;
 	struct asrc_config config;
@@ -556,8 +556,8 @@ static long fsl_easrc_ioctl_config_context(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_release_context(struct fsl_easrc_m2m *m2m,
 					    void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc *easrc = m2m->easrc;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct device *dev = &easrc->pdev->dev;
 	enum asrc_pair_index index;
 	unsigned long lock_flags;
@@ -607,9 +607,9 @@ static long fsl_easrc_ioctl_release_context(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_convert(struct fsl_easrc_m2m *m2m,
 				    void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct asrc_convert_buffer buf;
 	int ret;
 
@@ -654,7 +654,7 @@ static long fsl_easrc_ioctl_convert(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_start_conv(struct fsl_easrc_m2m *m2m,
 				       void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
 	enum asrc_pair_index index;
 	int ret;
@@ -681,8 +681,8 @@ static long fsl_easrc_ioctl_start_conv(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_stop_conv(struct fsl_easrc_m2m *m2m,
 				      void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc *easrc = m2m->easrc;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct device *dev = &easrc->pdev->dev;
 	enum asrc_pair_index index;
 	int ret;
@@ -712,9 +712,9 @@ static long fsl_easrc_ioctl_stop_conv(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_status(struct fsl_easrc_m2m *m2m,
 				   void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct asrc_status_flags flags;
 	int ret;
 
@@ -745,9 +745,9 @@ static long fsl_easrc_ioctl_status(struct fsl_easrc_m2m *m2m,
 static long fsl_easrc_ioctl_flush(struct fsl_easrc_m2m *m2m,
 				  void __user *user)
 {
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	struct device *dev = &easrc->pdev->dev;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 
 	/* Release DMA and request again */
 	dma_release_channel(ctx->dma_chan[IN]);
@@ -771,9 +771,9 @@ static long fsl_easrc_ioctl_flush(struct fsl_easrc_m2m *m2m,
 static int fsl_easrc_open(struct inode *inode, struct file *file)
 {
 	struct miscdevice *easrc_miscdev = file->private_data;
-	struct fsl_easrc *easrc = dev_get_drvdata(easrc_miscdev->parent);
+	struct fsl_asrc *easrc = dev_get_drvdata(easrc_miscdev->parent);
 	struct fsl_easrc_m2m *m2m;
-	struct fsl_easrc_context *ctx;
+	struct fsl_asrc_pair *ctx;
 	struct device *dev = &easrc->pdev->dev;
 	int ret;
 
@@ -796,8 +796,8 @@ static int fsl_easrc_open(struct inode *inode, struct file *file)
 	/* just save the pointer to easrc private data */
 	m2m->easrc = easrc;
 	m2m->ctx = ctx;
-	ctx->easrc = easrc;
-	ctx->private_data = m2m;
+	ctx->asrc = easrc;
+	ctx->private = m2m;
 
 	spin_lock_init(&m2m->lock);
 	init_completion(&m2m->complete[IN]);
@@ -817,8 +817,8 @@ out:
 static int fsl_easrc_close(struct inode *inode, struct file *file)
 {
 	struct fsl_easrc_m2m *m2m = file->private_data;
-	struct fsl_easrc *easrc = m2m->easrc;
-	struct fsl_easrc_context *ctx = m2m->ctx;
+	struct fsl_asrc *easrc = m2m->easrc;
+	struct fsl_asrc_pair *ctx = m2m->ctx;
 	struct device *dev = &easrc->pdev->dev;
 	unsigned long lock_flags;
 
@@ -869,7 +869,7 @@ static long fsl_easrc_ioctl(struct file *file, unsigned int cmd,
 			    unsigned long arg)
 {
 	struct fsl_easrc_m2m *m2m = file->private_data;
-	struct fsl_easrc *easrc = m2m->easrc;
+	struct fsl_asrc *easrc = m2m->easrc;
 	void __user *user = (void __user *)arg;
 	long ret = 0;
 
@@ -929,9 +929,9 @@ static int fsl_easrc_m2m_init(struct fsl_easrc *easrc)
 }
 
 #ifdef CONFIG_PM_SLEEP
-static void fsl_easrc_m2m_suspend(struct fsl_easrc *easrc)
+static void fsl_easrc_m2m_suspend(struct fsl_asrc *easrc)
 {
-	struct fsl_easrc_context *ctx;
+	struct  fsl_asrc_pair *ctx;
 	struct fsl_easrc_m2m *m2m;
 	unsigned long lock_flags;
 	int i;
@@ -939,11 +939,11 @@ static void fsl_easrc_m2m_suspend(struct fsl_easrc *easrc)
 	for (i = 0; i < EASRC_CTX_MAX_NUM; i++) {
 		spin_lock_irqsave(&easrc->lock, lock_flags);
 		ctx = easrc->ctx[i];
-		if (!ctx || !ctx->private_data) {
+		if (!ctx || !ctx->private) {
 			spin_unlock_irqrestore(&easrc->lock, lock_flags);
 			continue;
 		}
-		m2m = ctx->private_data;
+		m2m = ctx->private;
 
 		if (!completion_done(&m2m->complete[IN])) {
 			if (ctx->dma_chan[IN])
@@ -957,6 +957,7 @@ static void fsl_easrc_m2m_suspend(struct fsl_easrc *easrc)
 		}
 
 		m2m->first_convert = 1;
+		m2m->in_filled_len = 0;
 		fsl_easrc_stop_context(ctx);
 		spin_unlock_irqrestore(&easrc->lock, lock_flags);
 	}
