@@ -151,6 +151,11 @@ static int fsl_dai_probe(struct platform_device *pdev)
 		if (IS_ERR(priv->link[i]))
 			return PTR_ERR(priv->link);
 	}
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 3000);
+        pm_runtime_use_autosuspend(&pdev->dev);
+
+        pm_runtime_get_sync(&pdev->dev);
 
 	ret = devm_snd_soc_register_component(&pdev->dev, &fsl_dai_component,
 					      &fsl_dai, 1);
@@ -158,6 +163,9 @@ static int fsl_dai_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Failed to register DAI ret = %d\n", ret);
 		return ret;
 	}
+
+	pm_runtime_mark_last_busy(&pdev->dev);
+        pm_runtime_put_autosuspend(&pdev->dev);
 
 	return 0;
 }
