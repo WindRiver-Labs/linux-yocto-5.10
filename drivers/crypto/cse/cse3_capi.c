@@ -137,7 +137,6 @@ static int capi_aes_setkey(struct crypto_ablkcipher *tfm, const u8 *key,
 	cse_ctx_t *ctx = crypto_ablkcipher_ctx(tfm);
 
 	if (keylen != AES_KEYSIZE_128) {
-		crypto_ablkcipher_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return -EINVAL;
 	}
 
@@ -234,7 +233,6 @@ static int capi_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 	cse_ctx_t *ctx = crypto_ahash_ctx(tfm);
 
 	if (keylen != AES_KEYSIZE_128) {
-		crypto_ahash_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return -EINVAL;
 	}
 
