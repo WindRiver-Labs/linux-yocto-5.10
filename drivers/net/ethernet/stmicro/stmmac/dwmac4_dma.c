@@ -623,7 +623,7 @@ static int dwmac5_enable_tbs(void __iomem *ioaddr, bool en, u32 chan)
 const struct stmmac_dma_ops dwmac5_dma_ops = {
 	.reset = dwmac4_dma_reset,
 	.init = dwmac4_dma_init,
-	.init_chan = dwmac4_dma_init_channel,
+	.init_chan = dwmac410_dma_init_channel,
 	.init_rx_chan = dwmac4_dma_init_rx_chan,
 	.init_tx_chan = dwmac5_dma_init_tx_chan,
 	.axi = dwmac4_dma_axi,
