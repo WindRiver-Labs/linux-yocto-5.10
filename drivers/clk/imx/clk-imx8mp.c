@@ -746,6 +746,9 @@ static int imx8mp_clocks_probe(struct platform_device *pdev)
 
 		uart_clks[i] = &hws[index]->clk;
 	}
+	
+	clk_prepare_enable(clks[IMX8MP_CLK_QOS_ENET_ROOT]);
+        clk_prepare_enable(clks[IMX8MP_CLK_ENET_QOS_ROOT]);
 
 	imx_register_uart_clocks(uart_clks);
 
