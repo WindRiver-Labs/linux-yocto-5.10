@@ -2479,7 +2479,7 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue)
 {
 	struct stmmac_tx_queue *tx_q = &priv->tx_queue[queue];
 	unsigned int bytes_compl = 0, pkts_compl = 0;
-	unsigned int entry, xmits = 0, count = 0;
+	unsigned int entry, xmits = 0, next_entry, count = 0;
 
 	__netif_tx_lock_bh(netdev_get_tx_queue(priv->dev, queue));
 
@@ -2493,7 +2493,7 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue)
 	while ((entry != tx_q->cur_tx) && count < priv->dma_tx_size) {
 		struct xdp_frame *xdpf;
 		struct sk_buff *skb;
-		struct dma_desc *p;
+		struct dma_desc *p, *np;
 		int status;
 
 		if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_XDP_TX ||
@@ -2520,6 +2520,16 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue)
 		/* Check if the descriptor is owned by the DMA */
 		if (unlikely(status & tx_dma_own))
 			break;
+
+		next_entry = STMMAC_GET_ENTRY(entry, priv->dma_tx_size);
+		if (priv->extend_desc)
+			np = (struct dma_desc *)(tx_q->dma_etx + next_entry);
+		else if (tx_q->tbs & STMMAC_TBS_AVAIL)
+			np = &(tx_q->dma_entx + next_entry)->basic;
+		else
+			np = tx_q->dma_tx + next_entry;
+
+		prefetch(np);
 
 		count++;
 
@@ -2618,7 +2628,7 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue)
 
 		stmmac_release_tx_desc(priv, p, priv->mode);
 
-		entry = STMMAC_GET_ENTRY(entry, priv->dma_tx_size);
+		entry = next_entry;
 	}
 	tx_q->dirty_tx = entry;
 
