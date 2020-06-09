@@ -75,6 +75,19 @@
 #define CTRL_DF24                      BIT(1)
 #define CTRL_RUN                       BIT(0)
 
+#define CTRL_WORD_LENGTH_16             (0 << 8)
+#define CTRL_WORD_LENGTH_8              (1 << 8)
+#define CTRL_WORD_LENGTH_18             (2 << 8)
+#define CTRL_WORD_LENGTH_24             (3 << 8)
+#define CTRL_BUS_WIDTH_16               (0 << 10)
+#define CTRL_BUS_WIDTH_8                (1 << 10)
+#define CTRL_BUS_WIDTH_18               (2 << 10)
+#define CTRL_BUS_WIDTH_24               (3 << 10)
+#define CTRL_WORD_LENGTH_16             (0 << 8)
+#define CTRL_WORD_LENGTH_8              (1 << 8)
+#define CTRL_WORD_LENGTH_18             (2 << 8)
+#define CTRL_WORD_LENGTH_24             (3 << 8)
+
 #define CTRL1_RECOVERY_ON_UNDERFLOW    BIT(24)
 #define CTRL1_FIFO_CLEAR               BIT(21)
 
@@ -113,7 +126,7 @@
 #define CTRL2_LINE_PATTERN_BGR 5
 #define CTRL2_LINE_PATTERN_CLR 7
 
-#define CTRL2_LCD_RESET                        BIT(0)
+#define CTRL_LCD_RESET                 BIT(0)
 
 #define TRANSFER_COUNT_SET_VCOUNT(x)   REG_PUT((x), 31, 16)
 #define TRANSFER_COUNT_GET_VCOUNT(x)   REG_GET((x), 31, 16)
