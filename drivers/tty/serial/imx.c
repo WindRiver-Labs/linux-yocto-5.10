@@ -23,11 +23,13 @@
 #include <linux/ktime.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/rational.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
+#include <linux/pm_qos.h>
 
 #include <asm/irq.h>
 #include <linux/busfreq-imx.h>
@@ -1327,7 +1329,7 @@ static void imx_uart_dma_exit(struct imx_port *sport)
 		sport->dma_chan_tx = NULL;
 	}
 
-	pm_qos_remove_request(&sport->pm_qos_req);
+	cpu_latency_qos_remove_request(&sport->pm_qos_req);
 	release_bus_freq(BUS_FREQ_HIGH);
 }
 
@@ -1336,10 +1338,6 @@ static int imx_uart_dma_init(struct imx_port *sport)
 	struct dma_slave_config slave_config = {};
 	struct device *dev = sport->port.dev;
 	int ret;
-
-	/* request high bus for DMA mode */
-	request_bus_freq(BUS_FREQ_HIGH);
-	pm_qos_add_request(&sport->pm_qos_req, PM_QOS_CPU_DMA_LATENCY, 0);
 
 	/* Prepare for RX : */
 	sport->dma_chan_rx = dma_request_slave_channel(dev, "rx");
@@ -2563,10 +2561,12 @@ static void imx_uart_enable_wakeup(struct imx_port *sport, bool on)
 
 	if (sport->have_rtscts) {
 		u32 ucr1 = imx_uart_readl(sport, UCR1);
-		if (on)
+		if (on) {
+			imx_uart_writel(sport, USR1_RTSD, USR1);
 			ucr1 |= UCR1_RTSDEN;
-		else
+		} else {
 			ucr1 &= ~UCR1_RTSDEN;
+		}
 		imx_uart_writel(sport, ucr1, UCR1);
 	}
 }
