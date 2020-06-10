@@ -165,6 +165,16 @@
         };
 };
 
+&sai2 {
+       #sound-dai-cells = <0>;
+       pinctrl-names = "default";
+       pinctrl-0 = <&pinctrl_sai2>;
+       assigned-clocks = <&clk IMX8MN_CLK_SAI2>;
+       assigned-clock-parents = <&clk IMX8MN_AUDIO_PLL1_OUT>;
+       assigned-clock-rates = <24576000>;
+       status = "okay";
+};
+
 &A53_0 {
        cpu-supply = <&buck2_reg>;
 };
