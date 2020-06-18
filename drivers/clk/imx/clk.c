@@ -55,6 +55,7 @@ void imx_check_clocks(struct clk *clks[], unsigned int count)
 			pr_err("i.MX clk %u: register failed with %ld\n",
 			       i, PTR_ERR(clks[i]));
 }
+EXPORT_SYMBOL_GPL(imx_check_clocks);
 
 void imx_check_clk_hws(struct clk_hw *clks[], unsigned int count)
 {
@@ -194,6 +195,7 @@ void imx_register_uart_clocks(void)
 {
 	imx_earlycon_uart_clks_onoff(true);
 }
+EXPORT_SYMBOL_GPL(imx_register_uart_clocks);
 
 static int __init imx_clk_disable_uart(void)
 {
