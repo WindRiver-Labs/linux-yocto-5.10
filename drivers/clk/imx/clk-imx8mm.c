@@ -696,7 +696,11 @@ static struct platform_driver imx8mm_clk_driver = {
 	},
 };
 module_platform_driver(imx8mm_clk_driver);
+MODULE_AUTHOR("Bai Ping <ping.bai@nxp.com>");
+MODULE_DESCRIPTION("NXP i.MX8MM clock driver");
+MODULE_LICENSE("GPL v2");
 
+#ifndef MODULE
 /*
  * Debugfs interface for audio PLL K divider change dynamically.
  * Monitor control for the Audio PLL K-Divider
