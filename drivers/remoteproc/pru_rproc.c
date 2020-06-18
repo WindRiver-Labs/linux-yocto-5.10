@@ -16,8 +16,7 @@
 #include <linux/omap-mailbox.h>
 #include <linux/pruss.h>
 #include <linux/pruss_driver.h>
-#include <linux/pruss_intc.h>
-#include <linux/irqchip/irq-pruss-intc.h>
+
 #include <linux/remoteproc.h>
 
 #include "remoteproc_internal.h"
@@ -87,6 +86,44 @@ struct pru_private_data {
 	enum pru_type type;
 	unsigned int is_k3 : 1;
 };
+
+/* maximum number of system events */
+#define MAX_PRU_SYS_EVENTS      160 
+/* maximum number of interrupt channels */
+#define MAX_PRU_CHANNELS        20
+
+/**
+ * struct pruss_intc_config - INTC configuration info
+ * @sysev_to_ch: system events to channel mapping information
+ * @ch_to_host: interrupt channel to host interrupt information
+ */
+struct pruss_intc_config {
+        s8 sysev_to_ch[MAX_PRU_SYS_EVENTS];
+        s8 ch_to_host[MAX_PRU_CHANNELS];
+};
+
+#if IS_ENABLED(CONFIG_TI_PRUSS_INTC)
+ 
+int pruss_intc_configure(struct device *dev,
+                         struct pruss_intc_config *intc_config);
+int pruss_intc_unconfigure(struct device *dev,
+                           struct pruss_intc_config *intc_config);
+ 
+#else
+
+static inline int pruss_intc_configure(struct device *dev,
+                                       struct pruss_intc_config *intc_config)
+{
+        return -ENOTSUPP;
+}
+ 
+static inline int pruss_intc_unconfigure(struct device *dev,
+                                         struct pruss_intc_config *intc_config)
+{
+        return -ENOTSUPP;
+}
+ 
+#endif /* CONFIG_TI_PRUSS_INTC */
 
 /**
  * struct pru_rproc - PRU remoteproc structure
@@ -210,7 +247,7 @@ static int pru_rproc_intc_dt_config(struct pru_rproc *pru, int index)
 		return -EINVAL;
 	}
 
-	arr = kmalloc_array(dt_irqs, sizeof(u32), GFP_KERNEL);
+	arr = kvmalloc_array(dt_irqs, sizeof(u32), GFP_KERNEL);
 	if (!arr)
 		return -ENOMEM;
 
@@ -285,7 +322,7 @@ static int pru_rproc_intc_dt_config(struct pru_rproc *pru, int index)
 	}
 
 out:
-	kfree(arr);
+	vfree(arr);
 
 	return ret;
 }
@@ -692,7 +729,8 @@ static void pru_rproc_kick(struct rproc *rproc, int vq_id)
 		names[pru->data->type], pru->id);
 
 	if (pru->irq_kick > 0) {
-		ret = pruss_intc_trigger(pru->irq_kick);
+		ret = irq_set_irqchip_state(pru->irq_kick,
+					    IRQCHIP_STATE_PENDING, true);
 		if (ret < 0)
 			dev_err(dev, "pruss_intc_trigger failed: %d\n", ret);
 	} else if (pru->mbox) {
@@ -987,7 +1025,7 @@ static void *pru_i_da_to_va(struct pru_rproc *pru, u32 da, int len)
  * core for any PRU client drivers. The PRU Instruction RAM access is restricted
  * only to the PRU loader code.
  */
-static void *pru_rproc_da_to_va(struct rproc *rproc, u64 da, int len)
+static void *pru_rproc_da_to_va(struct rproc *rproc, u64 da, size_t len)
 {
 	struct pru_rproc *pru = rproc->priv;
 
@@ -1055,7 +1093,7 @@ static int pru_rproc_memcpy(void *dest, const void *src, size_t count)
 	while (size--)
 		*d++ = *s++;
 
-	kfree(tmp_src);
+	vfree(tmp_src);
 
 	return 0;
 }
