@@ -1218,6 +1218,20 @@ static int fec_enet_ipc_handle_init(struct fec_enet_private *fep)
 static void fec_enet_ipg_stop_set(struct fec_enet_private *fep, bool enabled) {}
 #endif
 
+static void fec_enet_enter_stop_mode(struct fec_enet_private *fep)
+{
+        struct fec_platform_data *pdata = fep->pdev->dev.platform_data;
+
+        if (!IS_ERR_OR_NULL(fep->lpm.gpr))
+                regmap_update_bits(fep->lpm.gpr, fep->lpm.req_gpr,
+                                   1 << fep->lpm.req_bit,
+                                   1 << fep->lpm.req_bit);
+        else if (pdata && pdata->sleep_mode_enable)
+                pdata->sleep_mode_enable(true);
+        else
+                fec_enet_ipg_stop_set(fep, true);
+}
+
 static void fec_enet_stop_mode(struct fec_enet_private *fep, bool enabled)
 {
 	struct fec_platform_data *pdata = fep->pdev->dev.platform_data;
@@ -1234,6 +1248,13 @@ static void fec_enet_stop_mode(struct fec_enet_private *fep, bool enabled)
 	} else if (pdata && pdata->sleep_mode_enable) {
 		pdata->sleep_mode_enable(enabled);
 	}
+}
+
+static inline void fec_irqs_disable(struct net_device *ndev)
+{
+        struct fec_enet_private *fep = netdev_priv(ndev);
+
+        writel(0, fep->hwp + FEC_IMASK);
 }
 
 static void
@@ -3232,10 +3253,6 @@ fec_enet_open(struct net_device *ndev)
 
 	if (fep->quirks & FEC_QUIRK_ERR006687)
 		imx6q_cpuidle_fec_irqs_used();
-	if (fep->quirks & FEC_QUIRK_HAS_PMQOS)
-		pm_qos_add_request(&fep->pm_qos_req,
-				   PM_QOS_CPU_DMA_LATENCY,
-				   0);
 
 	napi_enable(&fep->napi);
 	phy_start(ndev->phydev);
@@ -3281,7 +3298,7 @@ fec_enet_close(struct net_device *ndev)
 
 	fec_enet_clk_enable(ndev, false);
 	if (fep->quirks & FEC_QUIRK_HAS_PMQOS)
-		pm_qos_remove_request(&fep->pm_qos_req);
+		cpu_latency_qos_remove_request(&fep->pm_qos_req);
 	if (!fep->mii_bus_share)
 		pinctrl_pm_select_sleep_state(&fep->pdev->dev);
 	pm_runtime_mark_last_busy(&fep->pdev->dev);
@@ -4132,7 +4149,7 @@ static int __maybe_unused fec_resume(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct fec_enet_private *fep = netdev_priv(ndev);
-	int ret;
+	int ret = 0;
 	int val;
 
 	if (fep->reg_phy && !(fep->wol_flag & FEC_WOL_FLAG_ENABLE)) {
