@@ -83,6 +83,7 @@ static const struct clk_ops clk_lpcg_scu_ops = {
 	.enable = clk_lpcg_scu_enable,
 	.disable = clk_lpcg_scu_disable,
 };
+EXPORT_SYMBOL_GPL(imx_clk_lpcg_scu_pm_ops);
 
 struct clk_hw *__imx_clk_lpcg_scu(struct device *dev, const char *name,
 				  const char *parent_name, unsigned long flags,
@@ -120,6 +121,15 @@ struct clk_hw *__imx_clk_lpcg_scu(struct device *dev, const char *name,
 		dev_set_drvdata(dev, clk);
 
 	return hw;
+}
+EXPORT_SYMBOL_GPL(__imx_clk_lpcg_scu);
+
+void imx_clk_lpcg_scu_unregister(struct clk_hw *hw)
+{
+        struct clk_lpcg_scu *clk = to_clk_lpcg_scu(hw);
+
+        clk_hw_unregister(&clk->hw);
+        kfree(clk);
 }
 
 int __maybe_unused imx_clk_lpcg_scu_suspend(struct device *dev)
