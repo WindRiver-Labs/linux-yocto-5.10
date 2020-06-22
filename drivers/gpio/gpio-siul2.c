@@ -320,6 +320,7 @@ static int siul2_irq_setup(struct platform_device *pdev,
 	struct resource *iores;
 	struct of_phandle_args pinspec;
 	int irq;
+	struct gpio_irq_chip *girq;
 
 	/* Skip gpio node without interrupts */
 	intspec = of_get_property(pdev->dev.of_node, "interrupts", &intlen);
@@ -363,21 +364,20 @@ static int siul2_irq_setup(struct platform_device *pdev,
 	/* Disable falling-edge events */
 	writel(0, gpio_dev->irq_base + SIUL2_IFEER0);
 
-	/* Setup irq domain on top of the generic chip. */
-	err = gpiochip_irqchip_add(&gpio_dev->gc,
-				   &gpio_dev->irqchip,
-				   0,
-				   handle_simple_irq,
-				   IRQ_TYPE_NONE);
-	if (err) {
-		dev_err(&pdev->dev, "could not connect irqchip to gpiochip\n");
-		return err;
+	/* Set up the GPIO irqchip */
+	girq = &gpio_dev->gc.irq;
+	girq->chip = &gpio_dev->irqchip;
+	girq->parent_handler = siul2_gpio_irq_handler;
+	girq->num_parents = 1;
+	girq->parents = devm_kcalloc(&pdev->dev, 1,
+				     sizeof(*girq->parents),
+				     GFP_KERNEL);
+	if (!girq->parents) {
+		goto -ENOMEM;
 	}
-
-	gpiochip_set_chained_irqchip(&gpio_dev->gc,
-				     &gpio_dev->irqchip,
-				     irq,
-				     siul2_gpio_irq_handler);
+	girq->parents[0] = irq;
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_simple_irq;
 
 	return 0;
 }
@@ -582,16 +582,16 @@ int siul2_gpio_probe(struct platform_device *pdev)
 	gc->direction_input = siul2_gpio_dir_in;
 	gc->owner = THIS_MODULE;
 
-	err = gpiochip_add(gc);
-	if (err) {
-		dev_err(&pdev->dev, "unable to add gpiochip: %d\n", err);
-		return -EINVAL;
-	}
-
 	/* EIRQs setup */
 	err = siul2_irq_setup(pdev, gpio_dev);
 	if (err) {
 		dev_err(&pdev->dev, "failed to setup IRQ : %d\n", err);
+		return -EINVAL;
+	}
+
+	err = gpiochip_add(gc);
+	if (err) {
+		dev_err(&pdev->dev, "unable to add gpiochip: %d\n", err);
 		return -EINVAL;
 	}
 
