@@ -21,8 +21,9 @@
 
 #include "fsl-edma-common.h"
 
+#define EDMA_TCD(ch)		(0x1000 + 32 * (ch))
+
 static int is_vf610_edma(struct fsl_edma_engine *data);
-static int is_s32v234_edma(struct fsl_edma_engine *data);
 static int is_s32gen1_edma(struct fsl_edma_engine *data);
 
 static void fsl_edma_synchronize(struct dma_chan *chan)
@@ -239,32 +240,37 @@ fsl_edma_irq_init(struct platform_device *pdev, struct fsl_edma_engine *fsl_edma
 	unsigned int i, j;
 	const struct fsl_edma_drvdata *drvdata = fsl_edma->drvdata;
 
+	fsl_edma->irq_nos = devm_kzalloc(&pdev->dev,
+		drvdata->n_irqs * sizeof(*fsl_edma->irq_nos), GFP_KERNEL);
+	if (!fsl_edma->irq_nos)
+		return -ENOMEM;
+
 	for (i = 0; i < drvdata->n_irqs; i++) {
-		drvdata->irqs[i].irqno = platform_get_irq_byname(pdev,
+		fsl_edma->irq_nos[i] = platform_get_irq_byname(pdev,
 						drvdata->irqs[i].name);
-		if (drvdata->irqs[i].irqno < 0) {
+		if (fsl_edma->irq_nos[i] < 0) {
 			dev_err(&pdev->dev, "Can't get %s irq.\n",
 				drvdata->irqs[i].name);
-			return drvdata->irqs[i].irqno;
+			return fsl_edma->irq_nos[i];
 		}
 
 		for (j = 0; j < i; j++) {
-			if (drvdata->irqs[i].irqno == drvdata->irqs[j].irqno)
+			if (fsl_edma->irq_nos[i] == fsl_edma->irq_nos[j])
 				break;
 		}
 
 		/* Check there is a irq with multiple functionalities */
 		if (is_vf610_edma(fsl_edma))
 			if (j < i) {
-				drvdata->irqs[i].irqno = -1;
+				fsl_edma->irq_nos[i] = -1;
 				drvdata->irqs[j].name = "eDma";
 			}
 	}
 
 	for (i = 0; i < drvdata->n_irqs; i++) {
-		if (drvdata->irqs[i].irqno >= 0) {
+		if (fsl_edma->irq_nos[i] >= 0) {
 			ret = devm_request_irq(&pdev->dev,
-				       drvdata->irqs[i].irqno,
+				       fsl_edma->irq_nos[i],
 				       drvdata->irqs[i].irqhandler,
 				       0,
 				       drvdata->irqs[i].name,
@@ -276,6 +282,7 @@ fsl_edma_irq_init(struct platform_device *pdev, struct fsl_edma_engine *fsl_edma
 				return  ret;
 			}
 		}
+	}
 
 	return 0;
 }
@@ -331,54 +338,6 @@ static void fsl_disable_clocks(struct fsl_edma_engine *fsl_edma, int nr_clocks)
 		clk_disable_unprepare(fsl_edma->muxclk[i]);
 }
 
-static struct fsl_edma_drvdata vf610_data = {
-	.version = v1,
-	.dmamuxs = DMAMUX_NR,
-	.setup_irq = fsl_edma_irq_init,
-};
-
-static struct fsl_edma_drvdata ls1028a_data = {
-	.version = v1,
-	.dmamuxs = DMAMUX_NR,
-	.mux_swap = true,
-	.setup_irq = fsl_edma_irq_init,
-};
-
-static struct fsl_edma_drvdata imx7ulp_data = {
-	.version = v3,
-	.dmamuxs = 1,
-	.has_dmaclk = true,
-	.setup_irq = fsl_edma2_irq_init,
-};
-
-static const struct of_device_id fsl_edma_dt_ids[] = {
-	{ .compatible = "fsl,vf610-edma", .data = &vf610_data},
-	{ .compatible = "fsl,ls1028a-edma", .data = &ls1028a_data},
-	{ .compatible = "fsl,imx7ulp-edma", .data = &imx7ulp_data},
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
-
-static unsigned s32v234_mux_channel_mapping(u32 channel_id)
-{
-	return 4 * (channel_id/4) + ((4 - channel_id % 4) - 1);
-}
-
-static unsigned vf610_mux_channel_mapping(u32 channel_id)
-{
-	return channel_id;
-}
-
-static unsigned int s32v234_mux_channel_mapping(u32 channel_id)
-{
-	return 4 * (channel_id/4) + ((4 - channel_id % 4) - 1);
-}
-
-static unsigned int vf610_mux_channel_mapping(u32 channel_id)
-{
-	return channel_id;
-}
-
 static void fsl_edma_irq_exit(
 		struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
 {
@@ -386,9 +345,9 @@ static void fsl_edma_irq_exit(
 	const struct fsl_edma_drvdata *drvdata = fsl_edma->drvdata;
 
 	for (i = 0; i < drvdata->n_irqs; i++) {
-		if (drvdata->irqs[i].irqno >= 0)
+		if (fsl_edma->irq_nos[i] >= 0)
 			devm_free_irq(&pdev->dev,
-				      drvdata->irqs[i].irqno, fsl_edma);
+				      fsl_edma->irq_nos[i], fsl_edma);
 	}
 }
 
@@ -439,6 +398,11 @@ static struct fsl_edma_irq vf610_edma_irqs[] = {
 	{"edma-tx", fsl_edma_tx_handler, },
 };
 
+static struct fsl_edma_irq ls1028a_edma_irqs[] = {
+	{"edma-err", fsl_edma_irq_handler, },
+	{"edma-tx", fsl_edma_tx_handler, },
+};
+
 static struct fsl_edma_ops fsl_edma_ops = {
 	.edma_enable_request = fsl_edma_enable_request,
 	.edma_disable_request = fsl_edma_disable_request,
@@ -458,8 +422,9 @@ static struct fsl_edma_drvdata fsl_edma_s32gen1_data = {
 	.dmamuxs = DMAMUX_NR,
 	.n_irqs = ARRAY_SIZE(s32gen1_edma_irqs),
 	.irqs = s32gen1_edma_irqs,
-	.mux_channel_mapping = s32v234_mux_channel_mapping,
+	.mux_swap = true,
 	.ops = &fsl_edma3_ops,
+	.setup_irq = fsl_edma_irq_init,
 };
 
 static struct fsl_edma_drvdata fsl_edma_s32v234_data = {
@@ -467,50 +432,57 @@ static struct fsl_edma_drvdata fsl_edma_s32v234_data = {
 	.dmamuxs = DMAMUX_NR,
 	.n_irqs = ARRAY_SIZE(s32v234_edma_irqs),
 	.irqs = s32v234_edma_irqs,
-	.mux_channel_mapping = s32v234_mux_channel_mapping,
+	.mux_swap = true,
 	.ops = &fsl_edma_ops,
+	.setup_irq = fsl_edma_irq_init,
 };
 
-static struct fsl_edma_drvdata fsl_edma_vf610_data = {
+static struct fsl_edma_drvdata vf610_data = {
 	.version = v1,
 	.dmamuxs = DMAMUX_NR,
 	.n_irqs = ARRAY_SIZE(vf610_edma_irqs),
 	.irqs = vf610_edma_irqs,
-	.mux_channel_mapping = vf610_mux_channel_mapping,
+	.setup_irq = fsl_edma_irq_init,
 	.ops = &fsl_edma_ops,
 };
 
-static const struct of_device_id fsl_edma_dt_ids[] = {
-	{
-	  .compatible = "fsl,s32gen1-edma",
-	  .data = &fsl_edma_s32gen1_data,
-	},
-	{
-	  .compatible = "fsl,s32v234-edma",
-	  .data = &fsl_edma_s32v234_data,
-	},
-	{
-	  .compatible = "fsl,vf610-edma",
-	  .data = &fsl_edma_vf610_data,
-	},
-	{ /* sentinel */ }
+static struct fsl_edma_drvdata ls1028a_data = {
+	.version = v1,
+	.dmamuxs = DMAMUX_NR,
+	.n_irqs = ARRAY_SIZE(ls1028a_edma_irqs),
+	.irqs = ls1028a_edma_irqs,
+	.mux_swap = true,
+	.ops = &fsl_edma_ops,
+	.setup_irq = fsl_edma_irq_init,
 };
-MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
-static inline int is_s32gen1_edma(struct fsl_edma_engine *data)
+static struct fsl_edma_drvdata imx7ulp_data = {
+	.version = v3,
+	.dmamuxs = 1,
+	.has_dmaclk = true,
+	.ops = &fsl_edma_ops,
+	.setup_irq = fsl_edma2_irq_init,
+};
+
+static int is_vf610_edma(struct fsl_edma_engine *data)
+{
+	return data->drvdata == &vf610_data;
+}
+
+static int is_s32gen1_edma(struct fsl_edma_engine *data)
 {
 	return data->drvdata == &fsl_edma_s32gen1_data;
 }
 
-static inline int is_s32v234_edma(struct fsl_edma_engine *data)
-{
-	return data->drvdata == &fsl_edma_s32v234_data;
-}
-
-static inline int is_vf610_edma(struct fsl_edma_engine *data)
-{
-	return data->drvdata == &fsl_edma_vf610_data;
-}
+static const struct of_device_id fsl_edma_dt_ids[] = {
+	{ .compatible = "fsl,vf610-edma", .data = &vf610_data},
+	{ .compatible = "fsl,ls1028a-edma", .data = &ls1028a_data},
+	{ .compatible = "fsl,imx7ulp-edma", .data = &imx7ulp_data},
+	{ .compatible = "fsl,s32gen1-edma", .data = &fsl_edma_s32gen1_data,},
+	{ .compatible = "fsl,s32v234-edma", .data = &fsl_edma_s32v234_data,},
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
 static int fsl_edma_probe(struct platform_device *pdev)
 {
