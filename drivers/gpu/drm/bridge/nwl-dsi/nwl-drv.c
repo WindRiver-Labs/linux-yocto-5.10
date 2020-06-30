@@ -384,7 +384,7 @@ static void nwl_dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	 * bridge_enable, where we will enable the DPI and start streaming
 	 * pixels on the data lanes.
 	 */
-	drm_bridge_enable(dsi->panel_bridge);
+	drm_bridge_chain_enable(dsi->panel_bridge);
 }
 
 static void nwl_dsi_bridge_enable(struct drm_bridge *bridge)
@@ -504,6 +504,7 @@ static bool nwl_dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 
 static enum drm_mode_status
 nwl_dsi_bridge_mode_valid(struct drm_bridge *bridge,
+			  const struct drm_display_info *info,
 			  const struct drm_display_mode *mode)
 {
 	struct nwl_dsi *dsi = bridge_to_dsi(bridge);
@@ -594,7 +595,7 @@ nwl_dsi_bridge_mode_set(struct drm_bridge *bridge,
 
 }
 
-static int nwl_dsi_bridge_attach(struct drm_bridge *bridge)
+static int nwl_dsi_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct nwl_dsi *dsi = bridge->driver_private;
 	struct drm_bridge *panel_bridge;
@@ -608,8 +609,7 @@ static int nwl_dsi_bridge_attach(struct drm_bridge *bridge)
 		return ret;
 
 	if (panel) {
-		panel_bridge = drm_panel_bridge_add(panel,
-						    DRM_MODE_CONNECTOR_DSI);
+		panel_bridge = drm_panel_bridge_add(panel);
 		if (IS_ERR(panel_bridge))
 			return PTR_ERR(panel_bridge);
 	}
@@ -640,7 +640,7 @@ static int nwl_dsi_bridge_attach(struct drm_bridge *bridge)
 			clk_set_rate(dsi->rx_esc_clk, dsi->pdata->rx_clk_rate);
 	}
 
-	return drm_bridge_attach(bridge->encoder, dsi->panel_bridge, bridge);
+	return drm_bridge_attach(bridge->encoder, dsi->panel_bridge, bridge, flags);
 }
 
 static void nwl_dsi_bridge_detach(struct drm_bridge *bridge)
@@ -1118,6 +1118,7 @@ static int nwl_dsi_bind(struct device *dev,
 	uint32_t crtc_mask;
 	struct nwl_dsi *dsi = dev_get_drvdata(dev);
 	int ret = 0;
+	int flags = 0;
 
 	crtc_mask = drm_of_find_possible_crtcs(drm, dev->of_node);
 	/*
@@ -1146,7 +1147,7 @@ static int nwl_dsi_bind(struct device *dev,
 		return ret;
 	}
 
-	ret = drm_bridge_attach(&dsi->encoder, &dsi->bridge, NULL);
+	ret = drm_bridge_attach(&dsi->encoder, &dsi->bridge, NULL, flags);
 	if (ret)
 		drm_encoder_cleanup(&dsi->encoder);
 
@@ -1182,17 +1183,19 @@ static int nwl_dsi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *of_id = of_match_device(nwl_dsi_dt_ids, dev);
-	const struct nwl_dsi_platform_data *pdata = of_id->data;
 	const struct soc_device_attribute *attr;
 	struct nwl_dsi *dsi;
 	int ret;
+
+	if (!of_id || !of_id->data)
+		return -ENODEV;
 
 	dsi = devm_kzalloc(dev, sizeof(*dsi), GFP_KERNEL);
 	if (!dsi)
 		return -ENOMEM;
 
 	dsi->dev = dev;
-	dsi->pdata = pdata;
+	dsi->pdata = of_id->data;
 
 	attr = soc_device_match(nwl_dsi_quirks_match);
 	if (attr)
@@ -1234,8 +1237,9 @@ static int nwl_dsi_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, dsi);
 	pm_runtime_enable(dev);
 
-	if (of_property_read_bool(dev->of_node, "use-disp-ss"))
+	if (of_property_read_bool(dev->of_node, "use-disp-ss")) {
 		ret = component_add(&pdev->dev, &nwl_dsi_component_ops);
+	}
 
 	if (ret) {
 		pm_runtime_disable(dev);
