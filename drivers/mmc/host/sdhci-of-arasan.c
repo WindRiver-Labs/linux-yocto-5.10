@@ -622,7 +622,7 @@ static const struct clk_ops arasan_sampleclk_ops = {
  *
  * Set the SD Output Clock Tap Delays for Output path
  *
- * Return: 0 on success and error value on error
+ * Return: 0
  */
 static int sdhci_zynqmp_sdcardclk_set_phase(struct clk_hw *hw, int degrees)
 {
@@ -687,7 +687,7 @@ static const struct clk_ops zynqmp_sdcardclk_ops = {
  *
  * Set the SD Input Clock Tap Delays for Input path
  *
- * Return: 0 on success and error value on error
+ * Return: 0
  */
 static int sdhci_zynqmp_sampleclk_set_phase(struct clk_hw *hw, int degrees)
 {
@@ -736,7 +736,7 @@ static int sdhci_zynqmp_sampleclk_set_phase(struct clk_hw *hw, int degrees)
 	if (ret)
 		pr_err("Error setting Input Tap Delay\n");
 
-	return ret;
+	return 0;
 }
 
 static const struct clk_ops zynqmp_sampleclk_ops = {
@@ -1338,7 +1338,7 @@ sdhci_arasan_register_sdcardclk(struct sdhci_arasan_data *sdhci_arasan,
 	if (ret)
 		dev_err(dev, "Failed to add sdcard clock provider\n");
 
-	return ret;
+	return 0;
 }
 
 /**
