@@ -30,6 +30,7 @@
 #include <linux/ulpi/interface.h>
 
 #include <linux/phy/phy.h>
+#include "../host/xhci-plat.h"
 
 #define DWC3_MSG_MAX	500
 
@@ -944,6 +945,10 @@ struct dwc3_request {
  */
 struct dwc3_scratchpad_array {
 	__le64	dma_adr[DWC3_MAX_HIBER_SCRATCHBUFS];
+};
+
+struct dwc3_platform_data {
+	struct xhci_plat_priv *xhci_priv;
 };
 
 /**
