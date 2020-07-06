@@ -370,8 +370,8 @@ int stmmac_suspend_main(struct stmmac_priv *priv, struct net_device *ndev);
 int stmmac_resume_main(struct stmmac_priv *priv, struct net_device *ndev);
 #endif
 
-int stmmac_set_tbs_launchtime(struct stmmac_priv *priv, struct dma_desc *desc,
-			      u64 tx_time);
+void stmmac_set_tbs_launchtime(struct stmmac_priv *priv, struct dma_desc *desc,
+			       u64 tx_time);
 #if IS_ENABLED(CONFIG_STMMAC_SELFTESTS)
 void stmmac_selftest_run(struct net_device *dev,
 			 struct ethtool_test *etest, u64 *buf);
