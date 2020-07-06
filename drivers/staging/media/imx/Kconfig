@@ -65,8 +65,10 @@ config IMX8_MIPI_CSI2
 	 i.MX8QM/QXP platform.
 
 config IMX8_MEDIA_DEVICE
+	tristate "IMX8 Image Sensor Interface Memory to Memory Device Driver"
 	tristate "IMX8 Media Device Driver"
 	select V4L2_FWNODE
+	depends on IMX8_ISI_HW
 	default y
 	help
          This media device is a virtual device which used to manage
@@ -97,7 +99,6 @@ config IMX8_ISI_CAPTURE
 	default y
 
 config IMX8_ISI_M2M
-	bool "IMX8 Image Sensor Interface Memory to Memory Device Driver"
 	select V4L2_MEM2MEM_DEV
 	depends on IMX8_ISI_CORE
 	default y
