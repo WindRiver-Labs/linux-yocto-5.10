@@ -66,7 +66,6 @@ config IMX8_MIPI_CSI2
 
 config IMX8_MEDIA_DEVICE
 	tristate "IMX8 Image Sensor Interface Memory to Memory Device Driver"
-	tristate "IMX8 Media Device Driver"
 	select V4L2_FWNODE
 	depends on IMX8_ISI_HW
 	default y
@@ -87,8 +86,8 @@ config IMX8_ISI_HW
           driver
 
 config IMX8_ISI_CORE
-	bool "IMX8 Image Sensor Interface Core Driver"
-	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	tristate "IMX8 Image Sensor Interface Core Driver"
+	depends on IMX8_ISI_CAPTURE && IMX8_ISI_M2M
 	default y
 
 config IMX8_ISI_CAPTURE
@@ -99,8 +98,9 @@ config IMX8_ISI_CAPTURE
 	default y
 
 config IMX8_ISI_M2M
+	tristate "IMX8 Image Sensor Interface Memory to Memory Device Driver"
 	select V4L2_MEM2MEM_DEV
-	depends on IMX8_ISI_CORE
+	depends on IMX8_ISI_HW
 	default y
 
 config IMX8_PARALLEL_CSI
@@ -118,5 +118,5 @@ config GMSL_MAX9286
 	help
 	  Enable support for video4linux camera sensor driver for GMSL MAX9286
 
-endmenu
-endif  #VIDEO_IMX_CAPTURE
+#endmenu
+#endif  #VIDEO_IMX_CAPTURE
