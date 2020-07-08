@@ -15,6 +15,8 @@ struct am65_cpts;
 struct am65_cpts_estf_cfg {
 	u64 ns_period;
 	u64 ns_start;
+	int idx;
+	int on;
 };
 
 #if IS_ENABLED(CONFIG_TI_K3_AM65_CPTS)
