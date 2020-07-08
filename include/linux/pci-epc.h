@@ -242,7 +242,7 @@ struct pci_epc *pci_epc_get(const char *epc_name);
 void pci_epc_put(struct pci_epc *epc);
 struct pci_epc *of_pci_epc_get(struct device_node *node, int index);
 struct pci_epc *of_pci_epc_get_by_name(struct device_node *node,
-
+				       const char *epc_name);
 int pci_epc_mem_init(struct pci_epc *epc, phys_addr_t base,
 		     size_t size, size_t page_size);
 int pci_epc_multi_mem_init(struct pci_epc *epc,
