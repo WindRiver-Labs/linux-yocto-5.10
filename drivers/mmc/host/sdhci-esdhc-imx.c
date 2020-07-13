@@ -5,6 +5,7 @@
  * derived from the OF-version.
  *
  * Copyright (c) 2010 Pengutronix e.K.
+ * Copyright 2020 NXP
  *   Author: Wolfram Sang <kernel@pengutronix.de>
  */
 
@@ -1912,13 +1913,29 @@ static int sdhci_esdhc_suspend(struct device *dev)
 
 	ret = mmc_gpio_set_cd_wake(host->mmc, true);
 
+	clk_disable_unprepare(imx_data->clk_per);
+	clk_disable_unprepare(imx_data->clk_ipg);
+	clk_disable_unprepare(imx_data->clk_ahb);
+
 	return ret;
 }
 
 static int sdhci_esdhc_resume(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct pltfm_imx_data *imx_data = sdhci_pltfm_priv(pltfm_host);
 	int ret;
+
+	ret = clk_prepare_enable(imx_data->clk_per);
+	if (ret)
+		return ret;
+	ret = clk_prepare_enable(imx_data->clk_ipg);
+	if (ret)
+		goto disable_per_clk;
+	ret = clk_prepare_enable(imx_data->clk_ahb);
+	if (ret)
+		goto disable_ipg_clk;
 
 	ret = pinctrl_pm_select_default_state(dev);
 	if (ret)
@@ -1936,6 +1953,11 @@ static int sdhci_esdhc_resume(struct device *dev)
 
 	if (!ret)
 		ret = mmc_gpio_set_cd_wake(host->mmc, false);
+
+disable_per_clk:
+	clk_disable_unprepare(imx_data->clk_per);
+disable_ipg_clk:
+	clk_disable_unprepare(imx_data->clk_ipg);
 
 	return ret;
 }
