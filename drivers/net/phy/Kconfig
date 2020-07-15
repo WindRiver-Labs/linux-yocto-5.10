@@ -180,7 +180,7 @@ config LXT_PHY
 
 config INPHI_PHY
 	tristate "Inphi CDR 10G/25G Ethernet PHY"
-	---help---
+	help
 	  Currently supports the IN112525_S03 part @ 25G
 
 config INTEL_XWAY_PHY
