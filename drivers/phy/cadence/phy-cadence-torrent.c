@@ -2076,6 +2076,7 @@ static int cdns_torrent_phy_probe(struct platform_device *pdev)
 	struct cdns_torrent_phy *cdns_phy;
 	struct device *dev = &pdev->dev;
 	struct phy_provider *phy_provider;
+	struct phy_attrs torrent_attr;
 	const struct cdns_torrent_data *data;
 	struct device_node *child;
 	int ret, subnodes, node = 0, i;
@@ -2287,6 +2288,7 @@ static int cdns_torrent_phy_probe(struct platform_device *pdev)
 			gphy->attrs.bus_width = cdns_phy->phys[node].num_lanes;
 			gphy->attrs.max_link_rate = cdns_phy->max_bit_rate;
 			gphy->attrs.mode = PHY_MODE_DP;
+			phy_set_attrs(gphy, torrent_attr);
 		}
 
 		cdns_phy->phys[node].phy = gphy;
