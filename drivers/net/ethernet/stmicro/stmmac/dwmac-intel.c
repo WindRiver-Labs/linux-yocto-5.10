@@ -447,34 +447,18 @@ static void common_default_data(struct plat_stmmacenet_data *plat)
 	plat->rx_queues_cfg[0].pkt_route = 0x0;
 }
 
-static struct dwxpcs_platform_data intel_mgbe_pdata = {
-	.mode = DWXPCS_MODE_SGMII_AN,
-};
-
-static struct mdio_board_info intel_mgbe_bdinfo = {
-	.bus_id = "stmmac-1",
-	.modalias = "dwxpcs",
-	.mdio_addr = 0x16,
-	.platform_data = &intel_mgbe_pdata,
-};
-
-static int setup_intel_mgbe_phy_conv(struct mii_bus *bus, int irq,
-				     int phy_addr)
+static int setup_intel_mgbe_phy_conv(struct mii_bus *bus,
+				     struct mdio_board_info *bi)
 {
-	struct dwxpcs_platform_data *pdata = &intel_mgbe_pdata;
-
-	pdata->irq = irq;
-	pdata->ext_phy_addr = phy_addr;
-
-	return mdiobus_create_device(bus, &intel_mgbe_bdinfo);
+	return mdiobus_create_device(bus, bi);
 }
 
-static int remove_intel_mgbe_phy_conv(struct mii_bus *bus)
+static int remove_intel_mgbe_phy_conv(struct mii_bus *bus,
+				      struct mdio_board_info *bi)
 {
-	struct mdio_board_info *bdinfo = &intel_mgbe_bdinfo;
 	struct mdio_device *mdiodev;
 
-	mdiodev = mdiobus_get_mdio_device(bus, bdinfo->mdio_addr);
+	mdiodev = mdiobus_get_mdio_device(bus, bi->mdio_addr);
 
 	if (!mdiodev)
 		return -1;
@@ -626,11 +610,21 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	/* Use the last Rx queue */
 	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
 
-	/* Intel mgbe SGMII interface uses pcs-xcps */
 	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
-		plat->mdio_bus_data->has_xpcs = true;
-		plat->mdio_bus_data->xpcs_an_inband = true;
+		plat->xpcs_pdata = devm_kzalloc(&pdev->dev,
+						sizeof(*plat->xpcs_pdata),
+						GFP_KERNEL);
+		plat->xpcs_pdata->mode = DWXPCS_MODE_SGMII_AN;
+
+		plat->intel_bi = devm_kzalloc(&pdev->dev,
+					      sizeof(*plat->intel_bi),
+					      GFP_KERNEL);
+		plat->intel_bi->bus_id = "stmmac-1";
+		strncpy(plat->intel_bi->modalias, "dwxpcs", MDIO_NAME_SIZE);
+		plat->intel_bi->mdio_addr = 0x16;
+		plat->intel_bi->platform_data = plat->xpcs_pdata;
 	}
+
 	plat->int_snapshot_num = AUX_SNAPSHOT1;
 	plat->ext_snapshot_num = AUX_SNAPSHOT0;
 
