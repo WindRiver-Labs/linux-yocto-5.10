@@ -229,9 +229,10 @@ struct plat_stmmacenet_data {
 	int (*init)(struct platform_device *pdev, void *priv);
 	void (*exit)(struct platform_device *pdev, void *priv);
 	struct mac_device_info *(*setup)(void *priv);
-	int (*setup_phy_conv)(struct mii_bus *bus, int irq,
-	     int phy_addr);
-	int (*remove_phy_conv)(struct mii_bus *bus);
+	int (*setup_phy_conv)(struct mii_bus *bus,
+			      struct mdio_board_info *bi);
+	int (*remove_phy_conv)(struct mii_bus *bus,
+			       struct mdio_board_info *bi);
 	int (*clks_config)(void *priv, bool enabled);
 	int (*crosststamp)(ktime_t *device, struct system_counterval_t *system,
 			   void *ctx);
@@ -295,5 +296,7 @@ struct plat_stmmacenet_data {
 	u32 legos;
 	u32 ftos;
 	u32 fgos;
+	struct mdio_board_info *intel_bi;
+	struct dwxpcs_platform_data *xpcs_pdata;
 };
 #endif
