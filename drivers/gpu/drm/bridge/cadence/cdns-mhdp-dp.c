@@ -1,28 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <asm/unaligned.h>
-#include <drm/bridge/cdns-mhdp-common.h>
+#include <drm/bridge/cdns-mhdp.h>
 #include <drm/drm_print.h>
 #include <linux/io.h>
 
 #define LINK_TRAINING_TIMEOUT_MS	500
 #define LINK_TRAINING_RETRY_MS		20
-
-static inline u32 get_unaligned_be24(const void *p)
-{
-       const u8 *_p = p;
-
-       return _p[0] << 16 | _p[1] << 8 | _p[2];
-}
-
-static inline void put_unaligned_be24(u32 val, void *p)
-{
-       u8 *_p = p;
-
-       _p[0] = val >> 16;
-       _p[1] = val >> 8;
-       _p[2] = val;
-}
 
 int cdns_mhdp_dpcd_read(struct cdns_mhdp_device *mhdp,
 			u32 addr, u8 *data, u16 len)
@@ -155,8 +139,8 @@ static int cdns_mhdp_get_training_status(struct cdns_mhdp_device *mhdp)
 	if (ret)
 		goto err_get_training_status;
 
-	mhdp->dp.link.rate = drm_dp_bw_code_to_link_rate(status[0]);
-	mhdp->dp.link.num_lanes = status[1];
+	mhdp->dp.rate = drm_dp_bw_code_to_link_rate(status[0]);
+	mhdp->dp.num_lanes = status[1];
 
 err_get_training_status:
 	if (ret)
@@ -183,8 +167,8 @@ int cdns_mhdp_train_link(struct cdns_mhdp_device *mhdp)
 		return ret;
 	}
 
-	DRM_DEV_DEBUG_KMS(mhdp->dev, "rate:0x%x, lanes:%d\n", mhdp->dp.link.rate,
-			  mhdp->dp.link.num_lanes);
+	DRM_DEV_DEBUG_KMS(mhdp->dev, "rate:0x%x, lanes:%d\n", mhdp->dp.rate,
+			  mhdp->dp.num_lanes);
 	return ret;
 }
 EXPORT_SYMBOL(cdns_mhdp_train_link);
