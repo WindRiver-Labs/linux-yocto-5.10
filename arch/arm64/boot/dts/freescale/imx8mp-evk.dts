@@ -616,7 +616,7 @@
 };
 
 &sai2 {
-       #sound-dai-cells = <0>;
+       #sound-dai-cells = <1>;
        pinctrl-names = "default";
        pinctrl-0 = <&pinctrl_sai2>;
        assigned-clocks = <&clk IMX8MP_CLK_SAI2>;
@@ -640,7 +640,7 @@
 };
 
 &xcvr {
-       #sound-dai-cells = <0>;
+       #sound-dai-cells = <1>;
        status = "okay";
 };
 
