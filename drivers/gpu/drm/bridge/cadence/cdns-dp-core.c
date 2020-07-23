@@ -229,7 +229,7 @@ static const struct drm_connector_helper_funcs cdns_dp_connector_helper_funcs = 
 	.get_modes = cdns_dp_connector_get_modes,
 };
 
-static int cdns_dp_bridge_attach(struct drm_bridge *bridge)
+static int cdns_dp_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct cdns_mhdp_device *mhdp = bridge->driver_private;
 	struct drm_encoder *encoder = bridge->encoder;
@@ -255,6 +255,7 @@ static int cdns_dp_bridge_attach(struct drm_bridge *bridge)
 
 static enum drm_mode_status
 cdns_dp_bridge_mode_valid(struct drm_bridge *bridge,
+			  const struct drm_display_info *info,
 			  const struct drm_display_mode *mode)
 {
 	enum drm_mode_status mode_status = MODE_OK;
@@ -268,8 +269,8 @@ cdns_dp_bridge_mode_valid(struct drm_bridge *bridge,
 	if (mode->clock > 594000)
 		return MODE_CLOCK_HIGH;
 
-	/* 4096x2160 is not supported now */
-	if (mode->hdisplay > 3840)
+	/* 5120 x 2160 is the maximum supported resulution */
+	if (mode->hdisplay > 5120)
 		return MODE_BAD_HVALUE;
 
 	if (mode->vdisplay > 2160)
@@ -545,12 +546,13 @@ int cdns_dp_bind(struct platform_device *pdev, struct drm_encoder *encoder,
 		struct cdns_mhdp_device *mhdp)
 {
 	int ret;
+	int flags = 0;
 
 	ret = __cdns_dp_probe(pdev, mhdp);
 	if (ret < 0)
 		return ret;
 
-	ret = drm_bridge_attach(encoder, &mhdp->bridge.base, NULL);
+	ret = drm_bridge_attach(encoder, &mhdp->bridge.base, NULL, flags);
 	if (ret) {
 		cdns_dp_remove(pdev);
 		DRM_ERROR("Failed to initialize bridge with drm\n");
