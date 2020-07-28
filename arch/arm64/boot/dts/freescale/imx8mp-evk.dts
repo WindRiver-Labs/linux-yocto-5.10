@@ -776,6 +776,12 @@
                >;
        };
 
+	pinctrl_csi_mclk: csi_mclk_grp {
+               fsl,pins = <
+                       MX8MP_IOMUXC_GPIO1_IO15__CCM_CLKO2      0x59
+                >;
+        };
+
 	pinctrl_mipi_dsi_en: mipi_dsi_en {
                fsl,pins = <
                        MX8MP_IOMUXC_GPIO1_IO08__GPIO1_IO08     0x16
