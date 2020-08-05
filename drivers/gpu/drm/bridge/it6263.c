@@ -23,6 +23,8 @@
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/regmap.h>
+#include <drm/drm_device.h>
+#include <drm/drm_bridge.h>
 
 #define REG_VENDOR_ID(n)	(0x00 + (n))	/* n: 0/1 */
 #define REG_DEVICE_ID(n)	(0x02 + (n))	/* n: 0/1 */
@@ -716,7 +718,7 @@ static void it6263_bridge_mode_set(struct drm_bridge *bridge,
 						AFE_IP_ER0 | AFE_IP_RESETB);
 }
 
-static int it6263_bridge_attach(struct drm_bridge *bridge)
+static int it6263_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct it6263 *it6263 = bridge_to_it6263(bridge);
 	struct drm_device *drm = bridge->dev;
@@ -859,11 +861,9 @@ static int it6263_probe(struct i2c_client *client,
 {
 	struct device *dev = &client->dev;
 	struct device_node *np = dev->of_node;
-#if IS_ENABLED(CONFIG_OF_DYNAMIC)
 	struct device_node *remote_node = NULL, *endpoint = NULL;
 	struct of_changeset ocs;
 	struct property *prop;
-#endif
 	struct it6263 *it6263;
 	int ret;
 
@@ -874,7 +874,7 @@ static int it6263_probe(struct i2c_client *client,
 	it6263->split_mode = of_property_read_bool(np, "split-mode");
 
 	it6263->hdmi_i2c = client;
-	it6263->lvds_i2c = i2c_new_dummy(client->adapter,
+	it6263->lvds_i2c = i2c_new_dummy_device(client->adapter,
 						LVDS_INPUT_CTRL_I2C_ADDR);
 	if (!it6263->lvds_i2c) {
 		ret = -ENODEV;
@@ -950,7 +950,6 @@ unregister_lvds_i2c:
 		return ret;
 
 of_reconfig:
-#if IS_ENABLED(CONFIG_OF_DYNAMIC)
 	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
 	if (endpoint)
 		remote_node = of_graph_get_remote_port_parent(endpoint);
@@ -987,7 +986,6 @@ of_reconfig:
 
 		of_node_put(remote_node);
 	};
-#endif
 
 	return ret;
 }
