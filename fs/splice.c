@@ -787,6 +787,7 @@ long do_splice_to(struct file *in, loff_t *ppos,
 		return warn_unsupported(in, "read");
 	return in->f_op->splice_read(in, ppos, pipe, len, flags);
 }
+EXPORT_SYMBOL_GPL(do_splice_from);
 
 /**
  * splice_direct_to_actor - splices data directly between two non-pipes
@@ -933,6 +934,7 @@ static int direct_splice_actor(struct pipe_inode_info *pipe,
 	return do_splice_from(pipe, file, sd->opos, sd->total_len,
 			      sd->flags);
 }
+EXPORT_SYMBOL_GPL(do_splice_to);
 
 /**
  * do_splice_direct - splices data directly between two files
