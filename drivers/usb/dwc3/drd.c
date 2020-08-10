@@ -495,7 +495,7 @@ static int dwc3_usb_role_switch_set(struct usb_role_switch *sw,
 		if (dwc->role_switch_default_mode == USB_DR_MODE_HOST)
 			mode = DWC3_GCTL_PRTCAP_HOST;
 		else
-			mode = DWC3_GCTL_PRTCAP_DEVICE;
+			mode = DWC3_GCTL_PRTCAP_NONE;
 		break;
 	}
 
