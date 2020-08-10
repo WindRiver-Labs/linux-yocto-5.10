@@ -650,6 +650,8 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->ptov = 0;
 	plat->tils = 0;
 
+	plat->phy_wol_thru_pmc = 1;
+
 	return 0;
 }
 
