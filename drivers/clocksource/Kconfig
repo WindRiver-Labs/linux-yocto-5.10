@@ -473,7 +473,7 @@ config OXNAS_RPS_TIMER
 	  This enables support for the Oxford Semiconductor OXNAS RPS timers.
 
 config FSL_STM_TIMER
-	bool
+	bool "Nxp System Timer Module driver"
 	help
 	  Support for Freescale System Timer Module.
 
