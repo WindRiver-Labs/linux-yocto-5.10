@@ -303,3 +303,17 @@
 &mailbox0_cluster11 {
 	status = "disabled";
 };
+
+&pcie1_rc {
+	reset-gpios = <&exp1 2 GPIO_ACTIVE_HIGH>;
+	phys = <&serdes0_pcie_link>;
+	phy-names = "pcie_phy";
+	num-lanes = <2>;
+};
+
+&pcie1_ep {
+	phys = <&serdes0_pcie_link>;
+	phy-names = "pcie_phy";
+	num-lanes = <2>;
+	status = "disabled";
+};
