@@ -1428,16 +1428,6 @@
 		clock-names = "tbclk", "fck";
 	};
 
-	timesync_router: timesync_router@A40000 {
-		compatible = "pinctrl-single";
-		reg = <0x0 0xA40000 0x0 0x800>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		#pinctrl-cells = <1>;
-		pinctrl-single,register-width = <32>;
-		pinctrl-single,function-mask = <0x800007ff>;
-	};
-
 	gpu: gpu@7000000 {
 		compatible = "ti,am654-sgx544", "img,sgx544";
 		reg = <0x0 0x7000000 0x0 0x10000>;
