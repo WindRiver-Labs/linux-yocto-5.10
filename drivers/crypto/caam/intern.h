@@ -121,6 +121,7 @@ struct caam_drv_private {
 	u8 optee_en;            /* Nonzero if OP-TEE f/w is active */
 	int virt_en;		/* Virtualization enabled in CAAM */
 	int era;		/* CAAM Era (internal HW revision) */
+	int secvio_irq;		/* Security violation interrupt number */
 
 #define	RNG4_MAX_HANDLES 2
 	/* RNG4 block */
@@ -250,6 +251,24 @@ static inline void caam_sm_shutdown(struct device *dev)
 }
 
 #endif /* CONFIG_CRYPTO_DEV_FSL_CAAM_SM */
+
+#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_TK_API
+
+int caam_keygen_init(void);
+void caam_keygen_exit(void);
+
+#else
+
+static inline int caam_keygen_init(void)
+{
+       return 0;
+}
+
+static inline void caam_keygen_exit(void)
+{
+}
+
+#endif /* CONFIG_CRYPTO_DEV_FSL_CAAM_TK_API */
 
 static inline u64 caam_get_dma_mask(struct device *dev)
 {
