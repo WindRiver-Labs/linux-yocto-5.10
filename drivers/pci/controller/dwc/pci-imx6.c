@@ -112,55 +112,57 @@ struct imx6_pcie_drvdata {
 };
 
 struct imx6_pcie {
-	struct dw_pcie		*pci;
-	int			clkreq_gpio;
-	int			dis_gpio;
-	int			reset_gpio;
-	bool			gpio_active_high;
-	struct clk		*pcie_bus;
-	struct clk		*pcie_phy;
-	struct clk		*pcie_phy_pclk;
-	struct clk		*pcie_per;
-	struct clk		*pciex2_per;
-	struct clk		*pcie_inbound_axi;
-	struct clk		*pcie;
-	struct clk		*pcie_aux;
-	struct clk		*phy_per;
-	struct clk		*misc_per;
-	struct regmap		*iomuxc_gpr;
-	u32			controller_id;
-	struct reset_control	*pciephy_reset;
-	struct reset_control	*pciephy_perst;
-	struct reset_control	*apps_reset;
-	struct reset_control	*turnoff_reset;
-	struct reset_control	*clkreq_reset;
-	u32			tx_deemph_gen1;
-	u32			tx_deemph_gen2_3p5db;
-	u32			tx_deemph_gen2_6db;
-	u32			tx_swing_full;
-	u32			tx_swing_low;
-	u32                     hsio_cfg;
-	u32                     ext_osc;
-	u32                     local_addr;
-	struct regulator	*vpcie;
-	void __iomem		*phy_base;
-	void __iomem            *hsmix_base;
+        struct dw_pcie          *pci;
+        int                     clkreq_gpio;
+        int                     dis_gpio;
+        int                     reset_gpio;
+        bool                    gpio_active_high;
+        struct clk              *pcie_bus;
+        struct clk              *pcie_phy;
+        struct clk              *pcie_phy_pclk;
+        struct clk              *pcie_per;
+        struct clk              *pciex2_per;
+        struct clk              *pcie_inbound_axi;
+        struct clk              *pcie;
+        struct clk              *pcie_aux;
+        struct clk              *phy_per;
+        struct clk              *misc_per;
+        struct regmap           *iomuxc_gpr;
+        u32                     controller_id;
+        struct reset_control    *pciephy_reset;
+        struct reset_control    *pciephy_perst;
+        struct reset_control    *apps_reset;
+        struct reset_control    *turnoff_reset;
+        struct reset_control    *clkreq_reset;
+        u32                     tx_deemph_gen1;
+        u32                     tx_deemph_gen2_3p5db;
+        u32                     tx_deemph_gen2_6db;
+        u32                     tx_swing_full;
+        u32                     tx_swing_low;
+        u32                     hsio_cfg;
+        u32                     ext_osc;
+        u32                     local_addr;
+        int                     link_gen;
+        struct regulator        *vpcie;
+        void __iomem            *phy_base;
+        void __iomem            *hsmix_base;
 
-	/* power domain for pcie */
-	struct device		*pd_pcie;
-	/* power domain for pcie csr access */
-	struct device		*pd_pcie_per;
-	/* power domain for pcie phy */
-	struct device		*pd_pcie_phy;
-	/* power domain for hsio gpio used by pcie */
-	struct device		*pd_hsio_gpio;
-	struct device_link      *pd_link;
-	struct device_link      *pd_per_link;
+        /* power domain for pcie */
+        struct device           *pd_pcie;
+        /* power domain for pcie csr access */
+        struct device           *pd_pcie_per;
+        /* power domain for pcie phy */
+        struct device           *pd_pcie_phy;
+        /* power domain for hsio gpio used by pcie */
+        struct device           *pd_hsio_gpio;
+        struct device_link      *pd_link;
+        struct device_link      *pd_per_link;
         struct device_link      *pd_phy_link;
-	struct device_link      *pd_hsio_link;
-	const struct imx6_pcie_drvdata *drvdata;
-	struct regulator	*epdev_on;
-	struct phy              *phy;
+        struct device_link      *pd_hsio_link;
+
+        const struct imx6_pcie_drvdata *drvdata;
+        struct regulator        *epdev_on;
+        struct phy              *phy;
 };
 
 /* Parameters for the waiting for PCIe PHY PLL to lock on i.MX7 */
@@ -168,6 +170,16 @@ struct imx6_pcie {
 #define PHY_PLL_LOCK_WAIT_USLEEP_MIN	50
 #define PHY_PLL_LOCK_WAIT_USLEEP_MAX	200
 #define PHY_PLL_LOCK_WAIT_TIMEOUT	(2000 * PHY_PLL_LOCK_WAIT_USLEEP_MAX)
+
+/* PCIe Root Complex registers (memory-mapped) */
+#define PCIE_RC_IMX6_MSI_CAP                    0x50
+#define PCIE_RC_LCR                             0x7c
+#define PCIE_RC_LCR_MAX_LINK_SPEEDS_GEN1        0x1
+#define PCIE_RC_LCR_MAX_LINK_SPEEDS_GEN2        0x2
+#define PCIE_RC_LCR_MAX_LINK_SPEEDS_MASK        0xf
+
+#define PCIE_RC_LCSR                            0x80
+#define PCIE_RC_LC2SR                           0xa0
 
 /* PCIe Port Logic registers (memory-mapped) */
 #define PL_OFFSET 0x700
@@ -2343,7 +2355,7 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 	void __iomem *iomem;
 	struct regmap_config regconfig = imx6_pcie_regconfig;
 	int ret;
-	u32 reg;
+	u32 reg, val;
 
 	imx6_pcie = devm_kzalloc(dev, sizeof(*imx6_pcie), GFP_KERNEL);
 	if (!imx6_pcie)
@@ -2662,6 +2674,10 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 	imx6_pcie_init_phy(imx6_pcie);
 	imx6_pcie_deassert_core_reset(imx6_pcie);
 	imx6_setup_phy_mpll(imx6_pcie);
+
+	val = dw_pcie_readl_dbi(pci, PCIE_AMBA_ORDERING_CTRL_OFF);
+	val |= 0xD;
+	dw_pcie_writel_dbi(pci, PCIE_AMBA_ORDERING_CTRL_OFF, val);
 
 	switch (imx6_pcie->drvdata->mode) {
 	case DW_PCIE_RC_TYPE:

@@ -22,6 +22,30 @@
 static struct pci_ops dw_pcie_ops;
 static struct pci_ops dw_child_pcie_ops;
 
+static int dw_pcie_rd_own_conf(struct pcie_port *pp, int where, int size,
+                               u32 *val)
+{
+        struct dw_pcie *pci;
+
+        if (pp->ops->rd_own_conf)
+                return pp->ops->rd_own_conf(pp, where, size, val);
+
+        pci = to_dw_pcie_from_pp(pp);
+        return dw_pcie_read(pci->dbi_base + where, size, val);
+}
+
+static int dw_pcie_wr_own_conf(struct pcie_port *pp, int where, int size,
+                               u32 val)
+{
+        struct dw_pcie *pci;
+
+        if (pp->ops->wr_own_conf)
+                return pp->ops->wr_own_conf(pp, where, size, val);
+
+        pci = to_dw_pcie_from_pp(pp);
+        return dw_pcie_write(pci->dbi_base + where, size, val);
+}
+
 static void dw_msi_ack_irq(struct irq_data *d)
 {
 	irq_chip_ack_parent(d);
@@ -125,7 +149,6 @@ static int dw_pci_msi_set_affinity(struct irq_data *d,
 static void dw_pci_bottom_mask(struct irq_data *d)
 {
 	struct pcie_port *pp = irq_data_get_irq_chip_data(d);
-	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	unsigned int res, bit, ctrl;
 	unsigned long flags;
 
@@ -145,7 +168,6 @@ static void dw_pci_bottom_mask(struct irq_data *d)
 static void dw_pci_bottom_unmask(struct irq_data *d)
 {
 	struct pcie_port *pp = irq_data_get_irq_chip_data(d);
-	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	unsigned int res, bit, ctrl;
 	unsigned long flags;
 
@@ -615,6 +637,10 @@ void dw_pcie_setup_rc(struct pcie_port *pp)
 	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
 	val |= PORT_LOGIC_SPEED_CHANGE;
 	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
+
+	val = dw_pcie_readl_dbi(pci, PCIE_AMBA_ORDERING_CTRL_OFF);
+        val |= 0xD;
+        dw_pcie_writel_dbi(pci, PCIE_AMBA_ORDERING_CTRL_OFF, val);
 
 	dw_pcie_dbi_ro_wr_dis(pci);
 }

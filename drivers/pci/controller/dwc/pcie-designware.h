@@ -74,6 +74,7 @@
 #define PCIE_MSI_INTR0_MASK		0x82C
 #define PCIE_MSI_INTR0_STATUS		0x830
 
+#define PCIE_AMBA_ORDERING_CTRL_OFF    0x8D8
 #define PCIE_PORT_MULTI_LANE_CTRL	0x8C0
 #define PORT_MLTI_UPCFG_SUPPORT		BIT(7)
 
@@ -173,9 +174,16 @@ enum dw_pcie_device_mode {
 };
 
 struct dw_pcie_host_ops {
-	int (*host_init)(struct pcie_port *pp);
-	void (*set_num_vectors)(struct pcie_port *pp);
-	int (*msi_host_init)(struct pcie_port *pp);
+        int (*rd_own_conf)(struct pcie_port *pp, int where, int size, u32 *val);
+        int (*wr_own_conf)(struct pcie_port *pp, int where, int size, u32 val);
+        int (*rd_other_conf)(struct pcie_port *pp, struct pci_bus *bus,
+                             unsigned int devfn, int where, int size, u32 *val);
+        int (*wr_other_conf)(struct pcie_port *pp, struct pci_bus *bus,
+                             unsigned int devfn, int where, int size, u32 val);
+        int (*host_init)(struct pcie_port *pp);
+        void (*scan_bus)(struct pcie_port *pp);
+        void (*set_num_vectors)(struct pcie_port *pp);
+        int (*msi_host_init)(struct pcie_port *pp);
 };
 
 struct pcie_port {
@@ -185,6 +193,7 @@ struct pcie_port {
 	resource_size_t		io_base;
 	phys_addr_t		io_bus_addr;
 	u32			io_size;
+	u64			mem_base;
 	int			irq;
 	const struct dw_pcie_host_ops *ops;
 	int			msi_irq;
