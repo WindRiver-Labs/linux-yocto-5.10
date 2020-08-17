@@ -39,6 +39,8 @@ enum sof_comp_type {
 	SOF_COMP_ASRC,		/**< Asynchronous sample rate converter */
 	SOF_COMP_DCBLOCK,
 	SOF_COMP_SMART_AMP,             /**< smart amplifier component */
+	SOF_COMP_ASRC,
+	SOF_COMP_DCBLOCK,
 	/* keep FILEREAD/FILEWRITE as the last ones */
 	SOF_COMP_FILEREAD = 10000,	/**< host test based file IO */
 	SOF_COMP_FILEWRITE = 10001,	/**< host test based file IO */
