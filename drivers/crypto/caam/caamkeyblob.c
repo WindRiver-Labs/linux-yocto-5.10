@@ -137,7 +137,7 @@ static void unmap_read_write_data(struct device *dev, dma_addr_t dma_addr,
 {
 	/* Free the resources and clear the data*/
 	dma_unmap_single(dev, dma_addr, size, dir);
-	kzfree(allocated_data);
+	kfree(allocated_data);
 }
 
 /**
@@ -379,7 +379,7 @@ int caam_blob_encap(struct device *dev, struct keyblob_info *info)
 	trusted_key = (info->type >> TAG_OBJ_TK_OFFSET) & 0x1;
 
 	/* Validate input data*/
-	if (!info->black_key || !info->key_mod || !blob)
+	if (!info->key_mod || !blob)
 		return -EINVAL;
 
 	/* Validate object type - only JDKEK keys are supported */
