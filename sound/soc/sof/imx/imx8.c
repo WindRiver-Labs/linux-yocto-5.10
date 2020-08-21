@@ -584,8 +584,8 @@ struct snd_sof_dsp_ops sof_imx8x_ops = {
 	/* PM */
        .suspend                = imx8_dsp_suspend,
        .resume                 = imx8_dsp_resume,
-       .runtime_suspend        = imx8_dsp_suspend,
-       .runtime_resume         = imx8_dsp_resume,
+       .runtime_suspend        = imx8_dsp_runtime_suspend,
+       .runtime_resume         = imx8_dsp_runtime_resume,
 };
 EXPORT_SYMBOL(sof_imx8x_ops);
 
