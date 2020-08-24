@@ -11,7 +11,7 @@
 #include <linux/types.h>
 #include <linux/pruss.h>
 #include <linux/types.h>
-#include <net/lredev.h>
+#include <linux/netdevice.h>
 
 #include "icss_switch.h"
 #include "prueth_ptp.h"
@@ -117,6 +117,12 @@ struct prueth_packet_info {
 	bool lookup_success;
 	bool flood;
 	bool timestamp;
+};
+
+/* PRP Transparent reception modes */
+enum iec62439_3_tr_modes {
+	IEC62439_3_TR_REMOVE_RCT = 1,
+	IEC62439_3_TR_PASS_RCT,
 };
 
 /**
@@ -382,6 +388,7 @@ struct prueth_emac {
 	int offload_fwd_mark;
 
 	struct sk_buff *ptp_skb[PRUETH_PTP_TS_EVENTS];
+	struct sk_buff *ptp_ct_skb[PRUETH_PTP_TS_EVENTS];
 	spinlock_t ptp_skb_lock;	/* serialize access */
 	int emac_ptp_tx_irq;
 	int hsr_ptp_tx_irq;
