@@ -320,7 +320,7 @@ static void dwc3_frame_length_adjustment(struct dwc3 *dwc)
         */
        if (dwc->soft_itp_sync_quirk) {
                u32 ref_clk_hz, ref_clk_period_integer;
-               u64 temp;
+		unsigned long long temp;
 
                reg = dwc3_readl(dwc->regs, DWC3_GFLADJ);
                ref_clk_hz = clk_get_rate(dwc->clks[0].clk);
@@ -330,10 +330,10 @@ static void dwc3_frame_length_adjustment(struct dwc3 *dwc)
                }
 
                /* nano seconds the period of ref_clk */
-               ref_clk_period_integer = 1000000000 / ref_clk_hz;
-               temp = 125000L * 1000000000L;
-               temp = temp / ref_clk_hz;
-               temp = temp / ref_clk_period_integer;
+		ref_clk_period_integer = DIV_ROUND_DOWN_ULL(1000000000, ref_clk_hz);
+                temp = 125000ULL * 1000000000ULL;
+               temp = DIV_ROUND_DOWN_ULL(temp, ref_clk_hz);
+               temp = DIV_ROUND_DOWN_ULL(temp, ref_clk_period_integer);
                temp = temp - 125000;
                temp = temp << GFLADJ_REFCLK_FLADJ_SHIFT;
                reg &= ~GFLADJ_REFCLK_FLADJ_MASK;
