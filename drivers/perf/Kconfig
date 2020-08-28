@@ -132,4 +132,12 @@ config ARM_SPE_PMU
 
 source "drivers/perf/hisilicon/Kconfig"
 
+config NXP_S32_DDR_PERF
+	tristate "NXP S32 DDR Performance Monitor"
+	depends on SOC_S32GEN1
+	default y
+	help
+	  Provides support for the DDR performance monitor in S32 devices, which
+	  can give information about memory throughput and other related events.
+
 endmenu
