@@ -32,8 +32,8 @@
 #define VIRT_CPSW_MAX_PACKET_SIZE	(VLAN_ETH_FRAME_LEN + ETH_FCS_LEN)
 
 /* Number of TX/RX descriptors */
-#define VIRT_CPSW_MAX_TX_DESC	256
-#define VIRT_CPSW_MAX_RX_DESC	256
+#define VIRT_CPSW_MAX_TX_DESC	500
+#define VIRT_CPSW_MAX_RX_DESC	500
 
 #define VIRT_CPSW_NAV_PS_DATA_SIZE 16
 #define VIRT_CPSW_NAV_SW_DATA_SIZE 16
@@ -104,7 +104,7 @@ struct virt_cpsw_ndev_priv {
 #define virt_ndev_to_port(ndev) (virt_ndev_to_priv(ndev)->port)
 #define virt_ndev_to_common(ndev) (virt_ndev_to_port(ndev)->common)
 
-static void virt_cpsw_nuss_ndo_host_tx_timeout(struct net_device *ndev)
+static void virt_cpsw_nuss_ndo_host_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 {
 	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
 	struct virt_cpsw_tx_chn *tx_chn = &common->tx_chns;
