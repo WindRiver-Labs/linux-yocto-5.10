@@ -27,6 +27,30 @@
 #include <linux/mutex.h>
 #include <linux/of_device.h>
 
+static void handle_plugged_change(struct cdns_mhdp_device *mhdp, bool plugged)
+{
+        if (mhdp->plugged_cb && mhdp->codec_dev)
+                mhdp->plugged_cb(mhdp->codec_dev, plugged);
+}
+
+int cdns_hdmi_set_plugged_cb(struct cdns_mhdp_device *mhdp,
+                             hdmi_codec_plugged_cb fn,
+                             struct device *codec_dev)
+{
+        bool plugged;
+
+        mutex_lock(&mhdp->lock);
+        mhdp->plugged_cb = fn;
+        mhdp->codec_dev = codec_dev;
+        plugged = mhdp->last_connector_result == connector_status_connected;
+        handle_plugged_change(mhdp, plugged);
+        mutex_unlock(&mhdp->lock);
+
+        return 0;
+}
+EXPORT_SYMBOL_GPL(cdns_hdmi_set_plugged_cb);
+
+
 static void hdmi_sink_config(struct cdns_mhdp_device *mhdp)
 {
 	struct drm_scdc *scdc = &mhdp->connector.base.display_info.hdmi.scdc;
@@ -325,7 +349,7 @@ static const struct drm_connector_helper_funcs cdns_hdmi_connector_helper_funcs 
 	.atomic_check = cdns_hdmi_connector_atomic_check,
 };
 
-static int cdns_hdmi_bridge_attach(struct drm_bridge *bridge)
+static int cdns_hdmi_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	struct cdns_mhdp_device *mhdp = bridge->driver_private;
 	struct drm_mode_config *config = &bridge->dev->mode_config;
@@ -345,7 +369,7 @@ static int cdns_hdmi_bridge_attach(struct drm_bridge *bridge)
 					   config->hdr_output_metadata_property,
 					   0);
 
-		if (!drm_mode_create_colorspace_property(connector))
+		if (!drm_mode_create_hdmi_colorspace_property(connector))
 			drm_object_attach_property(&connector->base,
 						connector->colorspace_property,
 						0);
@@ -358,6 +382,7 @@ static int cdns_hdmi_bridge_attach(struct drm_bridge *bridge)
 
 static enum drm_mode_status
 cdns_hdmi_bridge_mode_valid(struct drm_bridge *bridge,
+			  const struct drm_display_info *info,
 			  const struct drm_display_mode *mode)
 {
 	struct cdns_mhdp_device *mhdp = bridge->driver_private;
@@ -521,6 +546,7 @@ static void cdns_hdmi_parse_dt(struct cdns_mhdp_device *mhdp)
 	dev_info(mhdp->dev, "lane-mapping 0x%02x\n", mhdp->lane_mapping);
 }
 
+
 static int __cdns_hdmi_probe(struct platform_device *pdev,
 		  struct cdns_mhdp_device *mhdp)
 {
@@ -675,7 +701,7 @@ int cdns_hdmi_bind(struct platform_device *pdev, struct drm_encoder *encoder,
 	if (ret)
 		return ret;
 
-	ret = drm_bridge_attach(encoder, &mhdp->bridge.base, NULL);
+	ret = drm_bridge_attach(encoder, &mhdp->bridge.base, NULL, 0);
 	if (ret) {
 		cdns_hdmi_remove(pdev);
 		DRM_ERROR("Failed to initialize bridge with drm\n");
