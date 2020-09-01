@@ -97,6 +97,7 @@ struct stmmac_dma_cfg {
 	bool aal;
 	bool eame;
 	bool multi_msi_en;
+	bool pch_intr_wa;
 	bool dche;
 };
 
