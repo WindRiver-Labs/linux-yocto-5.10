@@ -685,6 +685,8 @@ static int ehl_sgmii_data(struct pci_dev *pdev,
 	/* Set PTP clock rate for EHL as 200MHz */
 	plat->clk_ptp_rate = 204860000;
 
+	plat->dma_cfg->pch_intr_wa = 1;
+
 	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
@@ -704,6 +706,8 @@ static int ehl_rgmii_data(struct pci_dev *pdev,
 
 	/* Set PTP clock rate for EHL as 200MHz */
 	plat->clk_ptp_rate = 200000000;
+
+	plat->dma_cfg->pch_intr_wa = 1;
 
 	return ehl_common_data(pdev, plat);
 }
@@ -816,6 +820,8 @@ static int tgl_common_data(struct pci_dev *pdev,
 	plat->rx_queues_to_use = 6;
 	plat->tx_queues_to_use = 4;
 	plat->clk_ptp_rate = 200000000;
+
+	plat->dma_cfg->pch_intr_wa = 1;
 
 	plat->safety_feat_cfg->tsoee = 1;
 	plat->safety_feat_cfg->mrxpee = 0;
