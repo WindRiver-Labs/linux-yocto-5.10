@@ -2354,20 +2354,11 @@ static int tcpm_pd_select_pdo(struct tcpm_port *port, int *sink_pdo,
 			continue;
 		}
 
-		switch (type) {
-		case PDO_TYPE_FIXED:
-		case PDO_TYPE_VAR:
+		if (type == PDO_TYPE_FIXED || type == PDO_TYPE_VAR) {
 			src_ma = pdo_max_current(pdo);
 			src_mw = src_ma * min_src_mv / 1000;
-			break;
-		case PDO_TYPE_BATT:
+		} else if (type == PDO_TYPE_BATT) {
 			src_mw = pdo_max_power(pdo);
-			break;
-		case PDO_TYPE_APDO:
-			continue;
-		default:
-			tcpm_log(port, "Invalid source PDO type, ignoring");
-			continue;
 		}
 
 		for (j = 0; j < port->nr_snk_pdo; j++) {
@@ -5124,7 +5115,7 @@ struct tcpm_port *tcpm_register_port(struct device *dev, struct tcpc_dev *tcpc)
 	mutex_init(&port->lock);
 	mutex_init(&port->swap_lock);
 
-	port->wq = create_freezable_workqueue(dev_name(dev));
+	port->wq = kthread_create_worker(0, dev_name(dev));
 	if (IS_ERR(port->wq))
 		return ERR_CAST(port->wq);
 	sched_set_fifo(port->wq->task);
@@ -5211,9 +5202,6 @@ EXPORT_SYMBOL_GPL(tcpm_register_port);
 void tcpm_unregister_port(struct tcpm_port *port)
 {
 	int i;
-
-	cancel_delayed_work_sync(&port->state_machine);
-	cancel_delayed_work_sync(&port->vdm_state_machine);
 
 	tcpm_reset_port(port);
 	for (i = 0; i < ARRAY_SIZE(port->port_altmode); i++)
