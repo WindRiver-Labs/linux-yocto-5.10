@@ -83,6 +83,11 @@
 #define TCR_RXMSK	BIT(19)
 #define TCR_TXMSK	BIT(18)
 
+struct spi_imx_master {
+        int     *chipselect;
+        int     num_chipselect;
+};
+
 struct lpspi_config {
 	u8 bpw;
 	u8 chip_select;
@@ -815,10 +820,13 @@ static int fsl_lpspi_init_rpm(struct fsl_lpspi_data *fsl_lpspi)
 
 static int fsl_lpspi_probe(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
 	struct fsl_lpspi_data *fsl_lpspi;
 	struct spi_controller *controller;
+	struct spi_imx_master *lpspi_platform_info =
+                dev_get_platdata(&pdev->dev);
 	struct resource *res;
-	int i, ret, irq, num_cs;
+	int ret, irq, num_cs;
 	u32 temp;
 	bool is_slave;
 
@@ -924,6 +932,10 @@ static int fsl_lpspi_probe(struct platform_device *pdev)
 
 	if (ret < 0)
 		dev_err(&pdev->dev, "dma setup error %d, use pio\n", ret);
+	else
+               /* disable LPSPI module IRQ when enable DMA mode successfully,
+                * to prevent the unexpected LPSPI module IRQ events*/
+               disable_irq(irq);
 
 	ret = devm_spi_register_controller(&pdev->dev, controller);
 	if (ret < 0) {
