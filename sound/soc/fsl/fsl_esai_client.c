@@ -24,7 +24,7 @@ static struct snd_pcm_hardware fsl_esai_client_pcm_hardware = {
 	.buffer_bytes_max = IMX_SSI_DMABUF_SIZE,
 	.period_bytes_min = 2048,	/* fix period size, for alignment in FE/BE */
 	.period_bytes_max = 2048,
-	.periods_min = 4,		/* periods > 2 (pingpong buffer in BE) */
+	.periods_min = 8,		/* periods > 4 ( 4 buffer in BE) */
 	.periods_max = 255,
 	.fifo_size = 0,
 };
@@ -34,7 +34,7 @@ static int fsl_esai_client_pcm_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai_client *client = snd_soc_dai_get_drvdata(cpu_dai);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 
@@ -57,7 +57,7 @@ static int fsl_esai_client_pcm_hw_free(struct snd_pcm_substream *substream)
 static snd_pcm_uframes_t fsl_esai_client_pcm_pointer(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai_client *client = snd_soc_dai_get_drvdata(cpu_dai);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 
@@ -81,7 +81,7 @@ static int fsl_esai_client_pcm_open(struct snd_pcm_substream *substream)
 int fsl_esai_client_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai_client *client = snd_soc_dai_get_drvdata(cpu_dai);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 
@@ -118,25 +118,8 @@ static int fsl_esai_client_pcm_mmap(struct snd_pcm_substream *substream,
 			   runtime->dma_bytes);
 }
 
-static struct snd_pcm_ops fsl_esai_client_pcm_ops = {
-	.open		= fsl_esai_client_pcm_open,
-	.ioctl		= snd_pcm_lib_ioctl,
-	.hw_params	= fsl_esai_client_pcm_hw_params,
-	.hw_free	= fsl_esai_client_pcm_hw_free,
-	.pointer	= fsl_esai_client_pcm_pointer,
-	.mmap		= fsl_esai_client_pcm_mmap,
-	.trigger        = fsl_esai_client_pcm_trigger,
-};
-
-static int fsl_esai_client_pcm_new(struct snd_soc_pcm_runtime *rtd)
-{
-	return 0;
-}
-
 static const struct snd_soc_component_driver fsl_esai_client_pcm_platform = {
 	.name           = "fsl_esai_client_pcm",
-	.ops		= &fsl_esai_client_pcm_ops,
-	.pcm_new	= fsl_esai_client_pcm_new,
 };
 
 static const struct snd_soc_component_driver fsl_esai_client_component = {
