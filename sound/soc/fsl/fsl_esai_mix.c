@@ -33,7 +33,7 @@ int fsl_esai_mix_hw_params(struct snd_pcm_substream *substream,
 	mix->channels   = params_channels(params);
 	mix->word_width = snd_pcm_format_physical_width(params_format(params)) / 8;
 
-	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 	if (!dma_data)
 		return 0;
 
@@ -54,9 +54,9 @@ int fsl_esai_mix_open(struct snd_pcm_substream *substream, struct fsl_esai_mix *
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_dmaengine_dai_dma_data *dma_data;
 
-	dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_data = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 
-	mix->chan = dma_request_slave_channel(rtd->cpu_dai->dev,
+	mix->chan = dma_request_slave_channel(asoc_rtd_to_cpu(rtd, 0)->dev,
 					      dma_data->chan_name);
 
 	return 0;
@@ -71,11 +71,58 @@ int fsl_esai_mix_close(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int fsl_esai_mix_pointer(struct fsl_esai_mix *mix)
+{
+	struct dma_tx_state state;
+	enum dma_status status;
+	unsigned int buf_size;
+	unsigned int pos = 0;
+
+	status = dmaengine_tx_status(mix->chan, mix->cookie, &state);
+	if (status == DMA_IN_PROGRESS || status == DMA_PAUSED) {
+		buf_size = mix->buffer_bytes;
+		if (state.residue > 0 && state.residue <= buf_size)
+			pos = buf_size - state.residue;
+	}
+
+	return pos;
+}
+
+static int fsl_esai_tx_avail(struct fsl_esai_mix *mix)
+{
+	int avail;
+
+	mix->buffer_read_offset = fsl_esai_mix_pointer(mix);
+
+	avail = mix->buffer_bytes - mix->buffer_write_offset + mix->buffer_read_offset;
+	if (avail < 0)
+		avail += mix->buffer_bytes;
+	else if (avail > mix->buffer_bytes)
+		avail -=  mix->buffer_bytes;
+
+	return avail;
+}
+
+static int fsl_esai_rx_avail(struct fsl_esai_mix *mix)
+{
+	int avail;
+
+	mix->buffer_write_offset = fsl_esai_mix_pointer(mix);
+
+	avail = mix->buffer_bytes - mix->buffer_read_offset + mix->buffer_write_offset;
+	if (avail < 0)
+		avail += mix->buffer_bytes;
+	else if (avail > mix->buffer_bytes)
+		avail = avail -  mix->buffer_bytes;
+
+	return avail;
+}
+
 static void fsl_esai_mix_buffer_from_fe_tx(struct snd_pcm_substream *substream, bool elapse)
 {
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
 	struct fsl_esai_mix *mix = &esai->mix[tx];
 	struct fsl_esai_client *client;
@@ -107,7 +154,7 @@ static void fsl_esai_mix_buffer_from_fe_tx(struct snd_pcm_substream *substream, 
 			continue;
 
 		mix->fe_substream[i] = snd_soc_dpcm_get_substream(dpcm->fe, substream->stream);
-		mix->client[i] = snd_soc_dai_get_drvdata(dpcm->fe->cpu_dai);
+		mix->client[i] = snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(dpcm->fe, 0));
 
 		i++;
 		if (i >= MAX_CLIENT_NUM)
@@ -115,9 +162,9 @@ static void fsl_esai_mix_buffer_from_fe_tx(struct snd_pcm_substream *substream, 
 	}
 	spin_unlock_irqrestore(&rtd->card->dpcm_lock, flags);
 
-	avail = mix->buffer_bytes - mix->buffer_write_offset + mix->buffer_read_offset;
-	if (avail >= mix->buffer_bytes)
-		avail = avail -  mix->buffer_bytes;
+	avail = fsl_esai_tx_avail(mix);
+	if (avail >= mix->buffer_bytes && elapse)
+		dev_err(asoc_rtd_to_cpu(rtd, 0)->dev, "mix underrun\n");
 
 	while (avail >= mix->period_bytes) {
 		size = mix->period_bytes;
@@ -166,7 +213,7 @@ static void fsl_esai_mix_buffer_from_fe_tx(struct snd_pcm_substream *substream, 
 		}
 
 		mix->buffer_write_offset += size;
-		if (mix->buffer_write_offset > mix->buffer_bytes)
+		if (mix->buffer_write_offset >= mix->buffer_bytes)
 			mix->buffer_write_offset -= mix->buffer_bytes;
 
 		avail -= mix->period_bytes;
@@ -177,7 +224,7 @@ static void fsl_esai_split_buffer_from_be_rx(struct snd_pcm_substream *substream
 {
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
 	struct fsl_esai_mix *mix = &esai->mix[tx];
 	struct fsl_esai_client *client;
@@ -208,7 +255,7 @@ static void fsl_esai_split_buffer_from_be_rx(struct snd_pcm_substream *substream
 			continue;
 
 		mix->fe_substream[i] = snd_soc_dpcm_get_substream(dpcm->fe, substream->stream);
-		mix->client[i] = snd_soc_dai_get_drvdata(dpcm->fe->cpu_dai);
+		mix->client[i] = snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(dpcm->fe, 0));
 
 		i++;
 		if (i >= MAX_CLIENT_NUM)
@@ -216,9 +263,9 @@ static void fsl_esai_split_buffer_from_be_rx(struct snd_pcm_substream *substream
 	}
 	spin_unlock_irqrestore(&rtd->card->dpcm_lock, flags);
 
-	avail = mix->buffer_bytes - mix->buffer_read_offset + mix->buffer_write_offset;
-	if (avail >= mix->buffer_bytes)
-		avail = avail -  mix->buffer_bytes;
+	avail = fsl_esai_rx_avail(mix);
+	if (avail >= mix->buffer_bytes && elapse)
+		dev_err(asoc_rtd_to_cpu(rtd, 0)->dev, "mix overrun\n");
 
 	while (avail >= mix->period_bytes) {
 		size = mix->period_bytes;
@@ -261,7 +308,7 @@ static void fsl_esai_split_buffer_from_be_rx(struct snd_pcm_substream *substream
 		}
 
 		mix->buffer_read_offset += size;
-		if (mix->buffer_read_offset > mix->buffer_bytes)
+		if (mix->buffer_read_offset >= mix->buffer_bytes)
 			mix->buffer_read_offset -= mix->buffer_bytes;
 
 		avail -= mix->period_bytes;
@@ -289,22 +336,12 @@ static void fsl_esai_mix_dma_complete(void *arg)
 {
 	struct snd_pcm_substream *substream = arg;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct fsl_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct fsl_esai_mix *mix = &esai->mix[tx];
 
 	mix->substream = substream;
-
-	if (tx) {
-		mix->buffer_read_offset = mix->buffer_read_offset + mix->period_bytes;
-		if (mix->buffer_read_offset > mix->buffer_bytes)
-			mix->buffer_read_offset -= mix->buffer_bytes;
-	} else {
-		mix->buffer_write_offset = mix->buffer_write_offset + mix->period_bytes;
-		if (mix->buffer_write_offset > mix->buffer_bytes)
-			mix->buffer_write_offset -= mix->buffer_bytes;
-	}
 
 	queue_work(mix->mix_wq, &mix->work);
 }
@@ -329,11 +366,11 @@ static int fsl_esai_mix_prepare_and_submit(struct snd_pcm_substream *substream,
 
 	desc->callback = fsl_esai_mix_dma_complete;
 	desc->callback_param = substream;
-	dmaengine_submit(desc);
+	mix->cookie = dmaengine_submit(desc);
 
 	/* Mix the tx buffer */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		mix->buffer_read_offset = mix->buffer_bytes;
+		mix->buffer_read_offset = 0;
 		mix->buffer_write_offset = 0;
 		fsl_esai_mix_buffer_from_fe_tx(substream, false);
 	} else {
@@ -413,7 +450,6 @@ int fsl_esai_mix_probe(struct device *dev, struct fsl_esai_mix *mix_rx, struct f
 	mix_rx->channels = 4;
 	mix_rx->buffer_bytes = 2048 * mix_rx->client_cnt * 4;
 	mix_rx->period_bytes = 2048 * mix_rx->client_cnt;
-
 	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV,
 				  dev,
 				  IMX_SSI_DMABUF_SIZE * mix_rx->client_cnt,
