@@ -1383,6 +1383,16 @@ static int do_vop_entry(const char *filename, void *symval,
 	return 1;
 }
 
+/* Looks like: cosm:S */
+static int do_cosm_entry(const char *filename, void *symval,
+			  char *alias)
+{
+	DEF_FIELD_ADDR(symval, cosm_device_id, name);
+	sprintf(alias, COSM_MODULE_PREFIX "%s", *name);
+
+	return 1;
+}
+
 /* Does namelen bytes of name exactly match the symbol? */
 static bool sym_is(const char *name, unsigned namelen, const char *symbol)
 {
@@ -1458,6 +1468,7 @@ static const struct devtable devtable[] = {
 	{"wmi", SIZE_wmi_device_id, do_wmi_entry},
 	{"mhi", SIZE_mhi_device_id, do_mhi_entry},
 	{"vop", SIZE_vop_device_id, do_vop_entry},
+	{"cosm", SIZE_cosm_device_id, do_cosm_entry},
 };
 
 /* Create MODULE_ALIAS() statements.
