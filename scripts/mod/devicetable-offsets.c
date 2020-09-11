@@ -243,5 +243,9 @@ int main(void)
 	DEVID(mhi_device_id);
 	DEVID_FIELD(mhi_device_id, chan);
 
+	DEVID(vop_device_id);
+        DEVID_FIELD(vop_device_id, device);
+        DEVID_FIELD(vop_device_id, vendor);
+
 	return 0;
 }
