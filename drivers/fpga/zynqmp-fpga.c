@@ -99,7 +99,7 @@ static int zynqmp_fpga_ops_write(struct fpga_manager *mgr,
 				 const char *buf, size_t size)
 {
 	struct zynqmp_fpga_priv *priv;
-	dma_addr_t dma_addr;
+	dma_addr_t dma_addr = 0;
 	u32 eemi_flags = 0;
 	size_t dma_size;
 	char *kbuf;
@@ -167,8 +167,8 @@ static unsigned long zynqmp_fpga_get_contiguous_size(struct sg_table *sgt)
 static int zynqmp_fpga_ops_write_sg(struct fpga_manager *mgr,
 				    struct sg_table *sgt)
 {
+	dma_addr_t dma_addr, key_addr = 0;
 	struct zynqmp_fpga_priv *priv;
-	dma_addr_t dma_addr, key_addr;
 	unsigned long contig_size;
 	u32 eemi_flags = 0;
 	char *kbuf;
@@ -225,7 +225,7 @@ static enum fpga_mgr_states zynqmp_fpga_ops_state(struct fpga_manager *mgr)
 static u64 zynqmp_fpga_ops_status(struct fpga_manager *mgr)
 {
 	unsigned int *buf, reg_val;
-	dma_addr_t dma_addr;
+	dma_addr_t dma_addr = 0;
 	u64 status = 0;
 	int ret;
 
@@ -263,9 +263,9 @@ free_dmabuf:
 static int zynqmp_fpga_read_cfgreg(struct fpga_manager *mgr,
 				   struct seq_file *s)
 {
-	int ret, val;
+	int ret = 0, val;
 	unsigned int *buf;
-	dma_addr_t dma_addr;
+	dma_addr_t dma_addr = 0;
 	struct zynqmp_configreg *p = cfgreg;
 
 	buf = dma_alloc_coherent(mgr->dev.parent, READ_DMA_SIZE,
@@ -297,7 +297,7 @@ static int zynqmp_fpga_read_cfgdata(struct fpga_manager *mgr,
 	struct zynqmp_fpga_priv *priv;
 	int ret, data_offset;
 	unsigned int *buf;
-	dma_addr_t dma_addr;
+	dma_addr_t dma_addr = 0;
 	size_t size;
 
 	priv = mgr->priv;
