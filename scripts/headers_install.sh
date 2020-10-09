@@ -89,6 +89,9 @@ include/uapi/linux/atmdev.h:CONFIG_COMPAT
 include/uapi/linux/eventpoll.h:CONFIG_PM_SLEEP
 include/uapi/linux/hw_breakpoint.h:CONFIG_HAVE_MIXED_BREAKPOINTS_REGS
 include/uapi/linux/pktcdvd.h:CONFIG_CDROM_PKTCDVD_WCACHE
+include/uapi/linux/fmd/Peripherals/fm_port_ioctls.h:CONFIG_COMPAT
+include/uapi/linux/fmd/Peripherals/fm_pcd_ioctls.h:CONFIG_COMPAT
+include/uapi/linux/fmd/Peripherals/fm_ioctls.h:CONFIG_COMPAT
 "
 
 for c in $configs
