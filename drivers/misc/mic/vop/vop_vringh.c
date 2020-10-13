@@ -643,7 +643,7 @@ static int vop_virtio_copy_from_user(struct vop_vdev *vdev, void __user *ubuf,
 	size_t partlen;
 	bool dma = VOP_USE_DMA;
 	int err = 0;
-	void *temp = NULL;
+	size_t offset = 0;
 
 	if (daddr & (dma_alignment - 1)) {
 		vdev->tx_dst_unaligned += len;
@@ -692,16 +692,20 @@ memcpy:
 	 * We are copying to IO below and should ideally use something
 	 * like copy_from_user_toio(..) if it existed.
 	 */
-	temp = kmalloc(len, GFP_KERNEL);
-	if (copy_from_user(temp, ubuf, len)) {
-		err = -EFAULT;
-		dev_err(vop_dev(vdev), "%s %d err %d\n",
-			__func__, __LINE__, err);
-		goto err;
-	}
-	memcpy_toio((void __force *)dbuf, temp, len);
-	kfree(temp);
-	vdev->out_bytes += len;
+	while (len) {
+                partlen = min_t(size_t, len, VOP_INT_DMA_BUF_SIZE);
+ 
+                if (copy_from_user(vvr->buf, ubuf + offset, partlen)) {
+                        err = -EFAULT;
+                        dev_err(vop_dev(vdev), "%s %d err %d\n",
+                                __func__, __LINE__, err);
+                        goto err;
+                }
+                memcpy_toio(dbuf + offset, vvr->buf, partlen);
+                offset += partlen;
+                vdev->out_bytes += partlen;
+                len -= partlen;
+        }
 	err = 0;
 err:
 	vpdev->hw_ops->iounmap(vpdev, dbuf);
