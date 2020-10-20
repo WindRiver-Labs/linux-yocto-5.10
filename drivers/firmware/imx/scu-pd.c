@@ -110,8 +110,7 @@ static const struct imx_sc_pd_range imx8qxp_scu_pd_ranges[] = {
 	{ "kpp", IMX_SC_R_KPP, 1, false, 0 },
 	{ "fspi", IMX_SC_R_FSPI_0, 2, true, 0 },
 	{ "mu_a", IMX_SC_R_MU_0A, 14, true, 0 },
-	{ "mu_8b", IMX_SC_R_MU_8B, 1, true, 8 },
-	{ "mu_b", IMX_SC_R_MU_5B, 9, true, 5 },
+	{ "mu_b", IMX_SC_R_MU_13B, 1, true, 13 },
 
 	/* CONN SS */
 	{ "usb", IMX_SC_R_USB_0, 2, true, 0 },
@@ -129,9 +128,12 @@ static const struct imx_sc_pd_range imx8qxp_scu_pd_ranges[] = {
 	{ "audio-pll1", IMX_SC_R_AUDIO_PLL_1, 1, false, 0 },
 	{ "audio-clk-0", IMX_SC_R_AUDIO_CLK_0, 1, false, 0 },
 	{ "audio-clk-1", IMX_SC_R_AUDIO_CLK_1, 1, false, 0 },
+	{ "mclk-out-0", IMX_SC_R_MCLK_OUT_0, 1, false, 0 },
+	{ "mclk-out-1", IMX_SC_R_MCLK_OUT_1, 1, false, 0 },
 	{ "dma0-ch", IMX_SC_R_DMA_0_CH0, 32, true, 0 },
 	{ "dma1-ch", IMX_SC_R_DMA_1_CH0, 16, true, 0 },
-	{ "dma2-ch", IMX_SC_R_DMA_2_CH0, 5, true, 0 },
+	{ "dma2-ch-0", IMX_SC_R_DMA_2_CH0, 5, true, 0 },
+	{ "dma2-ch-1", IMX_SC_R_DMA_2_CH5, 27, true, 0 },
 	{ "dma3-ch", IMX_SC_R_DMA_3_CH0, 32, true, 0 },
 	{ "asrc0", IMX_SC_R_ASRC_0, 1, false, 0 },
 	{ "asrc1", IMX_SC_R_ASRC_1, 1, false, 0 },
@@ -153,7 +155,7 @@ static const struct imx_sc_pd_range imx8qxp_scu_pd_ranges[] = {
 	/* DMA SS */
 	{ "can", IMX_SC_R_CAN_0, 3, true, 0 },
 	{ "ftm", IMX_SC_R_FTM_0, 2, true, 0 },
-	{ "lpi2c", IMX_SC_R_I2C_0, 5, true, 0 },
+	{ "lpi2c", IMX_SC_R_I2C_0, 4, true, 0 },
 	{ "adc", IMX_SC_R_ADC_0, 1, true, 0 },
 	{ "lcd", IMX_SC_R_LCD_0, 1, true, 0 },
 	{ "lcd-pll", IMX_SC_R_ELCDIF_PLL, 1, true, 0 },
@@ -218,20 +220,16 @@ static const struct imx_sc_pd_range imx8qxp_scu_pd_ranges[] = {
 	/* CM40 SS */
 	{ "cm40_i2c", IMX_SC_R_M4_0_I2C, 1, false, 0 },
 	{ "cm40_intmux", IMX_SC_R_M4_0_INTMUX, 1, false, 0 },
-
-	/* CM40 SS */
-	{ "cm40-i2c", IMX_SC_R_M4_0_I2C, 1, false, 0 },
-	{ "cm40-intmux", IMX_SC_R_M4_0_INTMUX, 1, false, 0 },
-	{ "cm40-pid", IMX_SC_R_M4_0_PID0, 5, true, 0},
-	{ "cm40-mu-a1", IMX_SC_R_M4_0_MU_1A, 1, false, 0},
-	{ "cm40-lpuart", IMX_SC_R_M4_0_UART, 1, false, 0},
+	{ "cm40_pid", IMX_SC_R_M4_0_PID0, 5, true, 0},
+	{ "cm40_mu1a", IMX_SC_R_M4_0_MU_1A, 1, false, 0},
+	{ "cm40_lpuart", IMX_SC_R_M4_0_UART, 1, false, 0},
 
 	/* CM41 SS */
-	{ "cm41-i2c", IMX_SC_R_M4_1_I2C, 1, false, 0 },
-	{ "cm41-intmux", IMX_SC_R_M4_1_INTMUX, 1, false, 0 },
-	{ "cm41-pid", IMX_SC_R_M4_1_PID0, 5, true, 0},
-	{ "cm41-mu-a1", IMX_SC_R_M4_1_MU_1A, 1, false, 0},
-	{ "cm41-lpuart", IMX_SC_R_M4_1_UART, 1, false, 0},
+	{ "cm41_i2c", IMX_SC_R_M4_1_I2C, 1, false, 0 },
+	{ "cm41_intmux", IMX_SC_R_M4_1_INTMUX, 1, false, 0 },
+	{ "cm41_pid", IMX_SC_R_M4_1_PID0, 5, true, 0},
+	{ "cm41_mu1a", IMX_SC_R_M4_1_MU_1A, 1, false, 0},
+	{ "cm41_lpuart", IMX_SC_R_M4_1_UART, 1, false, 0},
 
 	/* IMAGE SS */
 	{ "img-pdma", IMX_SC_R_ISI_CH0, 8, true, 0 },
