@@ -116,6 +116,7 @@ struct otx2_pool {
 	struct qmem		*stack;
 	struct qmem		*fc_addr;
 	u16			rbsize;
+	u64			*lmt_addr;
 };
 
 struct otx2_cq_queue {
@@ -157,4 +158,10 @@ static inline u64 otx2_iova_to_phys(void *iommu_domain, dma_addr_t dma_addr)
 int otx2_napi_handler(struct napi_struct *napi, int budget);
 bool otx2_sq_append_skb(struct net_device *netdev, struct otx2_snd_queue *sq,
 			struct sk_buff *skb, u16 qidx);
+void cn10k_sqe_flush(void *dev, struct otx2_snd_queue *sq,
+		     int size, int qidx);
+void otx2_sqe_flush(void *dev, struct otx2_snd_queue *sq,
+		    int size, int qidx);
+void otx2_refill_pool_ptrs(void *dev, struct otx2_cq_queue *cq);
+void cn10k_refill_pool_ptrs(void *dev, struct otx2_cq_queue *cq);
 #endif /* OTX2_TXRX_H */
