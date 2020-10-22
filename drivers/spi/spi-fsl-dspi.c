@@ -36,6 +36,7 @@
 
 #define SPI_CTAR(x)			(0x0c + (((x) & GENMASK(1, 0)) * 4))
 #define SPI_CTAR_FMSZ(x)		(((x) << 27) & GENMASK(30, 27))
+#define SPI_CTAR_SLAVE_FMSZ(x)		(((x) << 27) & GENMASK(31, 27))
 #define SPI_CTAR_CPOL			BIT(26)
 #define SPI_CTAR_CPHA			BIT(25)
 #define SPI_CTAR_LSBFE			BIT(24)
@@ -104,6 +105,7 @@
 
 #define SPI_SREX			0x13c
 
+#define SPI_SLAVE_FRAME_BITS(bits)	SPI_CTAR_SLAVE_FMSZ((bits) - 1)
 #define SPI_FRAME_BITS(bits)		SPI_CTAR_FMSZ((bits) - 1)
 #define SPI_FRAME_EBITS(bits)		SPI_CTARE_FMSZE(((bits) - 1) >> 4)
 
@@ -807,9 +809,15 @@ no_accel:
 	 * We will update CTARE in the portion specific to XSPI, when we
 	 * also know the preload value (DTCP).
 	 */
-	regmap_write(dspi->regmap, SPI_CTAR(0),
-		     dspi->cur_chip->ctar_val |
-		     SPI_FRAME_BITS(dspi->oper_bits_per_word));
+	if (!spi_controller_is_slave(dspi->ctlr)) {
+		regmap_write(dspi->regmap, SPI_CTAR(0),
+			     dspi->cur_chip->ctar_val |
+			     SPI_FRAME_BITS(dspi->oper_bits_per_word));
+	} else {
+		regmap_write(dspi->regmap, SPI_CTAR(0),
+			     dspi->cur_chip->ctar_val |
+			     SPI_SLAVE_FRAME_BITS(dspi->oper_bits_per_word));
+	}
 }
 
 static void dspi_fifo_write(struct fsl_dspi *dspi)
