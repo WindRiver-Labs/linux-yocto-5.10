@@ -1108,6 +1108,10 @@ cpt:
 		rvu_scan_block(rvu, block);
 	}
 
+	err = rvu_set_channels_base(rvu);
+	if (err)
+		goto msix_err;
+
 	err = rvu_npc_init(rvu);
 	if (err)
 		goto npc_err;
@@ -1146,6 +1150,8 @@ cpt:
 	err = rvu_ree_init(rvu);
 	if (err)
 		goto nix_err;
+
+	rvu_program_channels(rvu);
 
 	return 0;
 
@@ -3158,8 +3164,6 @@ static void rvu_enable_afvf_intr(struct rvu *rvu)
 	rvupf_write64(rvu, RVU_PF_VFFLR_INT_ENA_W1SX(1), INTR_MASK(vfs - 64));
 	rvupf_write64(rvu, RVU_PF_VFME_INT_ENA_W1SX(1), INTR_MASK(vfs - 64));
 }
-
-#define PCI_DEVID_OCTEONTX2_LBK 0xA061
 
 int rvu_get_num_lbk_chans(void)
 {
