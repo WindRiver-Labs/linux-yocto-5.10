@@ -4083,9 +4083,13 @@ static int rvu_nix_lf_ptp_tx_cfg(struct rvu *rvu, u16 pcifunc, bool enable)
 {
 	struct rvu_hwinfo *hw = rvu->hw;
 	struct rvu_block *block;
-	int blkaddr;
+	int blkaddr, pf;
 	int nixlf;
 	u64 cfg;
+
+	pf = rvu_get_pf(pcifunc);
+	if (!is_mac_feature_supported(rvu, pf, RVU_LMAC_FEAT_PTP))
+		return 0;
 
 	/* Silicon does not support enabling time stamp in higig mode */
 	if (rvu_cgx_is_higig2_enabled(rvu, rvu_get_pf(pcifunc)))
