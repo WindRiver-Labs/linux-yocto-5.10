@@ -307,6 +307,7 @@ struct rvu_pfvf {
 	u8	nix_tx_intf; /* NIX0_TX/NIX1_TX interface to NPC */
 	bool	is_sdp0; /* is this PF mapped to SDP0 */
 	bool	is_sdp1; /* is this PF mapped to SDP1 */
+	u64     lmt_base_addr; /* Preseving the pcifunc's lmtst base addr*/
 
 	struct rvu_npc_mcam_rule *def_rule;
 };
@@ -856,5 +857,8 @@ int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 /* CN10K RVU */
 int rvu_set_channels_base(struct rvu *rvu);
 void rvu_program_channels(struct rvu *rvu);
+
+/* CN10K RVU - LMT*/
+void rvu_reset_lmt_map_tbl(struct rvu *rvu, u16 pcifunc);
 
 #endif /* RVU_H */
