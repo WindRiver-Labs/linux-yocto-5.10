@@ -18,6 +18,7 @@
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi-fsl-dspi.h>
+#include <linux/of_address.h>
 
 #define DRIVER_NAME			"fsl-dspi"
 
@@ -1260,7 +1261,10 @@ static int dspi_probe(struct platform_device *pdev)
 	if (!dspi)
 		return -ENOMEM;
 
-	ctlr = spi_alloc_master(&pdev->dev, 0);
+	if (of_property_read_bool(np, "spi-slave"))
+		ctlr = spi_alloc_slave(&pdev->dev, 0);
+	else
+		ctlr = spi_alloc_master(&pdev->dev, 0);
 	if (!ctlr)
 		return -ENOMEM;
 
