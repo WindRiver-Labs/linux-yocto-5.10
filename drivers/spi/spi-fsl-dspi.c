@@ -139,6 +139,7 @@ enum {
 	MCF5441X,
 	VF610,
 	NXPS32,
+	NXPS32SLAVE,
 };
 
 static struct fsl_dspi_devtype_data devtype_data[] = {
@@ -198,6 +199,11 @@ static struct fsl_dspi_devtype_data devtype_data[] = {
 	},
 	[NXPS32] = {
 		.trans_mode		= DSPI_XSPI_MODE,
+		.max_clock_factor	= 1,
+		.fifo_size		= 4,
+	},
+	[NXPS32SLAVE] = {
+		.trans_mode		= DSPI_DMA_MODE,
 		.max_clock_factor	= 1,
 		.fifo_size		= 4,
 	},
@@ -1313,6 +1319,9 @@ static int dspi_probe(struct platform_device *pdev)
 			ret = -EFAULT;
 			goto out_ctlr_put;
 		}
+
+		if (ctlr->slave && dspi->devtype_data == &devtype_data[NXPS32])
+			dspi->devtype_data = &devtype_data[NXPS32SLAVE];
 
 		big_endian = of_device_is_big_endian(np);
 	}
