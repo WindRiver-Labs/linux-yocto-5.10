@@ -21056,7 +21056,7 @@ static gcsFEATURE_DATABASE gChipInfo[] = {
     },
 };
 
-static gcsFEATURE_DATABASE*
+static inline gcsFEATURE_DATABASE*
 gcQueryFeatureDB(
     gctUINT32 ChipID,
     gctUINT32 ChipVersion,
