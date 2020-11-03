@@ -233,7 +233,6 @@ int otx2_hw_set_mtu(struct otx2_nic *pfvf, int mtu)
 		return -ENOMEM;
 	}
 
-	pfvf->max_frs = mtu +  OTX2_ETH_HLEN;
 	req->maxlen = pfvf->max_frs;
 
 	err = otx2_sync_mbox_msg(&pfvf->mbox);
@@ -1616,7 +1615,6 @@ void otx2_set_cints_affinity(struct otx2_nic *pfvf)
 	}
 }
 
-#define OTX2_MAX_MTU_SUPPORTED	16380
 u16 otx2_get_max_mtu(struct otx2_nic *pfvf)
 {
 	struct nix_hw_info *rsp;
@@ -1636,14 +1634,6 @@ u16 otx2_get_max_mtu(struct otx2_nic *pfvf)
 	if (!rc) {
 		rsp = (struct nix_hw_info *)
 		       otx2_mbox_get_rsp(&pfvf->mbox.mbox, 0, &req->hdr);
-
-		/* Currently driver doesn't support multi-segment ingress pkts
-		 * and the maximum buffer size we can configure in HW is 32K,
-		 * so limit the MTU for now to 16K which is same as that of
-		 * max MTU on RPM interfaces
-		 */
-		if (rsp->max_mtu > OTX2_MAX_MTU_SUPPORTED)
-			rsp->max_mtu = OTX2_MAX_MTU_SUPPORTED;
 
 		/* HW counts VLAN insertion bytes (8 for double tag)
 		 * irrespective of whether SQE is requesting to insert VLAN
