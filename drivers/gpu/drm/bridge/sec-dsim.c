@@ -228,7 +228,7 @@
 #define dsim_write(dsim, val, reg)	writel(val, dsim->base + reg)
 
 /* fixed phy ref clk rate */
-#define PHY_REF_CLK		27000
+#define PHY_REF_CLK		12000
 
 #define MAX_MAIN_HRESOL		2047
 #define MAX_MAIN_VRESOL		2047
@@ -793,7 +793,7 @@ static const struct mipi_dsi_host_ops sec_mipi_dsim_host_ops = {
 	.transfer = sec_mipi_dsim_host_transfer,
 };
 
-static int sec_mipi_dsim_bridge_attach(struct drm_bridge *bridge)
+static int sec_mipi_dsim_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
 {
 	int ret;
 	bool attach_bridge = false;
@@ -855,11 +855,11 @@ static int sec_mipi_dsim_bridge_attach(struct drm_bridge *bridge)
 		return -EPROBE_DEFER;
 
 	/* duplicate bridges or next bridge exists */
-	WARN_ON(bridge == next || bridge->next || dsim->next);
+	WARN_ON(bridge == next || drm_bridge_get_next_bridge(bridge) || dsim->next);
 
 	dsim->next = next;
 	next->encoder = encoder;
-	ret = drm_bridge_attach(encoder, next, bridge);
+	ret = drm_bridge_attach(encoder, next, bridge, flags);
 	if (ret) {
 		dev_err(dev, "Unable to attach bridge %s: %d\n",
 			remote->name, ret);
@@ -868,7 +868,7 @@ static int sec_mipi_dsim_bridge_attach(struct drm_bridge *bridge)
 	}
 
 	/* bridge chains */
-	bridge->next = next;
+	//bridge->next = next;
 
 	return 0;
 }
@@ -1801,7 +1801,7 @@ static int sec_mipi_dsim_connector_get_modes(struct drm_connector *connector)
 	if (WARN_ON(!dsim->panel))
 		return -ENODEV;
 
-	return drm_panel_get_modes(dsim->panel);
+	return drm_panel_get_modes(dsim->panel, connector);
 }
 
 static const struct drm_connector_helper_funcs
@@ -1932,7 +1932,7 @@ int sec_mipi_dsim_bind(struct device *dev, struct device *master, void *data,
 	bridge->encoder = encoder;
 
 	/* attach sec dsim bridge and its next bridge if exists */
-	ret = drm_bridge_attach(encoder, bridge, NULL);
+	ret = drm_bridge_attach(encoder, bridge, NULL, 0);
 	if (ret) {
 		dev_err(dev, "Failed to attach bridge: %s\n", dev_name(dev));
 
@@ -1978,9 +1978,6 @@ panel:
 		if (ret)
 			goto cleanup_connector;
 
-		ret = drm_panel_attach(dsim->panel, connector);
-		if (ret)
-			goto cleanup_connector;
 	}
 
 	dev_dbg(dev, "sec-dsim bridge bind end\n");
@@ -2000,7 +1997,6 @@ void sec_mipi_dsim_unbind(struct device *dev, struct device *master, void *data)
 	struct sec_mipi_dsim *dsim = dev_get_drvdata(dev);
 
 	if (dsim->panel) {
-		drm_panel_detach(dsim->panel);
 		drm_connector_cleanup(&dsim->connector);
 	}
 
