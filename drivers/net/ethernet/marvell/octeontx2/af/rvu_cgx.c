@@ -601,6 +601,25 @@ int rvu_mbox_handler_cgx_promisc_disable(struct rvu *rvu, struct msg_req *req,
 	return 0;
 }
 
+static void cgx_notify_up_ptp_info(struct rvu *rvu, int pf, bool enable)
+{
+	struct cgx_ptp_rx_info_msg *msg;
+	int err;
+
+	/* Send mbox message to PF */
+	msg = otx2_mbox_alloc_msg_cgx_ptp_rx_info(rvu, pf);
+	if (!msg) {
+		dev_err(rvu->dev, "ptp notification to pf %d failed\n", pf);
+		return;
+	}
+
+	msg->ptp_en = enable;
+	otx2_mbox_msg_send(&rvu->afpf_wq_info.mbox_up, pf);
+	err = otx2_mbox_wait_for_rsp(&rvu->afpf_wq_info.mbox_up, pf);
+	if (err)
+		dev_err(rvu->dev, "ptp notification to pf %d failed\n", pf);
+}
+
 static int rvu_cgx_ptp_rx_cfg(struct rvu *rvu, u16 pcifunc, bool enable)
 {
 	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
@@ -631,23 +650,6 @@ static int rvu_cgx_ptp_rx_cfg(struct rvu *rvu, u16 pcifunc, bool enable)
 	pfvf->hw_rx_tstamp_en = enable;
 
 	return 0;
-}
-
-static void cgx_notify_up_ptp_info(struct rvu *rvu, int pf, bool enable)
-{
-	struct cgx_ptp_rx_info_msg *msg;
-	int err;
-
-	/* Send mbox message to PF */
-	msg = otx2_mbox_alloc_msg_cgx_ptp_rx_info(rvu, pf);
-	if (!msg)
-		dev_err(rvu->dev, "failed to alloc message\n");
-
-	msg->ptp_en = enable;
-	otx2_mbox_msg_send(&rvu->afpf_wq_info.mbox_up, pf);
-	err = otx2_mbox_wait_for_rsp(&rvu->afpf_wq_info.mbox_up, pf);
-	if (err)
-		dev_err(rvu->dev, "ptp notification to pf %d failed\n", pf);
 }
 
 int rvu_mbox_handler_cgx_ptp_rx_enable(struct rvu *rvu, struct msg_req *req,
