@@ -913,6 +913,7 @@
 				assigned-clock-rates = <12000000>;
                                 interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
                                 power-domains = <&mipi_phy1_pd>;
+				blk-ctl = <&mediamix_blk_ctl>;
                                 status = "disabled";
 
                                 port@0 {
