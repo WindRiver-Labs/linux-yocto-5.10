@@ -109,17 +109,6 @@ static int caam_reset_hw_jr(struct device *dev)
 	return 0;
 }
 
-/*
- * Flush the job ring, so the jobs running will be stopped, jobs queued will be
- * invalidated and the CAAM will no longer fetch fron input ring.
- *
- * Must be called with itr disabled
- */
-static int caam_jr_flush(struct device *dev)
-{
-	return caam_jr_stop_processing(dev, JRCR_RESET);
-}
-
 #ifdef CONFIG_PM_SLEEP
 /* The resume can be used after a park or a flush if CAAM has not been reset */
 static int caam_jr_restart_processing(struct device *dev)
@@ -146,37 +135,42 @@ static int caam_jr_restart_processing(struct device *dev)
  */
 static int caam_jr_stop_processing(struct device *dev, u32 jrcr_bits)
 {
-	struct caam_drv_private_jr *jrp = dev_get_drvdata(dev);
-	unsigned int timeout = 100000;
-	int err;
+        struct caam_drv_private_jr *jrp = dev_get_drvdata(dev);
+        unsigned int timeout = 100000;
 
-	/* Check the current status */
+        /* Check the current status */
         if (rd_reg32(&jrp->rregs->jrintstatus) & JRINT_ERR_HALT_INPROGRESS)
                 goto wait_quiesce_completion;
 
-	err = caam_jr_flush(dev);
-	if (err)
-		return err;
+        /* Reset the field */
+        clrsetbits_32(&jrp->rregs->jrintstatus, JRINT_ERR_HALT_MASK, 0);
 
-	/* Reset the field */
-       clrsetbits_32(&jrp->rregs->jrintstatus, JRINT_ERR_HALT_MASK, 0);
-
-       /* initiate flush / park (required prior to reset) */
-       wr_reg32(&jrp->rregs->jrcommand, jrcr_bits);
+        /* initiate flush / park (required prior to reset) */
+        wr_reg32(&jrp->rregs->jrcommand, jrcr_bits);
 
 wait_quiesce_completion:
-	while ((rd_reg32(&jrp->rregs->jrcommand) & JRCR_RESET) && --timeout)
-		cpu_relax();
+        while (((rd_reg32(&jrp->rregs->jrintstatus) & JRINT_ERR_HALT_MASK) ==
+                JRINT_ERR_HALT_INPROGRESS) && --timeout)
+                cpu_relax();
 
-	if (timeout == 0) {
-		dev_err(dev, "failed to reset job ring %d\n", jrp->ridx);
-		return -EIO;
-	}
+        if ((rd_reg32(&jrp->rregs->jrintstatus) & JRINT_ERR_HALT_MASK) !=
+            JRINT_ERR_HALT_COMPLETE || timeout == 0) {
+                dev_err(dev, "failed to flush job ring %d\n", jrp->ridx);
+                return -EIO;
+        }
 
-	/* unmask interrupts */
-	clrsetbits_32(&jrp->rregs->rconfig_lo, JRCFG_IMSK, 0);
+        return 0;
+}
 
-	return 0;
+/*
+ * Flush the job ring, so the jobs running will be stopped, jobs queued will be
+ * invalidated and the CAAM will no longer fetch fron input ring.
+ *
+ * Must be called with itr disabled
+ */
+static int caam_jr_flush(struct device *dev)
+{
+        return caam_jr_stop_processing(dev, JRCR_RESET);
 }
 
 /**
@@ -779,40 +773,10 @@ static int caam_jr_probe(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static void caam_jr_get_hw_state(struct device *dev)
 {
-       struct caam_drv_private_jr *jrp = dev_get_drvdata(dev);
+        struct caam_drv_private_jr *jrp = dev_get_drvdata(dev);
 
-       jrp->state.inpbusaddr = rd_reg64(&jrp->rregs->inpring_base);
-       jrp->state.outbusaddr = rd_reg64(&jrp->rregs->outring_base);
-       struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev->parent);
-       struct caam_jr_dequeue_params suspend_params = {
-               .dev = dev,
-               .enable_itr = 0,
-       };
-
-       if (ctrlpriv->caam_off_during_pm) {
-               int err;
-
-               tasklet_disable(&jrpriv->irqtask);
-
-               /* mask itr to call flush */
-               clrsetbits_32(&jrpriv->rregs->rconfig_lo, 0, JRCFG_IMSK);
-	       /* Invalid job in process */
-               err = caam_jr_flush(dev);
-               if (err) {
-                       dev_err(dev, "Failed to flush\n");
-                       return err;
-               }
-
-               /* Dequeing jobs flushed */
-               caam_jr_dequeue((unsigned long)&suspend_params);
-
-               /* Save state */
-               caam_jr_get_hw_state(dev);
-       } else if (device_may_wakeup(&pdev->dev)) {
-		enable_irq_wake(jrpriv->irq);
-       }
-
-       return 0;
+        jrp->state.inpbusaddr = rd_reg64(&jrp->rregs->inpring_base);
+        jrp->state.outbusaddr = rd_reg64(&jrp->rregs->outring_base);
 }
 
 static int caam_jr_suspend(struct device *dev)
@@ -824,6 +788,9 @@ static int caam_jr_suspend(struct device *dev)
         spin_lock(&driver_data.jr_alloc_lock);
         list_del(&jrpriv->list_node);
         spin_unlock(&driver_data.jr_alloc_lock);
+
+	if (jrpriv->hwrng)
+                caam_rng_exit(dev->parent);
 
        if (device_may_wakeup(&pdev->dev))
                enable_irq_wake(jrpriv->irq);
@@ -889,6 +856,9 @@ add_jr:
        spin_lock(&driver_data.jr_alloc_lock);
        list_add_tail(&jrpriv->list_node, &driver_data.jr_list);
        spin_unlock(&driver_data.jr_alloc_lock);
+
+	if (jrpriv->hwrng)
+               jrpriv->hwrng = !caam_rng_init(dev->parent);
 
        return 0;
 }
