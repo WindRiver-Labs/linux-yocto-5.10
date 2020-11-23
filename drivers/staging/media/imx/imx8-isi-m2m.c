@@ -74,7 +74,7 @@ struct mxc_isi_fmt mxc_isi_input_formats[] = {
 		.colplanes	= 1,
 	}, {
 		.name		= "RGBA (R-G-B-A)",
-		.fourcc		= V4L2_PIX_FMT_RGBA,
+		.fourcc		= V4L2_PIX_FMT_RGBA32,
 		.depth		= { 32 },
 		.color = MXC_ISI_M2M_IN_FMT_XBGR8,
 		.memplanes	= 1,
@@ -1127,7 +1127,7 @@ static int isi_m2m_probe(struct platform_device *pdev)
 	if (ret)
 		goto free_m2m;
 
-	ret = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+	ret = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "%s fail to register video device\n", __func__);
 		goto ctrl_free;
