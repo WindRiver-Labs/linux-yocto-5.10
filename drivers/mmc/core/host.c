@@ -389,6 +389,11 @@ int mmc_parse_voltage(struct device *dev, u32 *mask)
 
 	num_ranges = device_property_read_u32_array(dev, "voltage-ranges",
 						    NULL, 0);
+	if (num_ranges < 0) {
+		dev_err(dev, "voltage-ranges unspecified\n");
+		return -EINVAL;
+	}
+
 	if (num_ranges / 2 == 0) {
 		dev_err(dev, "voltage-ranges empty\n");
 		return -EINVAL;
@@ -546,8 +551,6 @@ int mmc_add_host(struct mmc_host *host)
 #endif
 
 	mmc_start_host(host);
-	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
-		mmc_register_pm_notifier(host);
 
 	return 0;
 }
@@ -564,8 +567,6 @@ EXPORT_SYMBOL(mmc_add_host);
  */
 void mmc_remove_host(struct mmc_host *host)
 {
-	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
-		mmc_unregister_pm_notifier(host);
 	mmc_stop_host(host);
 
 #ifdef CONFIG_DEBUG_FS
