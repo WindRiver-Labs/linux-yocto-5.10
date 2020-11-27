@@ -346,92 +346,96 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
  * @dev - pointer to the controller device
  * @ent_delay - Defines the length (in system clocks) of each entropy sample.
  */
-static void kick_trng(struct device *dev, int ent_delay)
+static void kick_trng(struct platform_device *pdev, int ent_delay)
 {
-	struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
-	struct caam_ctrl __iomem *ctrl;
-	struct rng4tst __iomem *r4tst;
-	u32 val;
+        struct device *ctrldev = &pdev->dev;
+        struct caam_drv_private *ctrlpriv = dev_get_drvdata(ctrldev);
+        struct caam_ctrl __iomem *ctrl;
+        struct rng4tst __iomem *r4tst;
+        u32 val;
 
-	ctrl = (struct caam_ctrl __iomem *)ctrlpriv->ctrl;
-	r4tst = &ctrl->r4tst[0];
+        ctrl = (struct caam_ctrl __iomem *)ctrlpriv->ctrl;
+        r4tst = &ctrl->r4tst[0];
 
-	/*
-	 * Setting both RTMCTL:PRGM and RTMCTL:TRNG_ACC causes TRNG to
-	 * properly invalidate the entropy in the entropy register and
-	 * force re-generation.
-	 */
-	clrsetbits_32(&r4tst->rtmctl, 0, RTMCTL_PRGM);
+        /*
+         * Setting both RTMCTL:PRGM and RTMCTL:TRNG_ACC causes TRNG to
+         * properly invalidate the entropy in the entropy register and
+         * force re-generation.
+         */
+        clrsetbits_32(&r4tst->rtmctl, 0, RTMCTL_PRGM | RTMCTL_ACC);
 
-	/*
-	 * Performance-wise, it does not make sense to
-	 * set the delay to a value that is lower
-	 * than the last one that worked (i.e. the state handles
-	 * were instantiated properly. Thus, instead of wasting
-	 * time trying to set the values controlling the sample
-	 * frequency, the function simply returns.
-	 */
-	val = (rd_reg32(&r4tst->rtsdctl) & RTSDCTL_ENT_DLY_MASK)
-	      >> RTSDCTL_ENT_DLY_SHIFT;
-	if (ent_delay <= val)
-		goto start_rng;
+        /*
+         * Performance-wise, it does not make sense to
+         * set the delay to a value that is lower
+         * than the last one that worked (i.e. the state handles
+         * were instantiated properly. Thus, instead of wasting
+         * time trying to set the values controlling the sample
+         * frequency, the function simply returns.
+         */
+        val = (rd_reg32(&r4tst->rtsdctl) & RTSDCTL_ENT_DLY_MASK)
+              >> RTSDCTL_ENT_DLY_SHIFT;
+        if (ent_delay <= val)
+                goto start_rng;
 
-	val = rd_reg32(&r4tst->rtsdctl);
-	val = (val & ~RTSDCTL_ENT_DLY_MASK) |
-	      (ent_delay << RTSDCTL_ENT_DLY_SHIFT);
-	wr_reg32(&r4tst->rtsdctl, val);
-	/* min. freq. count, equal to 1/4 of the entropy sample length */
-	wr_reg32(&r4tst->rtfrqmin, ent_delay >> 2);
-	/* max. freq. count, equal to 16 times the entropy sample length */
-	wr_reg32(&r4tst->rtfrqmax, ent_delay << 4);
+        val = rd_reg32(&r4tst->rtsdctl);
+        val = (val & ~RTSDCTL_ENT_DLY_MASK) |
+              (ent_delay << RTSDCTL_ENT_DLY_SHIFT);
+        wr_reg32(&r4tst->rtsdctl, val);
+        /* min. freq. count, equal to 1/4 of the entropy sample length */
+        wr_reg32(&r4tst->rtfrqmin, ent_delay >> 2);
+        /* disable maximum frequency count */
+        wr_reg32(&r4tst->rtfrqmax, RTFRQMAX_DISABLE);
+        /* read the control register */
+        val = rd_reg32(&r4tst->rtmctl);
 start_rng:
-	/*
-	 * select raw sampling in both entropy shifter
-	 * and statistical checker; ; put RNG4 into run mode
-	 */
-	clrsetbits_32(&r4tst->rtmctl, RTMCTL_PRGM, RTMCTL_SAMP_MODE_RAW_ES_SC);
+        /*
+         * select raw sampling in both entropy shifter
+         * and statistical checker; ; put RNG4 into run mode
+         */
+        clrsetbits_32(&r4tst->rtmctl, RTMCTL_PRGM | RTMCTL_ACC,
+                      RTMCTL_SAMP_MODE_RAW_ES_SC);
 }
 
-static int caam_get_era_from_hw(struct caam_perfmon __iomem *perfmon)
+static int caam_get_era_from_hw(struct caam_ctrl __iomem *ctrl)
 {
-	static const struct {
-		u16 ip_id;
-		u8 maj_rev;
-		u8 era;
-	} id[] = {
-		{0x0A10, 1, 1},
-		{0x0A10, 2, 2},
-		{0x0A12, 1, 3},
-		{0x0A14, 1, 3},
-		{0x0A14, 2, 4},
-		{0x0A16, 1, 4},
-		{0x0A10, 3, 4},
-		{0x0A11, 1, 4},
-		{0x0A18, 1, 4},
-		{0x0A11, 2, 5},
-		{0x0A12, 2, 5},
-		{0x0A13, 1, 5},
-		{0x0A1C, 1, 5}
-	};
-	u32 ccbvid, id_ms;
-	u8 maj_rev, era;
-	u16 ip_id;
-	int i;
+        static const struct {
+                u16 ip_id;
+                u8 maj_rev;
+                u8 era;
+        } id[] = {
+                {0x0A10, 1, 1},
+                {0x0A10, 2, 2},
+                {0x0A12, 1, 3},
+                {0x0A14, 1, 3},
+                {0x0A14, 2, 4},
+                {0x0A16, 1, 4},
+                {0x0A10, 3, 4},
+                {0x0A11, 1, 4},
+                {0x0A18, 1, 4},
+                {0x0A11, 2, 5},
+                {0x0A12, 2, 5},
+                {0x0A13, 1, 5},
+                {0x0A1C, 1, 5}
+        };
+        u32 ccbvid, id_ms;
+        u8 maj_rev, era;
+        u16 ip_id;
+        int i;
 
-	ccbvid = rd_reg32(&perfmon->ccb_id);
-	era = (ccbvid & CCBVID_ERA_MASK) >> CCBVID_ERA_SHIFT;
-	if (era)	/* This is '0' prior to CAAM ERA-6 */
-		return era;
+        ccbvid = rd_reg32(&ctrl->perfmon.ccb_id);
+        era = (ccbvid & CCBVID_ERA_MASK) >> CCBVID_ERA_SHIFT;
+        if (era)        /* This is '0' prior to CAAM ERA-6 */
+                return era;
 
-	id_ms = rd_reg32(&perfmon->caam_id_ms);
-	ip_id = (id_ms & SECVID_MS_IPID_MASK) >> SECVID_MS_IPID_SHIFT;
-	maj_rev = (id_ms & SECVID_MS_MAJ_REV_MASK) >> SECVID_MS_MAJ_REV_SHIFT;
+        id_ms = rd_reg32(&ctrl->perfmon.caam_id_ms);
+        ip_id = (id_ms & SECVID_MS_IPID_MASK) >> SECVID_MS_IPID_SHIFT;
+        maj_rev = (id_ms & SECVID_MS_MAJ_REV_MASK) >> SECVID_MS_MAJ_REV_SHIFT;
 
-	for (i = 0; i < ARRAY_SIZE(id); i++)
-		if (id[i].ip_id == ip_id && id[i].maj_rev == maj_rev)
-			return id[i].era;
+        for (i = 0; i < ARRAY_SIZE(id); i++)
+                if (id[i].ip_id == ip_id && id[i].maj_rev == maj_rev)
+                        return id[i].era;
 
-	return -ENOTSUPP;
+        return -ENOTSUPP;
 }
 
 /**
@@ -441,22 +445,22 @@ static int caam_get_era_from_hw(struct caam_perfmon __iomem *perfmon)
  * In case this property is not passed an attempt to retrieve the CAAM
  * era via register reads will be made.
  *
- * @ctrl:	controller region
+ * @ctrl:       controller region
  */
-static int caam_get_era(struct caam_perfmon __iomem *perfmon)
+static int caam_get_era(struct caam_ctrl __iomem *ctrl)
 {
-	struct device_node *caam_node;
-	int ret;
-	u32 prop;
+        struct device_node *caam_node;
+        int ret;
+        u32 prop;
 
-	caam_node = of_find_compatible_node(NULL, NULL, "fsl,sec-v4.0");
-	ret = of_property_read_u32(caam_node, "fsl,sec-era", &prop);
-	of_node_put(caam_node);
+        caam_node = of_find_compatible_node(NULL, NULL, "fsl,sec-v4.0");
+        ret = of_property_read_u32(caam_node, "fsl,sec-era", &prop);
+        of_node_put(caam_node);
 
-	if (!ret)
-		return prop;
-	else
-		return caam_get_era_from_hw(perfmon);
+        if (!ret)
+                return prop;
+        else
+                return caam_get_era_from_hw(ctrl);
 }
 
 /*
@@ -670,7 +674,6 @@ static int caam_ctrl_rng_init(struct device *dev)
 				dev_info(dev,
 					 "Entropy delay = %u\n",
 					 ent_delay);
-				kick_trng(dev, ent_delay);
 				ent_delay += 400;
 			}
 			/*
@@ -815,341 +818,304 @@ SIMPLE_DEV_PM_OPS(caam_ctrl_pm_ops, caam_ctrl_suspend, caam_ctrl_resume);
 
 #endif /* CONFIG_PM_SLEEP */
 
-/* Probe routine for CAAM top (controller) level */
 static int caam_probe(struct platform_device *pdev)
 {
-	int ret, ring;
-	u64 caam_id;
-	const struct soc_device_attribute *imx_soc_match;
-	static struct platform_device_info caam_dma_pdev_info = {
-		.name = "caam-dma",
-		.id = PLATFORM_DEVID_NONE
-	};
-	static struct platform_device *caam_dma_dev;
-	struct device *dev;
-	struct device_node *nprop, *np;
-	struct resource res_regs;
-	struct caam_ctrl __iomem *ctrl;
-	struct caam_drv_private *ctrlpriv;
-	struct caam_perfmon __iomem *perfmon;
-	struct dentry *dfs_root;
-	u32 scfgr, comp_params;
-	u8 rng_vid;
-	int pg_size;
-	int BLOCK_OFFSET = 0;
-	 bool reg_access = true;
-	bool pr_support = false;
+        int ret, ring, gen_sk, ent_delay = RTSDCTL_ENT_DLY_MIN;
+        u64 caam_id;
+        const struct soc_device_attribute *imx_soc_match;
+        struct device *dev;
+        struct device_node *nprop, *np;
+        struct caam_ctrl __iomem *ctrl;
+        struct caam_drv_private *ctrlpriv;
+        struct dentry *dfs_root;
+        u32 scfgr, comp_params;
+        u8 rng_vid;
+        int pg_size;
+        int BLOCK_OFFSET = 0;
+        bool pr_support = false;
 
-	ctrlpriv = devm_kzalloc(&pdev->dev, sizeof(*ctrlpriv), GFP_KERNEL);
-	if (!ctrlpriv)
-		return -ENOMEM;
+        ctrlpriv = devm_kzalloc(&pdev->dev, sizeof(*ctrlpriv), GFP_KERNEL);
+        if (!ctrlpriv)
+                return -ENOMEM;
 
-	dev = &pdev->dev;
-	dev_set_drvdata(dev, ctrlpriv);
-	nprop = pdev->dev.of_node;
+        dev = &pdev->dev;
+        dev_set_drvdata(dev, ctrlpriv);
+        nprop = pdev->dev.of_node;
 
-	imx_soc_match = soc_device_match(caam_imx_soc_table);
-	caam_imx = (bool)imx_soc_match;
+        imx_soc_match = soc_device_match(caam_imx_soc_table);
+        caam_imx = (bool)imx_soc_match;
 
-#ifdef CONFIG_PM_SLEEP
-	ctrlpriv->caam_off_during_pm = caam_imx && caam_off_during_pm();
-#endif
+        if (imx_soc_match) {
+                if (!imx_soc_match->data) {
+                        dev_err(dev, "No clock data provided for i.MX SoC");
+                        return -EINVAL;
+                }
 
-	if (imx_soc_match) {
-		np = of_find_compatible_node(NULL, NULL, "fsl,imx-scu");
-		ctrlpriv->scu_en = !!np;
-		of_node_put(np);
+                ret = init_clocks(dev, imx_soc_match->data);
+                if (ret)
+                        return ret;
+        }
 
-		reg_access = !ctrlpriv->scu_en;
 
-		/*
-		 * CAAM clocks cannot be controlled from kernel.
-		 * They are automatically turned on by SCU f/w.
-		 */
-		if (!reg_access)
-			if (!reg_access)
-			goto iomap_ctrl;
+        /* Get configuration properties from device tree */
+        /* First, get register page */
+        ctrl = devm_of_iomap(dev, nprop, 0, NULL);
+        ret = PTR_ERR_OR_ZERO(ctrl);
+        if (ret) {
+                dev_err(dev, "caam: of_iomap() failed\n");
+                return ret;
+        }
 
-		/*
-		 * Until Layerscape and i.MX OP-TEE get in sync,
-		 * only i.MX OP-TEE use cases disallow access to
-		 * caam page 0 (controller) registers.
-		 */
-		np = of_find_compatible_node(NULL, NULL, "linaro,optee-tz");
-		ctrlpriv->optee_en = !!np;
-		of_node_put(np);
-
-		reg_access = reg_access && !ctrlpriv->optee_en;
-
-		if (!imx_soc_match->data) {
-			dev_err(dev, "No clock data provided for i.MX SoC");
-			return -EINVAL;
-		}
-
-		ret = init_clocks(dev, imx_soc_match->data);
-		if (ret)
-			return ret;
-	}
-
-iomap_ctrl:
-	/* Get configuration properties from device tree */
-	/* First, get register page */
-	ctrl = devm_of_iomap(dev, nprop, 0, NULL);
-	ret = PTR_ERR_OR_ZERO(ctrl);
-	if (ret) {
-		dev_err(dev, "caam: of_iomap() failed\n");
-		return ret;
-	}
-
-	ring = 0;
-	for_each_available_child_of_node(nprop, np)
-		if (of_device_is_compatible(np, "fsl,sec-v4.0-job-ring") ||
-		    of_device_is_compatible(np, "fsl,sec4.0-job-ring")) {
-			u32 reg;
-
-			if (of_property_read_u32_index(np, "reg", 0, &reg)) {
-				dev_err(dev, "%s read reg property error\n",
-					np->full_name);
-				continue;
-			}
-
-			ctrlpriv->jr[ring] = (struct caam_job_ring __iomem __force *)
-					     ((__force uint8_t *)ctrl + reg);
-
-			ctrlpriv->total_jobrs++;
-			ring++;
-		}
-
-	/*
-	 * Wherever possible, instead of accessing registers from the global page,
-	 * use the alias registers in the first (cf. DT nodes order)
-	 * job ring's page.
-	 */
-	perfmon = ring ? (struct caam_perfmon *)&ctrlpriv->jr[0]->perfmon :
-			 (struct caam_perfmon *)&ctrl->perfmon;
-
-	caam_little_end = !(bool)(rd_reg32(&perfmon->status) &
-				  (CSTA_PLEND | CSTA_ALT_PLEND));
-	comp_params = rd_reg32(&perfmon->comp_parms_ms);
-	if (reg_access && comp_params & CTPR_MS_PS &&
-	    rd_reg32(&ctrl->mcr) & MCFGR_LONG_PTR)
-		caam_ptr_sz = sizeof(u64);
-	else
-		caam_ptr_sz = sizeof(u32);
-	caam_dpaa2 = !!(comp_params & CTPR_MS_DPAA2);
-	ctrlpriv->qi_present = !!(comp_params & CTPR_MS_QI_MASK);
+        caam_little_end = !(bool)(rd_reg32(&ctrl->perfmon.status) &
+                                  (CSTA_PLEND | CSTA_ALT_PLEND));
+        comp_params = rd_reg32(&ctrl->perfmon.comp_parms_ms);
+        if (comp_params & CTPR_MS_PS && rd_reg32(&ctrl->mcr) & MCFGR_LONG_PTR)
+                caam_ptr_sz = sizeof(u64);
+        else
+                caam_ptr_sz = sizeof(u32);
+        caam_dpaa2 = !!(comp_params & CTPR_MS_DPAA2);
+        ctrlpriv->qi_present = !!(comp_params & CTPR_MS_QI_MASK);
 
 #ifdef CONFIG_CAAM_QI
-	/* If (DPAA 1.x) QI present, check whether dependencies are available */
-	if (ctrlpriv->qi_present && !caam_dpaa2) {
-		ret = qman_is_probed();
-		if (!ret) {
-			return -EPROBE_DEFER;
-		} else if (ret < 0) {
-			dev_err(dev, "failing probe due to qman probe error\n");
-			return -ENODEV;
-		}
+        /* If (DPAA 1.x) QI present, check whether dependencies are available */
+        if (ctrlpriv->qi_present && !caam_dpaa2) {
+                ret = qman_is_probed();
+                if (!ret) {
+                        return -EPROBE_DEFER;
+                } else if (ret < 0) {
+                        dev_err(dev, "failing probe due to qman probe error\n");
+                        return -ENODEV;
+                }
 
-		ret = qman_portals_probed();
-		if (!ret) {
-			return -EPROBE_DEFER;
-		} else if (ret < 0) {
-			dev_err(dev, "failing probe due to qman portals probe error\n");
-			return -ENODEV;
-		}
-	}
+                ret = qman_portals_probed();
+                if (!ret) {
+                        return -EPROBE_DEFER;
+                } else if (ret < 0) {
+                        dev_err(dev, "failing probe due to qman portals probe error\n");
+                        return -ENODEV;
+                }
+        }
 #endif
 
-	/* Allocating the BLOCK_OFFSET based on the supported page size on
-	 * the platform
-	 */
-	pg_size = (comp_params & CTPR_MS_PG_SZ_MASK) >> CTPR_MS_PG_SZ_SHIFT;
-	if (pg_size == 0)
-		BLOCK_OFFSET = PG_SIZE_4K;
-	else
-		BLOCK_OFFSET = PG_SIZE_64K;
+        /* Allocating the BLOCK_OFFSET based on the supported page size on
+         * the platform
+         */
+        pg_size = (comp_params & CTPR_MS_PG_SZ_MASK) >> CTPR_MS_PG_SZ_SHIFT;
+        if (pg_size == 0)
+                BLOCK_OFFSET = PG_SIZE_4K;
+        else
+                BLOCK_OFFSET = PG_SIZE_64K;
 
-	ctrlpriv->ctrl = (struct caam_ctrl __iomem __force *)ctrl;
-	ctrlpriv->assure = (struct caam_assurance __iomem __force *)
-			   ((__force uint8_t *)ctrl +
-			    BLOCK_OFFSET * ASSURE_BLOCK_NUMBER
-			   );
-	ctrlpriv->deco = (struct caam_deco __iomem __force *)
-			 ((__force uint8_t *)ctrl +
-			 BLOCK_OFFSET * DECO_BLOCK_NUMBER
-			 );
+        ctrlpriv->ctrl = (struct caam_ctrl __iomem __force *)ctrl;
+        ctrlpriv->assure = (struct caam_assurance __iomem __force *)
+                           ((__force uint8_t *)ctrl +
+                            BLOCK_OFFSET * ASSURE_BLOCK_NUMBER
+                           );
+        ctrlpriv->deco = (struct caam_deco __iomem __force *)
+                         ((__force uint8_t *)ctrl +
+                         BLOCK_OFFSET * DECO_BLOCK_NUMBER
+                         );
 
-	/* Only i.MX SoCs have sm */
-       if (!imx_soc_match)
-               goto mc_fw;
-
-       /* Get CAAM-SM node and of_iomap() and save */
-       np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-caam-sm");
-       if (!np)
-               return -ENODEV;
-
-       /* Get CAAM SM registers base address from device tree */
-       ret = of_address_to_resource(np, 0, &res_regs);
-       if (ret) {
-               dev_err(dev, "failed to retrieve registers base from device tree\n");
-               of_node_put(np);
-               return -ENODEV;
-       }
-
-       ctrlpriv->sm_phy = res_regs.start;
-       ctrlpriv->sm_base = devm_ioremap_resource(dev, &res_regs);
-       if (IS_ERR(ctrlpriv->sm_base)) {
-               of_node_put(np);
-               return PTR_ERR(ctrlpriv->sm_base);
-       }
-
-       if (!of_machine_is_compatible("fsl,imx8mn") &&
-	   !of_machine_is_compatible("fsl,imx8mp") &&
-           !of_machine_is_compatible("fsl,imx8mm") &&
-           !of_machine_is_compatible("fsl,imx8mq") &&
-           !of_machine_is_compatible("fsl,imx8qm") &&
-	   !of_machine_is_compatible("fsl,imx8qxp") &&
-           !of_machine_is_compatible("fsl,imx8dxl"))
-               ctrlpriv->sm_size = resource_size(&res_regs);
-       else
-               ctrlpriv->sm_size = PG_SIZE_64K;
-
-       ctrlpriv->sm_present = 1;
-       of_node_put(np);
-
-	np = of_find_compatible_node(NULL, NULL, "fsl,qoriq-mc");
-	ctrlpriv->mc_en = !!np;
-	of_node_put(np);
+        /* Get the IRQ of the controller (for security violations only) */
+        ctrlpriv->secvio_irq = irq_of_parse_and_map(nprop, 0);
+        np = of_find_compatible_node(NULL, NULL, "fsl,qoriq-mc");
+        ctrlpriv->mc_en = !!np;
+        of_node_put(np);
 
 #ifdef CONFIG_FSL_MC_BUS
-	if (ctrlpriv->mc_en) {
-		struct fsl_mc_version *mc_version;
+        if (ctrlpriv->mc_en) {
+                struct fsl_mc_version *mc_version;
 
-		mc_version = fsl_mc_get_version();
-		if (mc_version)
-			pr_support = check_version(mc_version, 10, 20, 0);
-		else
-			return -EPROBE_DEFER;
-	}
+                mc_version = fsl_mc_get_version();
+                if (mc_version)
+                        pr_support = check_version(mc_version, 10, 20, 0);
+                else
+                        return -EPROBE_DEFER;
+        }
 #endif
-mc_fw:
 
-	/*
-	 * Enable DECO watchdogs and, if this is a PHYS_ADDR_T_64BIT kernel,
-	 * long pointers in master configuration register.
-	 * In case of SoCs with Management Complex, MC f/w performs
-	 * the configuration.
-	 */
-	if (!ctrlpriv->mc_en)
-		clrsetbits_32(&ctrl->mcr, MCFGR_AWCACHE_MASK,
-			      MCFGR_AWCACHE_CACH | MCFGR_AWCACHE_BUFF |
-			      MCFGR_WDENABLE | MCFGR_LARGE_BURST);
+        /*
+         * Enable DECO watchdogs and, if this is a PHYS_ADDR_T_64BIT kernel,
+         * long pointers in master configuration register.
+         * In case of SoCs with Management Complex, MC f/w performs
+         * the configuration.
+         */
+        if (!ctrlpriv->mc_en)
+                clrsetbits_32(&ctrl->mcr, MCFGR_AWCACHE_MASK,
+                              MCFGR_AWCACHE_CACH | MCFGR_AWCACHE_BUFF |
+                              MCFGR_WDENABLE | MCFGR_LARGE_BURST);
 
-	handle_imx6_err005766(&ctrl->mcr);
+        handle_imx6_err005766(&ctrl->mcr);
 
-	/*
-	 *  Read the Compile Time parameters and SCFGR to determine
-	 * if virtualization is enabled for this platform
-	 */
-	scfgr = rd_reg32(&ctrl->scfgr);
+        /*
+         *  Read the Compile Time parameters and SCFGR to determine
+         * if virtualization is enabled for this platform
+         */
+        scfgr = rd_reg32(&ctrl->scfgr);
 
-	ctrlpriv->virt_en = 0;
-	if (comp_params & CTPR_MS_VIRT_EN_INCL) {
-		/* VIRT_EN_INCL = 1 & VIRT_EN_POR = 1 or
-		 * VIRT_EN_INCL = 1 & VIRT_EN_POR = 0 & SCFGR_VIRT_EN = 1
-		 */
-		if ((comp_params & CTPR_MS_VIRT_EN_POR) ||
-		    (!(comp_params & CTPR_MS_VIRT_EN_POR) &&
-		       (scfgr & SCFGR_VIRT_EN)))
-				ctrlpriv->virt_en = 1;
-	} else {
-		/* VIRT_EN_INCL = 0 && VIRT_EN_POR_VALUE = 1 */
-		if (comp_params & CTPR_MS_VIRT_EN_POR)
-				ctrlpriv->virt_en = 1;
-	}
+        ctrlpriv->virt_en = 0;
+        if (comp_params & CTPR_MS_VIRT_EN_INCL) {
+                /* VIRT_EN_INCL = 1 & VIRT_EN_POR = 1 or
+                 * VIRT_EN_INCL = 1 & VIRT_EN_POR = 0 & SCFGR_VIRT_EN = 1
+                 */
+                if ((comp_params & CTPR_MS_VIRT_EN_POR) ||
+                    (!(comp_params & CTPR_MS_VIRT_EN_POR) &&
+                       (scfgr & SCFGR_VIRT_EN)))
+                                ctrlpriv->virt_en = 1;
+        } else {
+                /* VIRT_EN_INCL = 0 && VIRT_EN_POR_VALUE = 1 */
+                if (comp_params & CTPR_MS_VIRT_EN_POR)
+                                ctrlpriv->virt_en = 1;
+        }
 
-	if (ctrlpriv->virt_en == 1)
-		clrsetbits_32(&ctrl->jrstart, 0, JRSTART_JR0_START |
-			      JRSTART_JR1_START | JRSTART_JR2_START |
-			      JRSTART_JR3_START);
+        if (ctrlpriv->virt_en == 1)
+                clrsetbits_32(&ctrl->jrstart, 0, JRSTART_JR0_START |
+                              JRSTART_JR1_START | JRSTART_JR2_START |
+                              JRSTART_JR3_START);
 
-set_dma_mask:
-	ret = dma_set_mask_and_coherent(dev, caam_get_dma_mask(dev));
-	if (ret) {
-		dev_err(dev, "dma_set_mask_and_coherent failed (%d)\n", ret);
-		return ret;
-	}
+        ret = dma_set_mask_and_coherent(dev, caam_get_dma_mask(dev));
+        if (ret) {
+                dev_err(dev, "dma_set_mask_and_coherent failed (%d)\n", ret);
+                return ret;
+        }
 
-	ctrlpriv->era = caam_get_era(perfmon);
-	ctrlpriv->domain = iommu_get_domain_for_dev(dev);
+        ctrlpriv->era = caam_get_era(ctrl);
+        ctrlpriv->domain = iommu_get_domain_for_dev(dev);
 
-	dfs_root = debugfs_create_dir(dev_name(dev), NULL);
-	if (IS_ENABLED(CONFIG_DEBUG_FS)) {
-		ret = devm_add_action_or_reset(dev, caam_remove_debugfs,
-					       dfs_root);
-		if (ret)
-			return ret;
-	}
-
-	caam_debugfs_init(ctrlpriv, dfs_root);
-
-	/* Check to see if (DPAA 1.x) QI present. If so, enable */
-	if (ctrlpriv->qi_present && !caam_dpaa2) {
-		ctrlpriv->qi = (struct caam_queue_if __iomem __force *)
-			       ((__force uint8_t *)ctrl +
-				 BLOCK_OFFSET * QI_BLOCK_NUMBER
-			       );
-		/* This is all that's required to physically enable QI */
-		wr_reg32(&ctrlpriv->qi->qi_control_lo, QICTL_DQEN);
-
-		/* If QMAN driver is present, init CAAM-QI backend */
-#ifdef CONFIG_CAAM_QI
-		ret = caam_qi_init(pdev);
-		if (ret)
-			dev_err(dev, "caam qi i/f init failed: %d\n", ret);
-#endif
-	}
-
-	/* If no QI and no rings specified, quit and go home */
-	if ((!ctrlpriv->qi_present) && (!ctrlpriv->total_jobrs)) {
-		dev_err(dev, "no queues configured, terminating\n");
-		return -ENOMEM;
-	}
-
-	caam_dma_pdev_info.parent = dev;
-	caam_dma_pdev_info.dma_mask = dma_get_mask(dev);
-	caam_dma_dev = platform_device_register_full(&caam_dma_pdev_info);
-	if (IS_ERR(caam_dma_dev)) {
-		dev_err(dev, "Unable to create and register caam-dma dev\n");
-		return PTR_ERR(caam_dma_dev);
-	} else {
-		set_dma_ops(&caam_dma_dev->dev, get_dma_ops(dev));
-		ret = devm_add_action_or_reset(dev, caam_dma_dev_unregister,
-					       caam_dma_dev);
-		if (ret)
-			return ret;
-	}
-
-	if (reg_access) {
-               ret = caam_ctrl_rng_init(dev);
-               if (ret)
+        dfs_root = debugfs_create_dir(dev_name(dev), NULL);
+        if (IS_ENABLED(CONFIG_DEBUG_FS)) {
+                ret = devm_add_action_or_reset(dev, caam_remove_debugfs,
+                                               dfs_root);
+                if (ret)
                         return ret;
-	}
+        }
 
-	caam_id = (u64)rd_reg32(&perfmon->caam_id_ms) << 32 |
-		  (u64)rd_reg32(&perfmon->caam_id_ls);
+        caam_debugfs_init(ctrlpriv, dfs_root);
 
-	/* Report "alive" for developer to see */
-	dev_info(dev, "device ID = 0x%016llx (Era %d)\n", caam_id,
-		 ctrlpriv->era);
-	dev_info(dev, "job rings = %d, qi = %d\n",
-		 ctrlpriv->total_jobrs, ctrlpriv->qi_present);
+        /* Check to see if (DPAA 1.x) QI present. If so, enable */
+        if (ctrlpriv->qi_present && !caam_dpaa2) {
+                ctrlpriv->qi = (struct caam_queue_if __iomem __force *)
+                               ((__force uint8_t *)ctrl +
+                                 BLOCK_OFFSET * QI_BLOCK_NUMBER
+                               );
+                /* This is all that's required to physically enable QI */
+                wr_reg32(&ctrlpriv->qi->qi_control_lo, QICTL_DQEN);
 
-	ret = devm_of_platform_populate(dev);
-	if (ret)
-		dev_err(dev, "JR platform devices creation error\n");
+                /* If QMAN driver is present, init CAAM-QI backend */
+#ifdef CONFIG_CAAM_QI
+                ret = caam_qi_init(pdev);
+                if (ret)
+                        dev_err(dev, "caam qi i/f init failed: %d\n", ret);
+#endif
+        }
 
-	return ret;
+        ring = 0;
+        for_each_available_child_of_node(nprop, np)
+                if (of_device_is_compatible(np, "fsl,sec-v4.0-job-ring") ||
+                    of_device_is_compatible(np, "fsl,sec4.0-job-ring")) {
+                        ctrlpriv->jr[ring] = (struct caam_job_ring __iomem __force *)
+                                             ((__force uint8_t *)ctrl +
+                                             (ring + JR_BLOCK_NUMBER) *
+                                              BLOCK_OFFSET
+                                             );
+                        ctrlpriv->total_jobrs++;
+                        ring++;
+                }
+
+        /* If no QI and no rings specified, quit and go home */
+        if ((!ctrlpriv->qi_present) && (!ctrlpriv->total_jobrs)) {
+                dev_err(dev, "no queues configured, terminating\n");
+                return -ENOMEM;
+        }
+
+        if (ctrlpriv->era < 10)
+                rng_vid = (rd_reg32(&ctrl->perfmon.cha_id_ls) &
+                           CHA_ID_LS_RNG_MASK) >> CHA_ID_LS_RNG_SHIFT;
+        else
+                rng_vid = (rd_reg32(&ctrl->vreg.rng) & CHA_VER_VID_MASK) >>
+                           CHA_VER_VID_SHIFT;
+
+        /*
+         * If SEC has RNG version >= 4 and RNG state handle has not been
+         * already instantiated, do RNG instantiation
+         * In case of SoCs with Management Complex, RNG is managed by MC f/w.
+         */
+        if (!(ctrlpriv->mc_en && pr_support) && rng_vid >= 4) {
+                ctrlpriv->rng4_sh_init =
+                        rd_reg32(&ctrl->r4tst[0].rdsta);
+                /*
+                 * If the secure keys (TDKEK, JDKEK, TDSK), were already
+                 * generated, signal this to the function that is instantiating
+                 * the state handles. An error would occur if RNG4 attempts
+                 * to regenerate these keys before the next POR.
+                 */
+                gen_sk = ctrlpriv->rng4_sh_init & RDSTA_SKVN ? 0 : 1;
+                ctrlpriv->rng4_sh_init &= RDSTA_MASK;
+                do {
+                        int inst_handles =
+                                rd_reg32(&ctrl->r4tst[0].rdsta) &
+                                                                RDSTA_MASK;
+                        /*
+                         * If either SH were instantiated by somebody else
+                         * (e.g. u-boot) then it is assumed that the entropy
+                         * parameters are properly set and thus the function
+                         * setting these (kick_trng(...)) is skipped.
+                         * Also, if a handle was instantiated, do not change
+                         * the TRNG parameters.
+                         */
+                        if (!(ctrlpriv->rng4_sh_init || inst_handles)) {
+                                dev_info(dev,
+                                         "Entropy delay = %u\n",
+                                         ent_delay);
+                                kick_trng(pdev, ent_delay);
+                                ent_delay += 400;
+                        }
+                        /*
+                         * if instantiate_rng(...) fails, the loop will rerun
+                         * and the kick_trng(...) function will modify the
+                         * upper and lower limits of the entropy sampling
+                         * interval, leading to a successful initialization of
+                         * the RNG.
+                         */
+                        ret = instantiate_rng(dev, inst_handles,
+                                              gen_sk);
+                        if (ret == -EAGAIN)
+                                /*
+                                 * if here, the loop will rerun,
+                                 * so don't hog the CPU
+                                 */
+                                cpu_relax();
+                } while ((ret == -EAGAIN) && (ent_delay < RTSDCTL_ENT_DLY_MAX));
+                if (ret) {
+                        dev_err(dev, "failed to instantiate RNG");
+                        return ret;
+                }
+                /*
+                 * Set handles initialized by this module as the complement of
+                 * the already initialized ones
+                 */
+                ctrlpriv->rng4_sh_init = ~ctrlpriv->rng4_sh_init & RDSTA_MASK;
+
+                /* Enable RDB bit so that RNG works faster */
+                clrsetbits_32(&ctrl->scfgr, 0, SCFGR_RDBENABLE);
+        }
+
+        /* NOTE: RTIC detection ought to go here, around Si time */
+
+        caam_id = (u64)rd_reg32(&ctrl->perfmon.caam_id_ms) << 32 |
+                  (u64)rd_reg32(&ctrl->perfmon.caam_id_ls);
+
+        /* Report "alive" for developer to see */
+        dev_info(dev, "device ID = 0x%016llx (Era %d)\n", caam_id,
+                 ctrlpriv->era);
+        dev_info(dev, "job rings = %d, qi = %d\n",
+                 ctrlpriv->total_jobrs, ctrlpriv->qi_present);
+
+        ret = devm_of_platform_populate(dev);
+        if (ret)
+                dev_err(dev, "JR platform devices creation error\n");
+
+        return ret;
 }
 
 static struct platform_driver caam_driver = {
