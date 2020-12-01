@@ -1030,6 +1030,9 @@ struct mvpp2_tai;
 #define MSS_THRESHOLD_START	1024
 #define MSS_FC_MAX_TIMEOUT	5000
 
+#define MVPP2_PRS_TCAM_SRAM_SIZE        256
+#define MVPP2_N_FLOWS   52
+
 /* Definitions */
 
 struct mvpp2_buff_hdr {
@@ -1111,6 +1114,8 @@ struct mvpp2 {
 
 	/* Debugfs root entry */
 	struct dentry *dbgfs_dir;
+	struct mvpp2_dbgfs_prs_entry *dbgfs_prs_entry[MVPP2_PRS_TCAM_SRAM_SIZE];
+	struct mvpp2_dbgfs_flow_entry *dbgfs_flow_entry[MVPP2_N_FLOWS];
 
 	/* CM3 SRAM pool */
 	struct gen_pool *sram_pool;
@@ -1125,6 +1130,21 @@ struct mvpp2 {
 
 	/* page_pool allocator */
 	struct page_pool *page_pool[MVPP2_PORT_MAX_RXQ];
+};
+
+struct mvpp2_dbgfs_prs_entry {
+	int tid;
+	struct mvpp2 *priv;
+};
+
+struct mvpp2_dbgfs_flow_entry {
+	int flow;
+	struct mvpp2 *priv;
+};
+
+struct mvpp2_dbgfs_port_flow_entry {
+	struct mvpp2_port *port;
+	struct mvpp2_dbgfs_flow_entry *dbg_fe;
 };
 
 struct mvpp2_pcpu_stats {
@@ -1280,6 +1300,8 @@ struct mvpp2_port {
 	bool rx_hwtstamp;
 	enum hwtstamp_tx_types tx_hwtstamp_type;
 	struct mvpp2_hwtstamp_queue tx_hwtstamp_queue[2];
+
+	struct mvpp2_dbgfs_port_flow_entry *dbgfs_port_flow_entry;
 };
 
 /* The mvpp2_tx_desc and mvpp2_rx_desc structures describe the
