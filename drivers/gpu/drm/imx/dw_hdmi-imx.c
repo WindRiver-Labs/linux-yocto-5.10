@@ -215,8 +215,9 @@ static bool imx8mp_hdmi_check_clk_rate(int rate_khz)
 }
 
 static enum drm_mode_status
-imx8mp_hdmi_mode_valid(struct drm_connector *con,
-		       const struct drm_display_mode *mode)
+imx8mp_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
+                                           const struct drm_display_info *info,
+                                           const struct drm_display_mode *mode)
 {
 	if (mode->clock < 13500)
 		return MODE_CLOCK_LOW;
@@ -257,7 +258,8 @@ static struct dw_hdmi_plat_data imx6dl_hdmi_drv_data = {
 };
 
 static int imx8mp_hdmi_phy_init(struct dw_hdmi *dw_hdmi, void *data,
-			     struct drm_display_mode *mode)
+			     const struct drm_display_info *display,
+			     const struct drm_display_mode *mode)
 {
 	struct imx_hdmi *hdmi = (struct imx_hdmi *)data;
 	int val;
@@ -302,9 +304,11 @@ static void imx8mp_hdmi_phy_disable(struct dw_hdmi *dw_hdmi, void *data)
 	regmap_read(hdmi->regmap, 0x200, &val);
 	/* Disable CEC */
 	val &= ~0x2;
-	/* Power down HDMI PHY */
-	val |= 0x8;
-    regmap_write(hdmi->regmap, 0x200, val);
+	/* Power down HDMI PHY
+	 * TODO move PHY power off to hdmi phy driver
+	 * val |= 0x8;
+	 * regmap_write(hdmi->regmap, 0x200, val);
+	*/
 }
 
 static int imx8mp_hdmimix_setup(struct imx_hdmi *hdmi)
