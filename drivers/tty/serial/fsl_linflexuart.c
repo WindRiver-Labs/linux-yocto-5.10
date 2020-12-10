@@ -1722,6 +1722,10 @@ static int __init linflex_serial_init(void)
 
 	prd_info("serial: Freescale linflex driver\n");
 
+#ifdef CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE
+	spin_lock_init(&init_lock);
+#endif
+
 	ret = uart_register_driver(&linflex_reg);
 	if (ret)
 		return ret;
@@ -1729,10 +1733,6 @@ static int __init linflex_serial_init(void)
 	ret = platform_driver_register(&linflex_driver);
 	if (ret)
 		uart_unregister_driver(&linflex_reg);
-
-#ifdef CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE
-	spin_lock_init(&init_lock);
-#endif
 
 	return ret;
 }
