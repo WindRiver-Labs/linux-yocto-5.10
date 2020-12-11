@@ -17,6 +17,7 @@ Contents:
    hamradio/index
    wan/index
    wifi/index
+   ti/am65_nuss_cpsw_switchdev
 
 .. only::  subproject and html
 
