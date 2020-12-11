@@ -2850,6 +2850,9 @@ static int cgx_print_stats(struct seq_file *s, int lmac_id)
 		return -ENODEV;
 
 	mac_ops = cgx_get_mac_ops(cgxd);
+	/* There can be no CGX devices at all */
+	if (!mac_ops)
+		return 0;
 
 	/* Link status */
 	seq_puts(s, "\n=======Link Status======\n\n");
@@ -2973,6 +2976,9 @@ static void rvu_dbg_cgx_init(struct rvu *rvu)
 		return;
 
 	mac_ops = cgx_get_mac_ops(rvu_cgx_pdata(rvu_def_cgx_id, rvu));
+	/* There can be no CGX devices at all */
+	if (!mac_ops)
+		return;
 	rvu->rvu_dbg.cgx_root = debugfs_create_dir(mac_ops->name,
 						   rvu->rvu_dbg.root);
 
@@ -3379,6 +3385,9 @@ void rvu_dbg_init(struct rvu *rvu)
 	if (!pfile)
 		goto create_failed;
 
+	if (!cgx_get_cgxcnt_max())
+		goto create;
+
 	if (is_rvu_otx2(rvu))
 		pfile = debugfs_create_file("rvu_pf_cgx_map", 0444, rvu->rvu_dbg.root,
 					    rvu, &rvu_dbg_rvu_pf_cgx_map_fops);
@@ -3388,6 +3397,7 @@ void rvu_dbg_init(struct rvu *rvu)
 	if (!pfile)
 		goto create_failed;
 
+create:
 	rvu_dbg_npa_init(rvu);
 	rvu_dbg_nix_init(rvu, BLKADDR_NIX0);
 	rvu_dbg_nix_init(rvu, BLKADDR_NIX1);
