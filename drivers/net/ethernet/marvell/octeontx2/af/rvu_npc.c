@@ -1034,7 +1034,7 @@ void rvu_npc_free_mcam_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 		NPC_AF_INTFX_LDATAX_FLAGSX_CFG(intf, ld, flags), cfg)
 
 static void npc_program_mkex_rx(struct rvu *rvu, int blkaddr,
-				struct npc_mcam_kex *mkex, u8 intf)
+				const struct npc_mcam_kex *mkex, u8 intf)
 {
 	int lid, lt, ld, fl;
 
@@ -1063,7 +1063,7 @@ static void npc_program_mkex_rx(struct rvu *rvu, int blkaddr,
 }
 
 static void npc_program_mkex_tx(struct rvu *rvu, int blkaddr,
-				struct npc_mcam_kex *mkex, u8 intf)
+				const struct npc_mcam_kex *mkex, u8 intf)
 {
 	int lid, lt, ld, fl;
 
@@ -1092,7 +1092,7 @@ static void npc_program_mkex_tx(struct rvu *rvu, int blkaddr,
 }
 
 static void npc_program_mkex_profile(struct rvu *rvu, int blkaddr,
-				     struct npc_mcam_kex *mkex)
+				     const struct npc_mcam_kex *mkex)
 {
 	struct rvu_hwinfo *hw = rvu->hw;
 	u8 intf;
@@ -1134,7 +1134,7 @@ static int npc_fwdb_prfl_img_map(struct rvu *rvu, void __iomem **prfl_img_addr,
 #define MKEX_END_SIGN  0xdeadbeef
 
 static void npc_load_mkex_profile(struct rvu *rvu, int blkaddr,
-				  char *mkex_profile)
+				  const char *mkex_profile)
 {
 	struct device *dev = &rvu->pdev->dev;
 	struct npc_mcam_kex *mcam_kex;
@@ -1178,7 +1178,7 @@ program_mkex:
 }
 
 static void npc_config_kpuaction(struct rvu *rvu, int blkaddr,
-				 struct npc_kpu_profile_action *kpuaction,
+				 const struct npc_kpu_profile_action *kpuaction,
 				 int kpu, int entry, bool pkind)
 {
 	struct npc_kpu_action0 action0 = {0};
@@ -1220,7 +1220,7 @@ static void npc_config_kpuaction(struct rvu *rvu, int blkaddr,
 }
 
 static void npc_config_kpucam(struct rvu *rvu, int blkaddr,
-			      struct npc_kpu_profile_cam *kpucam,
+			      const struct npc_kpu_profile_cam *kpucam,
 			      int kpu, int entry)
 {
 	struct npc_kpu_cam cam0 = {0};
@@ -1248,7 +1248,7 @@ static inline u64 enable_mask(int count)
 }
 
 static void npc_program_kpu_profile(struct rvu *rvu, int blkaddr, int kpu,
-				    struct npc_kpu_profile *profile)
+				    const struct npc_kpu_profile *profile)
 {
 	int entry, num_entries, max_entries;
 	u64 entry_mask;
