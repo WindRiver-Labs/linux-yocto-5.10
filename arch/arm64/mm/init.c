@@ -60,6 +60,7 @@ EXPORT_SYMBOL(memstart_addr);
  * otherwise it is empty.
  */
 phys_addr_t arm64_dma_phys_limit __ro_after_init;
+phys_addr_t arm64_dma32_phys_limit __ro_after_init;
 
 #ifdef CONFIG_KEXEC_CORE
 /*
