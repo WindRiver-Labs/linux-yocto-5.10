@@ -18,6 +18,7 @@
 #include <linux/timecounter.h>
 
 #include <mbox.h>
+#include <npc.h>
 #include "otx2_reg.h"
 #include "otx2_txrx.h"
 #include <rvu_trace.h>
