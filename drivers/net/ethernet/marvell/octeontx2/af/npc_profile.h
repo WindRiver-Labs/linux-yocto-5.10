@@ -151,6 +151,20 @@
 			(((bytesm1) << 16) | ((hdr_ofs) << 8) | ((ena) << 7) | \
 			 ((flags_ena) << 6) | ((key_ofs) & 0x3F))
 
+/* Rx parse key extract nibble enable */
+#define NPC_PARSE_NIBBLE_INTF_RX	(NPC_PARSE_NIBBLE_CHAN | \
+					 NPC_PARSE_NIBBLE_LA_LTYPE | \
+					 NPC_PARSE_NIBBLE_LB_LTYPE | \
+					 NPC_PARSE_NIBBLE_LC_LTYPE | \
+					 NPC_PARSE_NIBBLE_LD_LTYPE | \
+					 NPC_PARSE_NIBBLE_LE_LTYPE)
+/* Tx parse key extract nibble enable */
+#define NPC_PARSE_NIBBLE_INTF_TX	(NPC_PARSE_NIBBLE_LA_LTYPE | \
+					 NPC_PARSE_NIBBLE_LB_LTYPE | \
+					 NPC_PARSE_NIBBLE_LC_LTYPE | \
+					 NPC_PARSE_NIBBLE_LD_LTYPE | \
+					 NPC_PARSE_NIBBLE_LE_LTYPE)
+
 enum npc_kpu_parser_state {
 	NPC_S_NA = 0,
 	NPC_S_KPU1_ETHER,
@@ -14292,15 +14306,19 @@ static struct npc_mcam_kex npc_mkex_default = {
 	.name = "default",
 	.kpu_version = NPC_KPU_PROFILE_VER,
 	.keyx_cfg = {
-		/* nibble: LA..LE (ltype only) + Channel */
-		[NIX_INTF_RX] = ((u64)NPC_MCAM_KEY_X2 << 32) | 0x49247,
-		[NIX_INTF_TX] = ((u64)NPC_MCAM_KEY_X2 << 32) | ((1ULL << 19) - 1),
+		/* nibble: LA..LE (ltype only) + channel */
+		[NIX_INTF_RX] = ((u64)NPC_MCAM_KEY_X2 << 32) | NPC_PARSE_NIBBLE_INTF_RX,
+		/* nibble: LA..LE (ltype only) */
+		[NIX_INTF_TX] = ((u64)NPC_MCAM_KEY_X2 << 32) | NPC_PARSE_NIBBLE_INTF_TX,
 	},
 	.intf_lid_lt_ld = {
 	/* Default RX MCAM KEX profile */
 	[NIX_INTF_RX] = {
 		[NPC_LID_LA] = {
-			/* Layer A: Ethernet: */
+			/* Layer A: NIX_INST_HDR_S + Ethernet */
+			/* NIX appends 8 bytes of NIX_INST_HDR_S at the
+			 * start of each TX packet supplied to NPC.
+			 */
 			[NPC_LT_LA_ETHER] = {
 				/* DMAC: 6 bytes, KW1[47:0] */
 				KEX_LD_CFG(0x05, 0x0, 0x1, 0x0, NPC_KEXOF_DMAC),
@@ -14343,17 +14361,13 @@ static struct npc_mcam_kex npc_mkex_default = {
 		[NPC_LID_LD] = {
 			/* Layer D:UDP */
 			[NPC_LT_LD_UDP] = {
-				/* SPORT: 2 bytes, KW3[15:0] */
-				KEX_LD_CFG(0x1, 0x0, 0x1, 0x0, 0x18),
-				/* DPORT: 2 bytes, KW3[31:16] */
-				KEX_LD_CFG(0x1, 0x2, 0x1, 0x0, 0x1a),
+				/* SPORT+DPORT: 4 bytes, KW3[31:0] */
+				KEX_LD_CFG(0x3, 0x0, 0x1, 0x0, 0x18),
 			},
 			/* Layer D:TCP */
 			[NPC_LT_LD_TCP] = {
-				/* SPORT: 2 bytes, KW3[15:0] */
-				KEX_LD_CFG(0x1, 0x0, 0x1, 0x0, 0x18),
-				/* DPORT: 2 bytes, KW3[31:16] */
-				KEX_LD_CFG(0x1, 0x2, 0x1, 0x0, 0x1a),
+				/* SPORT+DPORT: 4 bytes, KW3[31:0] */
+				KEX_LD_CFG(0x3, 0x0, 0x1, 0x0, 0x18),
 			},
 		},
 	},
