@@ -121,39 +121,7 @@ struct nix_mce_list {
 	int			max;
 };
 
-/* list of known and supported fields in packet header and
- * fields present in key structure.
- */
-enum key_fields {
-	NPC_CHAN = NPC_HEADER_FIELDS_MAX, /* Valid when Rx */
-	NPC_PF_FUNC, /* Valid when Tx */
-	NPC_ERRLEV,
-	NPC_ERRCODE,
-	NPC_LXMB,
-	NPC_LA,
-	NPC_LB,
-	NPC_LC,
-	NPC_LD,
-	NPC_LE,
-	NPC_LF,
-	NPC_LG,
-	NPC_LH,
-	/* ether type for untagged frame */
-	NPC_ETYPE_ETHER,
-	/* ether type for single tagged frame */
-	NPC_ETYPE_TAG1,
-	/* ether type for double tagged frame */
-	NPC_ETYPE_TAG2,
-	/* outer vlan tci for single tagged frame */
-	NPC_VLAN_TAG1,
-	/* outer vlan tci for double tagged frame */
-	NPC_VLAN_TAG2,
-	/* other header fields programmed to extract but not of our interest */
-	NPC_UNKNOWN,
-	NPC_KEY_FIELDS_MAX,
-};
-
-/* layer meta data to uniquely identify a packet header field */
+/* layer metadata to uniquely identify a packet header field */
 struct npc_layer_mdata {
 	u8 lid;
 	u8 ltype;
@@ -296,6 +264,8 @@ struct rvu_pfvf {
 	struct pci_dev	*pdev;
 	struct kobject	*limits_kobj;
 
+	struct rvu_npc_mcam_rule *def_ucast_rule;
+
 	bool	cgx_in_use; /* this PF/VF using CGX? */
 	int	cgx_users;  /* number of cgx users - used only by PFs */
 
@@ -303,7 +273,6 @@ struct rvu_pfvf {
 	int     intf_mode;
 	u8	nix_rx_intf; /* NIX0_RX/NIX1_RX interface to NPC */
 	u8	nix_tx_intf; /* NIX0_TX/NIX1_TX interface to NPC */
-	struct rvu_npc_mcam_rule *def_rule;
 };
 
 struct nix_txsch {
@@ -778,7 +747,6 @@ int rvu_ree_register_interrupts(struct rvu *rvu);
 void rvu_ree_unregister_interrupts(struct rvu *rvu);
 
 /* HW workarounds/fixes */
-#include "npc.h"
 void rvu_nix_txsch_lock(struct nix_hw *nix_hw);
 void rvu_nix_txsch_unlock(struct nix_hw *nix_hw);
 void rvu_nix_update_link_credits(struct rvu *rvu, int blkaddr,
