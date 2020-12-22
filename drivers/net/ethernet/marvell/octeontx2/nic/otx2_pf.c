@@ -1705,15 +1705,6 @@ int otx2_open(struct net_device *netdev)
 	if (pf->linfo.link_up && !(pf->pcifunc & RVU_PFVF_FUNC_MASK))
 		otx2_handle_link_event(pf);
 
-	if ((pf->flags & OTX2_FLAG_RX_VLAN_SUPPORT) ||
-	    (pf->flags & OTX2_FLAG_VF_VLAN_SUPPORT)) {
-		if (!(pf->flags & OTX2_FLAG_MCAM_ENTRIES_ALLOC)) {
-			err = otx2_alloc_mcam_entries(pf);
-			if (err)
-				goto err_free_cints;
-		}
-	}
-
 	if (pf->flags & OTX2_FLAG_RX_VLAN_SUPPORT)
 		otx2_enable_rxvlan(pf, true);
 
@@ -1877,12 +1868,18 @@ void otx2_do_set_rx_mode(struct work_struct *work)
 	struct otx2_nic *pf = container_of(work, struct otx2_nic, rx_mode_work);
 	struct net_device *netdev = pf->netdev;
 	struct nix_rx_mode *req;
+	bool promisc = false;
 
 	if (!(netdev->flags & IFF_UP))
 		return;
 
+	if ((netdev->flags & IFF_PROMISC) ||
+	    (netdev_uc_count(netdev) > OTX2_MAX_UNICAST_FLOWS)) {
+		promisc = true;
+	}
+
 	/* Write unicast address to mcam entries or del from mcam */
-	if (netdev->priv_flags & IFF_UNICAST_FLT)
+	if (!promisc && netdev->priv_flags & IFF_UNICAST_FLT)
 		__dev_uc_sync(netdev, otx2_add_macfilter, otx2_del_macfilter);
 
 	mutex_lock(&pf->mbox.lock);
@@ -1894,7 +1891,7 @@ void otx2_do_set_rx_mode(struct work_struct *work)
 
 	req->mode = NIX_RX_MODE_UCAST;
 
-	if (netdev->flags & IFF_PROMISC)
+	if (promisc)
 		req->mode |= NIX_RX_MODE_PROMISC;
 	else if (netdev->flags & (IFF_ALLMULTI | IFF_MULTICAST))
 		req->mode |= NIX_RX_MODE_ALLMULTI;
@@ -2089,7 +2086,7 @@ static int otx2_do_set_vf_mac(struct otx2_nic *pf, int vf, const u8 *mac)
 	}
 
 	ether_addr_copy(req->packet.dmac, mac);
-	u64_to_ether_addr(0xffffffffffffull, req->mask.dmac);
+	eth_broadcast_addr((u8 *)&req->mask.dmac);
 	req->features = BIT_ULL(NPC_DMAC);
 	req->channel = pf->hw.rx_chan_base;
 	req->intf = NIX_INTF_RX;
@@ -2131,7 +2128,7 @@ static int otx2_set_vf_mac(struct net_device *netdev, int vf, u8 *mac)
 }
 
 int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
-			u16 proto)
+			__be16 proto)
 {
 	struct otx2_flow_config *flow_cfg = pf->flow_cfg;
 	struct nix_vtag_config_rsp *vtag_rsp;
@@ -2207,7 +2204,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 	req->packet.vlan_tci = htons(vlan);
 	req->mask.vlan_tci = htons(VLAN_VID_MASK);
 	/* af fills the destination mac addr */
-	u64_to_ether_addr(0xffffffffffffull, req->mask.dmac);
+	eth_broadcast_addr((u8 *)&req->mask.dmac);
 	req->features = BIT_ULL(NPC_OUTER_VID) | BIT_ULL(NPC_DMAC);
 	req->channel = pf->hw.rx_chan_base;
 	req->intf = NIX_INTF_RX;
@@ -2252,7 +2249,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 		goto out;
 	}
 
-	u64_to_ether_addr(0x0ull, req->mask.dmac);
+	eth_zero_addr((u8 *)&req->mask.dmac);
 	idx = ((vf * OTX2_PER_VF_VLAN_FLOWS) + OTX2_VF_VLAN_TX_INDEX);
 	req->entry = flow_cfg->entry[flow_cfg->vf_vlan_offset + idx];
 	req->features = BIT_ULL(NPC_DMAC);
@@ -2261,7 +2258,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 	req->vf = vf + 1;
 	req->op = NIX_TX_ACTIONOP_UCAST_DEFAULT;
 	req->vtag0_def = vtag_rsp->vtag0_idx;
-	req->vtag0_op = 0x1;
+	req->vtag0_op = VTAG_INSERT;
 	req->set_cntr = 1;
 
 	err = otx2_sync_mbox_msg(&pf->mbox);
@@ -2319,13 +2316,6 @@ static int otx2_get_vf_config(struct net_device *netdev, int vf,
 	ivi->vlan = config->vlan;
 
 	return 0;
-}
-
-static netdev_features_t
-otx2_features_check(struct sk_buff *skb, struct net_device *dev,
-		    netdev_features_t features)
-{
-	return features;
 }
 
 static int otx2_xdp_xmit_tx(struct otx2_nic *pf, struct xdp_frame *xdpf,
@@ -2445,7 +2435,6 @@ static const struct net_device_ops otx2_netdev_ops = {
 	.ndo_set_vf_mac		= otx2_set_vf_mac,
 	.ndo_set_vf_vlan	= otx2_set_vf_vlan,
 	.ndo_get_vf_config	= otx2_get_vf_config,
-	.ndo_features_check     = otx2_features_check,
 	.ndo_bpf		= otx2_xdp,
 	.ndo_xdp_xmit           = otx2_xdp_xmit,
 };
@@ -2647,19 +2636,27 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			       NETIF_F_GSO_UDP_L4);
 	netdev->features |= netdev->hw_features;
 
+	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL;
+
+	err = otx2_mcam_flow_init(pf);
+	if (err)
+		goto err_ptp_destroy;
+
+	if (pf->flags & OTX2_FLAG_NTUPLE_SUPPORT)
+		netdev->hw_features |= NETIF_F_NTUPLE;
+
+	if (pf->flags & OTX2_FLAG_UCAST_FLTR_SUPPORT)
+		netdev->priv_flags |= IFF_UNICAST_FLT;
+
 	/* Support TSO on tag interface */
 	netdev->vlan_features |= netdev->features;
-
 	netdev->hw_features  |= NETIF_F_HW_VLAN_CTAG_TX |
-				NETIF_F_HW_VLAN_STAG_TX |
-				NETIF_F_HW_VLAN_CTAG_RX |
-				NETIF_F_HW_VLAN_STAG_RX;
-
+				NETIF_F_HW_VLAN_STAG_TX;
+	if (pf->flags & OTX2_FLAG_RX_VLAN_SUPPORT)
+		netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_RX |
+				       NETIF_F_HW_VLAN_STAG_RX;
 	netdev->features |= netdev->hw_features;
 
-	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL | NETIF_F_NTUPLE;
-
-	netdev->priv_flags |= IFF_UNICAST_FLT;
 	netdev->gso_max_segs = OTX2_MAX_GSO_SEGS;
 	netdev->watchdog_timeo = netdev->watchdog_timeo ?
 				 netdev->watchdog_timeo : OTX2_TX_TIMEOUT;
@@ -2673,14 +2670,10 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(dev, "Failed to register netdevice\n");
-		goto err_ptp_destroy;
+		goto err_del_mcam_entries;
 	}
 
 	err = otx2_wq_init(pf);
-	if (err)
-		goto err_unreg_netdev;
-
-	err = otx2_mcam_flow_init(pf);
 	if (err)
 		goto err_unreg_netdev;
 
@@ -2702,6 +2695,8 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 err_unreg_netdev:
 	unregister_netdev(netdev);
+err_del_mcam_entries:
+	otx2_mcam_flow_del(pf);
 err_ptp_destroy:
 	otx2_ptp_destroy(pf);
 err_detach_rsrc:
