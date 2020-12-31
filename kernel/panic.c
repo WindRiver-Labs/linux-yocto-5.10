@@ -653,25 +653,93 @@ EXPORT_SYMBOL(__warn_printk);
 
 /* Support resetting WARN*_ONCE state */
 
-static int clear_warn_once_set(void *data, u64 val)
+static u64 clear_warn_once;
+static bool warn_timer_active;
+
+static void do_clear_warn_once(void)
 {
 	generic_bug_clear_once();
 	memset(__start_once, 0, __end_once - __start_once);
+}
+
+static void timer_warn_once(struct timer_list *timer)
+{
+	do_clear_warn_once();
+	timer->expires = jiffies + clear_warn_once * HZ * 60;
+	add_timer(timer);
+}
+static DEFINE_TIMER(warn_reset_timer, timer_warn_once);
+
+static int warn_once_get(void *data, u64 *val)
+{
+	*val = clear_warn_once;
 	return 0;
 }
 
-DEFINE_DEBUGFS_ATTRIBUTE(clear_warn_once_fops, NULL, clear_warn_once_set,
-			 "%lld\n");
+static int warn_once_set(void *data, u64 val)
+{
+	clear_warn_once = val;
+
+	if (val > 1) {		/* set/reset new timer */
+		unsigned long expires = jiffies + val * HZ * 60;
+
+		if (warn_timer_active) {
+			mod_timer(&warn_reset_timer, expires);
+		} else {
+			warn_timer_active = 1;
+			warn_reset_timer.expires = expires;
+			add_timer(&warn_reset_timer);
+		}
+		return 0;
+	}
+
+	if (warn_timer_active) {
+		del_timer_sync(&warn_reset_timer);
+		warn_timer_active = 0;
+	}
+	clear_warn_once = 0;
+
+	if (val == 0)		/* cleared timer, we are done */
+		return 0;
+
+	/* Getting here means val == 1  --->  so clear existing data */
+	do_clear_warn_once();
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(clear_warn_once_fops, warn_once_get, warn_once_set,
+			 "%llu\n");
 
 static __init int register_warn_debugfs(void)
 {
 	/* Don't care about failure */
-	debugfs_create_file_unsafe("clear_warn_once", 0200, NULL, NULL,
-				   &clear_warn_once_fops);
+	debugfs_create_file_unsafe("clear_warn_once", 0600, NULL,
+				   &clear_warn_once, &clear_warn_once_fops);
+
+	/* if a bootarg was used, set the initial timer */
+	if (clear_warn_once)
+		warn_once_set(NULL, clear_warn_once);
+
 	return 0;
 }
 
 device_initcall(register_warn_debugfs);
+
+static int __init warn_once_setup(char *s)
+{
+	int r;
+
+	if (!s)
+		return -EINVAL;
+
+	r = kstrtoull(s, 0, &clear_warn_once);
+	if (r)
+		return r;
+
+	return 1;
+}
+__setup("clear_warn_once=", warn_once_setup);
+
 #endif
 
 #ifdef CONFIG_STACKPROTECTOR
