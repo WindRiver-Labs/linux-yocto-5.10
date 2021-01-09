@@ -1158,7 +1158,8 @@ void __init device_tree_init(void)
 	bool do_prune;
 	bool fill_mac;
 
-	if (fw_passed_dtb) {
+	if (fw_passed_dtb && (fw_passed_dtb != (ulong)&__dtb_octeon_68xx_begin) &&
+	    (fw_passed_dtb != (ulong)&__dtb_octeon_3xxx_begin)) {
 		fdt = (void *)fw_passed_dtb;
 		do_prune = false;
 		fill_mac = true;
