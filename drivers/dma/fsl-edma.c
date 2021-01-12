@@ -3,7 +3,7 @@
  * drivers/dma/fsl-edma.c
  *
  * Copyright 2013-2016 Freescale Semiconductor, Inc.
- * Copyright 2017-2020 NXP
+ * Copyright 2017-2021 NXP
  *
  * Driver for the Freescale eDMA engine with flexible channel multiplexing
  * capability for DMA request sources. The eDMA block can be found on some
@@ -47,7 +47,9 @@ static void fsl_edma3_disable_request(struct fsl_edma_chan *fsl_chan)
 	void __iomem *addr = fsl_chan->edma->membase;
 	u32 ch = fsl_chan->vchan.chan.chan_id;
 
-	while (edma_readl(fsl_chan->edma, addr + EDMA3_MP_HRS) & (1 << ch))
+	/* Make sure there is no hardware request in progress. */
+	while (edma_readl(fsl_chan->edma, addr + EDMA3_MP_HRS)
+		& EDMA3_MP_HRS_CH(ch))
 		cpu_relax();
 
 	edma_writel(fsl_chan->edma, 0, addr + EDMA3_CHn_CSR(ch));
