@@ -500,6 +500,39 @@ static inline void dpdma_set(void __iomem *base, u32 offset, u32 set)
  */
 
 /**
+ * xilinx_dpdma_sw_desc_next_32 - Set 32 bit address of a next sw descriptor
+ * @sw_desc: current software descriptor
+ * @next: next descriptor
+ *
+ * Update the current sw descriptor @sw_desc with 32 bit address of the next
+ * descriptor @next.
+ */
+static inline void
+xilinx_dpdma_sw_desc_next_32(struct xilinx_dpdma_sw_desc *sw_desc,
+			     struct xilinx_dpdma_sw_desc *next)
+{
+	sw_desc->hw.next_desc = next->dma_addr;
+}
+
+/**
+ * xilinx_dpdma_sw_desc_next_64 - Set 64 bit address of a next sw descriptor
+ * @sw_desc: current software descriptor
+ * @next: next descriptor
+ *
+ * Update the current sw descriptor @sw_desc with 64 bit address of the next
+ * descriptor @next.
+ */
+static inline void
+xilinx_dpdma_sw_desc_next_64(struct xilinx_dpdma_sw_desc *sw_desc,
+			     struct xilinx_dpdma_sw_desc *next)
+{
+	sw_desc->hw.next_desc = lower_32_bits(next->dma_addr);
+	sw_desc->hw.addr_ext |= upper_32_bits(next->dma_addr) &
+				XILINX_DPDMA_DESC_ADDR_EXT_NEXT_ADDR_MASK;
+}
+
+
+/**
  * xilinx_dpdma_sw_desc_set_dma_addrs - Set DMA addresses in the descriptor
  * @xdev: DPDMA device
  * @sw_desc: The software descriptor in which to set DMA addresses
@@ -733,6 +766,77 @@ xilinx_dpdma_chan_prep_interleaved_dma(struct xilinx_dpdma_chan *chan,
 	hw_desc->control |= XILINX_DPDMA_DESC_CONTROL_LAST_OF_FRAME;
 
 	list_add_tail(&sw_desc->node, &tx_desc->descriptors);
+
+	return tx_desc;
+}
+
+/**
+ * xilinx_dpdma_chan_prep_cyclic_dma - Prepare a cyclic dma
+ *					    descriptor
+ * @chan: DPDMA channel
+ * @buf_addr: buffer address
+ * @buf_len: buffer length
+ * @period_len: number of periods
+ *
+ * Prepare a tx descriptor including internal software/hardware descriptors
+ * for the given cyclic transaction.
+ *
+ * Return: A DPDMA TX descriptor on success, or NULL.
+ */
+static struct xilinx_dpdma_tx_desc *
+xilinx_dpdma_chan_prep_cyclic_dma(struct xilinx_dpdma_chan *chan,
+			      dma_addr_t buf_addr, size_t buf_len,
+			      size_t period_len)
+{
+	struct xilinx_dpdma_tx_desc *tx_desc;
+	struct xilinx_dpdma_sw_desc *sw_desc, *last = NULL;
+	unsigned int periods = buf_len / period_len;
+	unsigned int i;
+
+	tx_desc = xilinx_dpdma_chan_alloc_tx_desc(chan);
+	if (!tx_desc)
+		return NULL;
+
+	for (i = 0; i < periods; i++) {
+		struct xilinx_dpdma_hw_desc *hw_desc;
+
+		if (!IS_ALIGNED(buf_addr, XILINX_DPDMA_ALIGN_BYTES)) {
+			dev_err(chan->xdev->dev, "buffer should be aligned at %d B\n",
+				XILINX_DPDMA_ALIGN_BYTES);
+			return NULL;
+		}
+
+		sw_desc = xilinx_dpdma_chan_alloc_sw_desc(chan);
+		if (!sw_desc) {
+			xilinx_dpdma_chan_free_tx_desc(&tx_desc->vdesc);
+			return NULL;
+		}
+
+		xilinx_dpdma_sw_desc_set_dma_addrs(chan->xdev, sw_desc, last,
+						&buf_addr, 1);
+		hw_desc = &sw_desc->hw;
+		hw_desc->xfer_size = period_len;
+		hw_desc->hsize_stride =
+		FIELD_PREP(XILINX_DPDMA_DESC_HSIZE_STRIDE_HSIZE_MASK, period_len) |
+		FIELD_PREP(XILINX_DPDMA_DESC_HSIZE_STRIDE_STRIDE_MASK, period_len);
+
+		hw_desc->control |= XILINX_DPDMA_DESC_CONTROL_PREEMBLE;
+		hw_desc->control |= XILINX_DPDMA_DESC_CONTROL_COMPLETE_INTR;
+		hw_desc->control |= XILINX_DPDMA_DESC_CONTROL_IGNORE_DONE;
+
+		list_add_tail(&sw_desc->node, &tx_desc->descriptors);
+
+		buf_addr += period_len;
+		last = sw_desc;
+	}
+
+	sw_desc = list_first_entry(&tx_desc->descriptors,
+				   struct xilinx_dpdma_sw_desc, node);
+	if (chan->xdev->ext_addr)
+		xilinx_dpdma_sw_desc_next_64(last, sw_desc);
+	else
+		xilinx_dpdma_sw_desc_next_32(last, sw_desc);
+	last->hw.control |= XILINX_DPDMA_DESC_CONTROL_LAST_OF_FRAME;
 
 	return tx_desc;
 }
@@ -1206,6 +1310,31 @@ xilinx_dpdma_prep_interleaved_dma(struct dma_chan *dchan,
 	return &desc->vdesc.tx;
 }
 
+static struct dma_async_tx_descriptor *
+xilinx_dpdma_prep_cyclic_dma(struct dma_chan *dchan, dma_addr_t buf_addr,
+				  size_t buf_len, size_t period_len,
+				  enum dma_transfer_direction direction,
+				  unsigned long flags)
+{
+	struct xilinx_dpdma_chan *chan = to_xilinx_chan(dchan);
+	struct xilinx_dpdma_tx_desc *desc;
+
+	if (direction != DMA_MEM_TO_DEV)
+		return NULL;
+
+	if (buf_len % period_len)
+		return NULL;
+
+	desc = xilinx_dpdma_chan_prep_cyclic_dma(chan, buf_addr, buf_len,
+						 period_len);
+	if (!desc)
+		return NULL;
+
+	vchan_tx_prep(&chan->vchan, &desc->vdesc, flags | DMA_CTRL_ACK);
+
+	return &desc->vdesc.tx;
+}
+
 /**
  * xilinx_dpdma_alloc_chan_resources - Allocate resources for the channel
  * @dchan: DMA channel
@@ -1641,6 +1770,7 @@ static int xilinx_dpdma_probe(struct platform_device *pdev)
 	ddev->device_alloc_chan_resources = xilinx_dpdma_alloc_chan_resources;
 	ddev->device_free_chan_resources = xilinx_dpdma_free_chan_resources;
 	ddev->device_prep_interleaved_dma = xilinx_dpdma_prep_interleaved_dma;
+	ddev->device_prep_dma_cyclic = xilinx_dpdma_prep_cyclic_dma;
 	/* TODO: Can we achieve better granularity ? */
 	ddev->device_tx_status = dma_cookie_status;
 	ddev->device_issue_pending = xilinx_dpdma_issue_pending;

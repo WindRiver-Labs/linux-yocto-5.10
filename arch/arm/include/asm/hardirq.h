@@ -6,6 +6,8 @@
 #include <linux/threads.h>
 #include <asm/irq.h>
 
+#define NR_IPI	16
+
 typedef struct {
 	unsigned int __softirq_pending;
 } ____cacheline_aligned irq_cpustat_t;

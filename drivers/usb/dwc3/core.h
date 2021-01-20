@@ -167,6 +167,9 @@
 
 /* Bit fields */
 
+/* Global Status Register */
+#define DWC3_GSTS_CUR_MODE			(1 << 0)
+
 /* Global SoC Bus Configuration INCRx Register 0 */
 #define DWC3_GSBUSCFG0_INCR256BRSTENA	(1 << 7) /* INCR256 burst */
 #define DWC3_GSBUSCFG0_INCR128BRSTENA	(1 << 6) /* INCR128 burst */
@@ -198,6 +201,12 @@
 #define DWC3_DESCFETCHQ		6
 #define DWC3_EVENTQ		7
 #define DWC3_AUXEVENTQ		8
+
+/* Global SoC Bus Configuration Register */
+#define DWC3_GSBUSCFG0_DATRDREQINFO	(0xf << 28)
+#define DWC3_GSBUSCFG0_DESRDREQINFO	(0xf << 24)
+#define DWC3_GSBUSCFG0_DATWRREQINFO	(0xf << 20)
+#define DWC3_GSBUSCFG0_DESWRREQINFO	(0xf << 16)
 
 /* Global RX Threshold Configuration Register */
 #define DWC3_GRXTHRCFG_MAXRXBURSTSIZE(n) (((n) & 0x1f) << 19)
@@ -378,6 +387,11 @@
 /* Global Frame Length Adjustment Register */
 #define DWC3_GFLADJ_30MHZ_SDBND_SEL		BIT(7)
 #define DWC3_GFLADJ_30MHZ_MASK			0x3f
+#define DWC3_GFLADJ_REFCLK_FLADJ		(0x3fff << 8)
+
+/* Global User Control Register 1 */
+#define DWC3_GUCTL1_RESUME_QUIRK		(1 << 10)
+#define DWC3_GUCTL1_IPD_QUIRK			(1 << 9)
 
 /* Global User Control Register 2 */
 #define DWC3_GUCTL2_RST_ACTBITLATER		BIT(14)
@@ -461,6 +475,7 @@
 
 /* Device Status Register */
 #define DWC3_DSTS_DCNRD			BIT(29)
+#define DWC3_DSTS_SRE			BIT(28)
 
 /* This applies for core versions 1.87a and earlier */
 #define DWC3_DSTS_PWRUPREQ		BIT(24)
@@ -901,6 +916,7 @@ struct dwc3_request {
 
 	unsigned int		num_pending_sgs;
 	unsigned int		num_queued_sgs;
+	u8			first_trb_index;
 	unsigned int		remaining;
 
 	unsigned int		status;
@@ -956,7 +972,9 @@ struct dwc3_scratchpad_array {
  * @regs: base address for our registers
  * @regs_size: address space size
  * @fladj: frame length adjustment
+ * @refclk_fladj: boolean to update GFLADJ_REFCLK_FLADJ field also
  * @irq_gadget: peripheral controller's IRQ number
+ * @otg: pointer to the dwc3_otg structure
  * @otg_irq: IRQ number for OTG IRQs
  * @current_otg_role: current role of operation while using the OTG block
  * @desired_otg_role: desired role of operation while using the OTG block
@@ -1027,6 +1045,7 @@ struct dwc3_scratchpad_array {
  *			not needed for DWC_usb31 version 1.70a-ea06 and below
  * @usb3_lpm_capable: set if hadrware supports Link Power Management
  * @usb2_lpm_disable: set to disable usb2 lpm
+ * @remote_wakeup: set if host supports Remote Wakeup from Peripheral
  * @disable_scramble_quirk: set if we enable the disable scramble quirk
  * @u2exit_lfps_quirk: set if we enable u2exit lfps quirk
  * @u2ss_inp3_quirk: set if we enable P3 OK for U2/SS Inactive quirk
@@ -1047,11 +1066,16 @@ struct dwc3_scratchpad_array {
  *			provide a free-running PHY clock.
  * @dis_del_phy_power_chg_quirk: set if we disable delay phy power
  *			change quirk.
+ * @enable_guctl1_resume_quirk: Set if we enable quirk for fixing improper crc
+ *			generation after resume from suspend.
+ * @enable_guctl1_ipd_quirk: set if we enable quirk for reducing timing of inter
+ *			packet delay(ipd).
  * @dis_tx_ipgap_linecheck_quirk: set if we disable u2mac linestate
  *			check during HS transmit.
  * @parkmode_disable_ss_quirk: set if we need to disable all SuperSpeed
  *			instances in park mode.
  * @tx_de_emphasis_quirk: set if we enable Tx de-emphasis quirk
+ * @is_hibernated: true when dwc3 is hibernated; abort processing events
  * @tx_de_emphasis: Tx de-emphasis value
  *	0	- -6dB de-emphasis
  *	1	- -3.5dB de-emphasis
@@ -1061,6 +1085,12 @@ struct dwc3_scratchpad_array {
  * @dis_split_quirk: set to disable split boundary.
  * @imod_interval: set the interrupt moderation interval in 250ns
  *			increments or 0 to disable.
+ * @is_d3: set if the controller is in d3 state
+ * @saved_regs: registers to be saved/restored during hibernation/wakeup events
+ * @irq_wakeup: wakeup IRQ number, triggered when host asks to wakeup from
+ *              hibernation
+ * @force_hiber_wake: flag set when the gadget driver is forcefully triggering
+		a hibernation wakeup event
  */
 struct dwc3 {
 	struct work_struct	drd_work;
@@ -1094,6 +1124,8 @@ struct dwc3 {
 
 	struct reset_control	*reset;
 
+	struct dwc3_otg		*otg;
+
 	struct usb_phy		*usb2_phy;
 	struct usb_phy		*usb3_phy;
 
@@ -1118,6 +1150,7 @@ struct dwc3 {
 	enum usb_dr_mode	role_switch_default_mode;
 
 	u32			fladj;
+	bool			refclk_fladj;
 	u32			irq_gadget;
 	u32			otg_irq;
 	u32			current_otg_role;
@@ -1227,7 +1260,7 @@ struct dwc3 {
 	unsigned		dis_start_transfer_quirk:1;
 	unsigned		usb3_lpm_capable:1;
 	unsigned		usb2_lpm_disable:1;
-
+	unsigned                remote_wakeup:1;
 	unsigned		disable_scramble_quirk:1;
 	unsigned		u2exit_lfps_quirk:1;
 	unsigned		u2ss_inp3_quirk:1;
@@ -1244,17 +1277,25 @@ struct dwc3 {
 	unsigned		dis_rxdet_inp3_quirk:1;
 	unsigned		dis_u2_freeclk_exists_quirk:1;
 	unsigned		dis_del_phy_power_chg_quirk:1;
+	unsigned		enable_guctl1_resume_quirk:1;
+	unsigned		enable_guctl1_ipd_quirk:1;
 	unsigned		dis_tx_ipgap_linecheck_quirk:1;
 	unsigned		parkmode_disable_ss_quirk:1;
 
 	unsigned		tx_de_emphasis_quirk:1;
 	unsigned		tx_de_emphasis:2;
+	unsigned		is_hibernated:1;
 
 	unsigned		dis_metastability_quirk:1;
+	unsigned		mask_phy_rst:1;
 
 	unsigned		dis_split_quirk:1;
 
 	u16			imod_interval;
+	bool			is_d3;
+	u32			*saved_regs;
+	u32			irq_wakeup;
+	bool			force_hiber_wake;
 };
 
 #define INCRX_BURST_MODE 0
@@ -1444,12 +1485,35 @@ u32 dwc3_core_fifo_space(struct dwc3_ep *dep, u8 type);
 	 (!(_ip##_VERSIONTYPE_##_to) ||					\
 	  dwc->version_type <= _ip##_VERSIONTYPE_##_to))
 
+#if IS_ENABLED(CONFIG_USB_DWC3_OF_SIMPLE)
+int dwc3_enable_hw_coherency(struct device *dev);
+void dwc3_simple_wakeup_capable(struct device *dev, bool wakeup);
+void dwc3_set_simple_data(struct dwc3 *dwc);
+void dwc3_simple_check_quirks(struct dwc3 *dwc);
+int dwc3_set_usb_core_power(struct dwc3 *dwc, bool on);
+void dwc3_mask_phy_reset(struct device *dev, bool mask);
+#else
+static inline int dwc3_enable_hw_coherency(struct device *dev)
+{ return 1; }
+void dwc3_simple_wakeup_capable(struct device *dev, bool wakeup)
+{ ; }
+void dwc3_set_simple_data(struct dwc3 *dwc)
+{ ; }
+void dwc3_simple_check_quirks(struct dwc3 *dwc)
+{ ; }
+int dwc3_set_usb_core_power(struct dwc3 *dwc, bool on)
+{ ; }
+void dwc3_mask_phy_reset(struct device *dev, bool mask)
+{ ; }
+#endif
+
 bool dwc3_has_imod(struct dwc3 *dwc);
 
 int dwc3_event_buffers_setup(struct dwc3 *dwc);
 void dwc3_event_buffers_cleanup(struct dwc3 *dwc);
 
-#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)\
+	 || IS_ENABLED(CONFIG_USB_DWC3_OTG)
 int dwc3_host_init(struct dwc3 *dwc);
 void dwc3_host_exit(struct dwc3 *dwc);
 #else
@@ -1459,7 +1523,8 @@ static inline void dwc3_host_exit(struct dwc3 *dwc)
 { }
 #endif
 
-#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)\
+	 || IS_ENABLED(CONFIG_USB_DWC3_OTG)
 int dwc3_gadget_init(struct dwc3 *dwc);
 void dwc3_gadget_exit(struct dwc3 *dwc);
 int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode);
@@ -1469,6 +1534,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 		struct dwc3_gadget_ep_cmd_params *params);
 int dwc3_send_gadget_generic_command(struct dwc3 *dwc, unsigned int cmd,
 		u32 param);
+int dwc3_core_init(struct dwc3 *dwc);
 #else
 static inline int dwc3_gadget_init(struct dwc3 *dwc)
 { return 0; }
@@ -1490,21 +1556,25 @@ static inline int dwc3_send_gadget_generic_command(struct dwc3 *dwc,
 { return 0; }
 #endif
 
+#if IS_ENABLED(CONFIG_USB_DWC3_OTG) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+void dwc3_otg_init(struct dwc3 *dwc);
+void dwc3_otg_exit(struct dwc3 *dwc);
+#else
+static inline void dwc3_otg_init(struct dwc3 *dwc)
+{ }
+static inline void dwc3_otg_exit(struct dwc3 *dwc)
+{ }
+#endif
+
 #if IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_drd_init(struct dwc3 *dwc);
 void dwc3_drd_exit(struct dwc3 *dwc);
-void dwc3_otg_init(struct dwc3 *dwc);
-void dwc3_otg_exit(struct dwc3 *dwc);
 void dwc3_otg_update(struct dwc3 *dwc, bool ignore_idstatus);
 void dwc3_otg_host_init(struct dwc3 *dwc);
 #else
 static inline int dwc3_drd_init(struct dwc3 *dwc)
 { return 0; }
 static inline void dwc3_drd_exit(struct dwc3 *dwc)
-{ }
-static inline void dwc3_otg_init(struct dwc3 *dwc)
-{ }
-static inline void dwc3_otg_exit(struct dwc3 *dwc)
 { }
 static inline void dwc3_otg_update(struct dwc3 *dwc, bool ignore_idstatus)
 { }
