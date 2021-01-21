@@ -172,12 +172,17 @@ static int s32gen1_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	return 0;
 }
 
-static int s32gen1_rtc_set_time(struct device *dev, struct rtc_time *tm)
+static int s32gen1_rtc_set_time(struct device *dev, struct rtc_time *time)
 {
-	/* There is no corressponding register to save the time. So, for the moment, 
-	 *leave this callback empty as it is here to shun a
-	 * run-time warning from hwclock -w.
-	*/
+	struct rtc_s32gen1_priv *priv = dev_get_drvdata(dev);
+	u32 rtccnt = ioread32(priv->rtc_base + RTCCNT_OFFSET);
+
+	if (!time)
+		return -EINVAL;
+
+	priv->base.rollovers = priv->rollovers;
+	priv->base.cycles = rtccnt;
+	priv->base.sec = rtc_tm_to_time64(time);
 
 	return 0;
 }
