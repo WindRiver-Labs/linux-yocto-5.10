@@ -1,0 +1,174 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Vision-apps: device-tree overlay
+ *
+ * Copyright (C) 2019 Texas Instruments Incorporated - http://www.ti.com/
+ */
+
+#include <dt-bindings/soc/ti,sci_pm_domain.h>
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@101 {
+		target-path = "/";
+
+		__overlay__ {
+
+			dma_buf_phys {
+				compatible = "ti,dma_buf_phys";
+			};
+		};
+	};
+};
+
+&mcu_r5fss0_core1_dma_memory_region {
+	status = "disabled";
+};
+
+&mcu_r5fss0_core1_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss0_core0_dma_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss0_core0_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss0_core1_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss1_core0_dma_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss1_core0_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss1_core1_dma_memory_region {
+	status = "disabled";
+};
+
+&main_r5fss1_core1_memory_region {
+	status = "disabled";
+};
+
+&rtos_ipc_memory_region {
+	reg = <0x00 0xaa000000 0x00 0x02000000>;
+};
+
+&reserved_memory {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	vision_apps_main_r5fss0_core0_dma_memory_region: vision_apps-r5f-dma-memory@a1000000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xa1000000 0x00 0x00100000>;
+		no-map;
+	};
+	vision_apps_main_r5fss0_core0_memory_region: vision_apps-r5f-memory@a1100000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xa1100000 0x00 0x01f00000>;
+		no-map;
+	};
+	vision_apps_main_r5fss0_core1_memory_region: vision_apps-r5f-memory@a3100000 {
+	    compatible = "shared-dma-pool";
+	    reg = <0x00 0xa3100000 0x00 0x01f00000>;
+	    no-map;
+	};
+	vision_apps_main_r5fss1_core0_dma_memory_region: vision_apps-r5f-dma-memory@a5000000 {
+	    compatible = "shared-dma-pool";
+	    reg = <0x00 0xa5000000 0x00 0x100000>;
+	    no-map;
+	};
+	vision_apps_main_r5fss1_core0_memory_region: vision_apps-r5f-memory@a5100000 {
+	    compatible = "shared-dma-pool";
+	    reg = <0x00 0xa5100000 0x00 0x00700000>;
+	    no-map;
+	};
+	vision_apps_main_r5fss1_core1_dma_memory_region: vision_apps-r5f-dma-memory@a5800000 {
+	    compatible = "shared-dma-pool";
+	    reg = <0x00 0xa5800000 0x00 0x100000>;
+	    no-map;
+	};
+	vision_apps_main_r5fss1_core1_memory_region: vision_apps-r5f-memory@a5900000 {
+	    compatible = "shared-dma-pool";
+	    reg = <0x00 0xa5900000 0x00 0x00700000>;
+	    no-map;
+	};
+	vision_apps_memory_region: vision_apps-dma-memory@ac000000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xac000000 0x00 0x02000000>;
+		no-map;
+	};
+	vision_apps_shared_region: vision_apps_shared-memories {
+		compatible = "dma-heap-carveout";
+		reg = <0x00 0xae000000 0x00 0x20000000>;
+	};
+	vision_apps_core_heaps: vision_apps-core-heap-memory@ce000000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xce000000 0x00 0x2d000000>;
+		no-map;
+	};
+	vision_apps_mcu_r5fss0_core1_dma_memory_region: vision_apps-r5f-dma-memory@fb000000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xfb000000 0x00 0x00100000>;
+		no-map;
+	};
+	vision_apps_mcu_r5fss0_core1_memory_region: vision_apps-r5f-memory@fb100000 {
+		compatible = "shared-dma-pool";
+		reg = <0x00 0xfb100000 0x00 0x00f00000>;
+		no-map;
+	};
+};
+
+&mcu_r5fss0_core1 {
+	memory-region = <&vision_apps_mcu_r5fss0_core1_dma_memory_region>,
+			<&vision_apps_mcu_r5fss0_core1_memory_region>;
+};
+
+&main_r5fss0_core0 {
+	memory-region = <&vision_apps_main_r5fss0_core0_dma_memory_region>,
+			<&vision_apps_main_r5fss0_core0_memory_region>;
+};
+
+&main_r5fss0_core1 {
+	memory-region = <&main_r5fss0_core1_dma_memory_region>,
+			<&vision_apps_main_r5fss0_core1_memory_region>;
+};
+
+&main_r5fss1_core0 {
+	memory-region = <&vision_apps_main_r5fss1_core0_dma_memory_region>,
+			<&vision_apps_main_r5fss1_core0_memory_region>;
+};
+
+&main_r5fss1_core1 {
+	memory-region = <&vision_apps_main_r5fss1_core1_dma_memory_region>,
+			<&vision_apps_main_r5fss1_core1_memory_region>;
+};
+
+&main_i2c6 {
+	status = "disabled";
+};
+
+&serdes_wiz4 {
+	status = "disabled";
+};
+
+&mhdp {
+	status = "disabled";
+};
+
+&dss {
+	status = "disabled";
+};
+
+&main_i2c1 {
+	status = "disabled";
+};
