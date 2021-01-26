@@ -19,6 +19,7 @@
 #include "rvu_reg.h"
 #include "rvu.h"
 #include "cgx.h"
+#include "lmac_common.h"
 #include "npc.h"
 
 #define DEBUGFS_DIR_NAME "octeontx2"
@@ -325,7 +326,7 @@ static int rvu_dbg_rvu_pf_cgx_map_display(struct seq_file *filp, void *unused)
 {
 	struct rvu *rvu = filp->private;
 	struct pci_dev *pdev = NULL;
-	struct cgx_mac_ops *mac_ops;
+	struct mac_ops *mac_ops;
 	int rvu_def_cgx_id = 0;
 	char cgx[10], lmac[10];
 	struct rvu_pfvf *pfvf;
@@ -334,7 +335,7 @@ static int rvu_dbg_rvu_pf_cgx_map_display(struct seq_file *filp, void *unused)
 	u16 pcifunc;
 
 	domain = 2;
-	mac_ops = cgx_get_mac_ops(rvu_cgx_pdata(rvu_def_cgx_id, rvu));
+	mac_ops = get_mac_ops(rvu_cgx_pdata(rvu_def_cgx_id, rvu));
 	seq_printf(filp, "PCI dev\t\tRVU PF Func\tNIX block\t%s\tLMAC\n",
 		   mac_ops->name);
 	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
@@ -2837,7 +2838,7 @@ create_failed:
 static int cgx_print_stats(struct seq_file *s, int lmac_id)
 {
 	struct cgx_link_user_info linfo;
-	struct cgx_mac_ops *mac_ops;
+	struct mac_ops *mac_ops;
 	void *cgxd = s->private;
 	u64 ucast, mcast, bcast;
 	int stat = 0, err = 0;
@@ -2849,7 +2850,7 @@ static int cgx_print_stats(struct seq_file *s, int lmac_id)
 	if (!rvu)
 		return -ENODEV;
 
-	mac_ops = cgx_get_mac_ops(cgxd);
+	mac_ops = get_mac_ops(cgxd);
 	/* There can be no CGX devices at all */
 	if (!mac_ops)
 		return 0;
@@ -2964,7 +2965,7 @@ RVU_DEBUG_SEQ_FOPS(cgx_stat, cgx_stat_display, NULL);
 static void rvu_dbg_cgx_init(struct rvu *rvu)
 {
 	const struct device *dev = &rvu->pdev->dev;
-	struct cgx_mac_ops *mac_ops;
+	struct mac_ops *mac_ops;
 	unsigned long lmac_bmap;
 	int rvu_def_cgx_id = 0;
 	struct dentry *pfile;
@@ -2975,7 +2976,7 @@ static void rvu_dbg_cgx_init(struct rvu *rvu)
 	if (!cgx_get_cgxcnt_max())
 		return;
 
-	mac_ops = cgx_get_mac_ops(rvu_cgx_pdata(rvu_def_cgx_id, rvu));
+	mac_ops = get_mac_ops(rvu_cgx_pdata(rvu_def_cgx_id, rvu));
 	/* There can be no CGX devices at all */
 	if (!mac_ops)
 		return;
