@@ -6,7 +6,7 @@
 // Copyright (c) 2009 Sascha Hauer, Pengutronix
 // Copyright (c) 2010-2017 Pengutronix, Marc Kleine-Budde <kernel@pengutronix.de>
 // Copyright (c) 2014 David Jander, Protonic Holland
-// Copyright 2018 NXP
+// Copyright 2015,2018-2021 NXP
 //
 // Based on code originally by Andrey Volkov <avolkov@varma-el.com>
 
@@ -476,8 +476,8 @@ static const struct flexcan_devtype_data fsl_lx2160a_r1_devtype_data = {
 };
 
 static struct flexcan_devtype_data fsl_s32v234_devtype_data = {
-	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR |
-		FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
+	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_ENABLE_EACEN_RRS |
+		FLEXCAN_QUIRK_DISABLE_MECR | FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
 		FLEXCAN_QUIRK_SUPPORT_FD,
 		FLEXCAN_QUIRK_SETUP_STOP_MODE,
 	.n_irqs = ARRAY_SIZE(s32v234_flexcan_irqs),
@@ -485,8 +485,8 @@ static struct flexcan_devtype_data fsl_s32v234_devtype_data = {
 };
 
 static struct flexcan_devtype_data fsl_s32gen1_devtype_data = {
-	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_DISABLE_MECR |
-		FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
+	.quirks = FLEXCAN_QUIRK_DISABLE_RXFG | FLEXCAN_QUIRK_ENABLE_EACEN_RRS |
+		FLEXCAN_QUIRK_DISABLE_MECR | FLEXCAN_QUIRK_USE_OFF_TIMESTAMP |
 		FLEXCAN_QUIRK_SUPPORT_FD,
 		FLEXCAN_QUIRK_SETUP_STOP_MODE,
 	.n_irqs = ARRAY_SIZE(s32gen1_flexcan_irqs),
@@ -528,12 +528,6 @@ static const struct can_bittiming_const flexcan_fd_data_bittiming_const = {
 	.brp_max = 1024,
 	.brp_inc = 1,
 };
-
-static int is_s32_flexcan(const struct flexcan_priv *data)
-{
-	return ((data->devtype_data == &fsl_s32gen1_devtype_data) ||
-		(data->devtype_data == &fsl_s32v234_devtype_data));
-}
 
 /* FlexCAN module is essentially modelled as a little-endian IP in most
  * SoCs, i.e the registers as well as the message buffer areas are
