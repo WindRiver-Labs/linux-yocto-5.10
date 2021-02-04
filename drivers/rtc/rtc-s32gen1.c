@@ -116,25 +116,32 @@ static irqreturn_t s32gen1_rtc_handler(int irq, void *dev)
 	/* Clear the IRQ */
 	iowrite32(RTCS_RTCF, priv->rtc_base + RTCS_OFFSET);
 
+	rtc_update_irq(priv->rdev, 1, RTC_IRQF | RTC_AF);
+
 	return IRQ_HANDLED;
 }
 
 static int s32gen1_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	/* Dummy reading so we appease rtc_valid_tm(); note that this means
-	 * we won't have a monotonic timestamp, in case someone wants to use
-	 * this RTC as the system timer.
-	 */
-	static struct rtc_time stm = {
-		.tm_year = 118,	/* 2018 */
-		.tm_mon = 7,	/* August */
-		.tm_mday = 10,
-		.tm_hour = 18,
-	};
+	struct rtc_s32gen1_priv *priv = dev_get_drvdata(dev);
+	time64_t time;
 
 	if (!tm)
 		return -EINVAL;
-	*tm = stm;
+
+	time = ioread32(priv->rtc_base + RTCCNT_OFFSET)/priv->rtc_hz;
+
+	rtc_time64_to_tm(time, tm);
+
+	return 0;
+}
+
+static int s32gen1_rtc_set_time(struct device *dev, struct rtc_time *tm)
+{
+	/* There is no corressponding register to save the time. So, for the moment, 
+	 *leave this callback empty as it is here to shun a
+	 * run-time warning from hwclock -w.
+	*/
 
 	return 0;
 }
@@ -208,6 +215,7 @@ err_sec_to_rtcval:
 
 static const struct rtc_class_ops s32gen1_rtc_ops = {
 	.read_time = s32gen1_rtc_read_time,
+	.set_time = s32gen1_rtc_set_time,
 	.read_alarm = s32gen1_rtc_read_alarm,
 	.set_alarm = s32gen1_rtc_set_alarm,
 	.alarm_irq_enable = s32gen1_alarm_irq_enable,
@@ -404,15 +412,6 @@ static int s32gen1_rtc_probe(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "RTC successfully mapped to 0x%p\n",
 		priv->rtc_base);
 
-	priv->rdev = devm_rtc_device_register(&pdev->dev, "s32gen1_rtc",
-					&s32gen1_rtc_ops, THIS_MODULE);
-	if (IS_ERR_OR_NULL(priv->rdev)) {
-		dev_err(&pdev->dev, "devm_rtc_device_register error %ld\n",
-			PTR_ERR(priv->rdev));
-		err = -ENXIO;
-		goto err_devm_rtc_device_register;
-	}
-
 	err = device_init_wakeup(&pdev->dev, ENABLE_WAKEUP);
 	if (err) {
 		dev_err(&pdev->dev, "device_init_wakeup err %d\n", err);
@@ -443,6 +442,15 @@ static int s32gen1_rtc_probe(struct platform_device *pdev)
 		goto err_devm_request_irq;
 	}
 
+	priv->rdev = devm_rtc_device_register(&pdev->dev, "s32gen1_rtc",
+					&s32gen1_rtc_ops, THIS_MODULE);
+	if (IS_ERR_OR_NULL(priv->rdev)) {
+		dev_err(&pdev->dev, "devm_rtc_device_register error %ld\n",
+			PTR_ERR(priv->rdev));
+		err = -ENXIO;
+		goto err_devm_request_irq;
+	}
+
 	print_rtc(pdev);
 
 	return 0;
@@ -451,7 +459,6 @@ err_devm_request_irq:
 err_rtc_init:
 err_dts_init:
 err_device_init_wakeup:
-err_devm_rtc_device_register:
 err_ioremap_nocache:
 	release_resource(priv->res);
 err_platform_get_resource:
