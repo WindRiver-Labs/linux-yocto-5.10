@@ -26,7 +26,7 @@
 #include <linux/axxia-pei.h>
 #include <linux/time.h>
 #include <linux/axxia-ncr.h>
-#include <asm-generic/msi.h>
+#include <linux/msi.h>
 
 #include "pcie-axxia.h"
 
@@ -907,8 +907,8 @@ axxia_pcie_los_wa(struct pcie_port *pp, unsigned int max_width)
 	unsigned int value;
 	int rc = 1;
 	unsigned int control;
-	struct timeval start;
-	struct timeval now;
+	struct timespec64 start;
+	struct timespec64 now;
 
 	/*
 	 * There are four SerDes, each with 2 lanes or channels.  The
@@ -1086,7 +1086,7 @@ axxia_pcie_los_wa(struct pcie_port *pp, unsigned int max_width)
 		lane1_dig_asic_rx_ovrd_in_0 = 0x4414;
 	}
 
-	do_gettimeofday(&start);
+	ktime_get_real_ts64(&start);
 
 	for (;;) {
 		int i;
@@ -1154,11 +1154,11 @@ axxia_pcie_los_wa(struct pcie_port *pp, unsigned int max_width)
 		 * Give up if there is no link after 1 second.
 		 */
 
-		do_gettimeofday(&now);
+		ktime_get_real_ts64(&now);
 
 		if ((1000 * 1000) <
-		    (((now.tv_sec * 1000 * 1000) + now.tv_usec) -
-		     ((start.tv_sec * 1000 * 1000) + start.tv_usec))) {
+		    (((now.tv_sec * 1000 * 1000) + now.tv_nsec / 1000) -
+		     ((start.tv_sec * 1000 * 1000) + start.tv_nsec / 1000))) {
 			rc = -1;
 
 			break;
@@ -1522,7 +1522,6 @@ int axxia_pcie_host_init(struct pcie_port *pp)
 	struct platform_device *pdev = to_platform_device(pp->dev);
 	struct of_pci_range range;
 	struct of_pci_range_parser parser;
-	u32 na, ns;
 	int ret;
 	struct pci_bus *bus;
 	unsigned long mem_offset;
@@ -1534,12 +1533,6 @@ int axxia_pcie_host_init(struct pcie_port *pp)
 #else
 	msi_data_below_4g = 0;
 #endif
-
-	/* Find the address cell size and the number of cells in order to get
-	 * the untranslated address.
-	 */
-	of_property_read_u32(np, "#address-cells", &na);
-	ns = of_n_size_cells(np);
 
 	if (of_pci_range_parser_init(&parser, np)) {
 		dev_err(pp->dev, "missing ranges property\n");
@@ -1566,7 +1559,7 @@ int axxia_pcie_host_init(struct pcie_port *pp)
 
 			/* Find the untranslated IO space address */
 			pp->io_mod_base = of_read_number(parser.range -
-							 parser.np + na, ns);
+							 (parser.pna + parser.ns), parser.ns);
 		}
 		if (restype == IORESOURCE_MEM) {
 			of_pci_range_to_resource(&range, np, &pp->mem);
@@ -1576,7 +1569,7 @@ int axxia_pcie_host_init(struct pcie_port *pp)
 
 			/* Find the untranslated MEM space address */
 			pp->mem_mod_base = of_read_number(parser.range -
-							  parser.np + na, ns);
+							  (parser.pna + parser.ns), parser.ns);
 			pp->mem_mod_base = pp->mem.start;
 		}
 		if (restype == 0) {
@@ -1891,9 +1884,9 @@ static int pcie_init(void)
 }
 subsys_initcall(pcie_init);
 
-static const struct file_operations axxia_pcie_reset_proc_ops = {
-	.write      = axxia_pcie_reset_trigger,
-	.llseek     = noop_llseek,
+static const struct proc_ops axxia_pcie_reset_proc_ops = {
+	.proc_write      = axxia_pcie_reset_trigger,
+	.proc_lseek      = noop_llseek,
 };
 
 static int pcie2_init(void)
