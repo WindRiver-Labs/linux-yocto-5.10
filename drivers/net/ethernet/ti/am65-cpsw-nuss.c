@@ -698,6 +698,7 @@ static int am65_cpsw_nuss_ndo_slave_open(struct net_device *ndev)
 	/* Initialize IET */
 	am65_cpsw_qos_iet_init(ndev);
 	am65_cpsw_qos_cut_thru_init(port);
+	am65_cpsw_qos_mqprio_init(port);
 
 	phy_attached_info(port->slave.phy);
 	phy_start(port->slave.phy);
@@ -1769,7 +1770,7 @@ static int am65_cpsw_nuss_init_rx_chns(struct am65_cpsw_common *common)
 		rx_flow_cfg.ring_rxfdq0_id = fdqring_id;
 		rx_flow_cfg.rx_cfg.size = max_desc_num;
 		rx_flow_cfg.rxfdq_cfg.size = max_desc_num;
-		rx_flow_cfg.rxfdq_cfg.mode = common->pdata.fdqring_mode;
+		rx_flow_cfg.rxfdq_cfg.mode = common->pdata->fdqring_mode;
 
 		ret = k3_udma_glue_rx_flow_init(rx_chn->rx_chn,
 						i, &rx_flow_cfg);
@@ -2486,6 +2487,7 @@ static int am65_cpsw_nuss_register_devlink(struct am65_cpsw_common *common)
 	struct am65_cpsw_port *port;
 	int ret = 0;
 	int i;
+	struct devlink_port_attrs attrs = {};
 
 	common->devlink =
 		devlink_alloc(&am65_cpsw_devlink_ops, sizeof(*dl_priv));
@@ -2523,9 +2525,12 @@ static int am65_cpsw_nuss_register_devlink(struct am65_cpsw_common *common)
 		if (!port->ndev)
 			continue;
 
-		devlink_port_attrs_set(dl_port, DEVLINK_PORT_FLAVOUR_PHYSICAL,
-				       port->port_id, false, 0, common->switch_id,
-				       sizeof(resource_size_t));
+		attrs.flavour = DEVLINK_PORT_FLAVOUR_PHYSICAL;
+		attrs.phys.port_number = port->port_id;
+		memcpy(attrs.switch_id.id, common->switch_id, sizeof(resource_size_t));
+		attrs.switch_id.id_len = sizeof(resource_size_t);
+
+		devlink_port_attrs_set(dl_port, &attrs);
 
 		ret = devlink_port_register(common->devlink, dl_port, port->port_id);
 		if (ret) {
@@ -2762,7 +2767,7 @@ static int am65_cpsw_nuss_probe(struct platform_device *pdev)
 	ale_params.ale_ageout = AM65_CPSW_ALE_AGEOUT_DEFAULT;
 	ale_params.ale_ports = common->port_num + 1;
 	ale_params.ale_regs = common->cpsw_base + AM65_CPSW_NU_ALE_BASE;
-	ale_params.dev_id = common->pdata.ale_dev_id;
+	ale_params.dev_id = common->pdata->ale_dev_id;
 	ale_params.bus_freq = common->bus_freq;
 
 	common->ale = cpsw_ale_create(&ale_params);
