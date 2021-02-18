@@ -2265,12 +2265,6 @@ static void zynqmp_disp_disable(struct zynqmp_disp *disp, bool force)
 	zynqmp_disp_av_buf_disable_buf(&disp->av_buf);
 	zynqmp_disp_av_buf_disable(&disp->av_buf);
 
-	/* Mark the flip is done as crtc is disabled anyway */
-	if (crtc->state->event) {
-		complete_all(crtc->state->event->base.completion);
-		crtc->state->event = NULL;
-	}
-
 	disp->enabled = false;
 }
 
@@ -2959,6 +2953,14 @@ zynqmp_disp_crtc_atomic_disable(struct drm_crtc *crtc,
 	zynqmp_disp_plane_disable(crtc->primary);
 	zynqmp_disp_disable(disp, true);
 	drm_crtc_vblank_off(crtc);
+
+	spin_lock_irq(&crtc->dev->event_lock);
+	if (crtc->state->event) {
+		drm_crtc_send_vblank_event(crtc, crtc->state->event);
+		crtc->state->event = NULL;
+	}
+	spin_unlock_irq(&crtc->dev->event_lock);
+
 	pm_runtime_put_sync(disp->dev);
 }
 
