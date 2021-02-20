@@ -1863,7 +1863,6 @@ err_unmap:
 static int cqspi_direct_read_execute(struct cqspi_flash_pdata *f_pdata,
 				     const struct spi_mem_op *op)
 {
-	struct cqspi_st *cqspi = f_pdata->cqspi;
 	loff_t from = op->addr.val;
 	loff_t from_aligned, to_aligned;
 	size_t len = op->data.nbytes;
@@ -2054,9 +2053,16 @@ static void cqspi_mem_phy_op(struct spi_mem *mem,
 
 	f_pdata->phy_read_op = *op;
 
-	ret = cqspi_phy_calibrate(f_pdata, mem);
-	if (ret)
-		dev_info(&cqspi->pdev->dev, "PHY calibration failed: %d\n", ret);
+	if (cqspi_phy_check_pattern(f_pdata, mem)) {
+		dev_dbg(&cqspi->pdev->dev,
+			"PHY calibration pattern not found. Falling back to slow read speeds.\n");
+	} else {
+		ret = cqspi_phy_calibrate(f_pdata, mem);
+		if (ret)
+			dev_warn(&cqspi->pdev->dev,
+				 "PHY calibration failed: %d. Falling back to slow read speeds.\n",
+				 ret);
+	}
 }
 
 static int cqspi_of_get_flash_pdata(struct platform_device *pdev,
