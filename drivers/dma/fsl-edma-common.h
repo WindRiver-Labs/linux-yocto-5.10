@@ -30,6 +30,7 @@
 /* edma3 regs. */
 #define EDMA3_MP_CSR			0x00
 #define EDMA3_MP_ES			0x04
+#define EDMA3_MP_HRS			0x0c
 
 #define EDMA3_CHn_CSR(ch)	(0x4000 + (ch) * 0x1000)
 #define EDMA3_CHn_ES(ch)	(0x4004 + (ch) * 0x1000)

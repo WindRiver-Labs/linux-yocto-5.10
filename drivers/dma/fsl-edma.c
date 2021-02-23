@@ -47,6 +47,9 @@ static void fsl_edma3_disable_request(struct fsl_edma_chan *fsl_chan)
 	void __iomem *addr = fsl_chan->edma->membase;
 	u32 ch = fsl_chan->vchan.chan.chan_id;
 
+	while (edma_readl(fsl_chan->edma, addr + EDMA3_MP_HRS) & (1 << ch))
+		cpu_relax();
+
 	edma_writel(fsl_chan->edma, 0, addr + EDMA3_CHn_CSR(ch));
 }
 
