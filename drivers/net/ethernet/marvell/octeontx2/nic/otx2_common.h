@@ -419,7 +419,7 @@ static inline bool is_96xx_B0(struct pci_dev *pdev)
  */
 #define PCI_REVISION_ID_96XX		0x00
 #define PCI_REVISION_ID_95XX		0x10
-#define PCI_REVISION_ID_LOKI		0x20
+#define PCI_REVISION_ID_95XXN		0x20
 #define PCI_REVISION_ID_98XX		0x30
 #define PCI_REVISION_ID_95XXMM		0x40
 #define PCI_REVISION_ID_95XXO		0xE0
@@ -429,7 +429,7 @@ static inline bool is_dev_otx2(struct pci_dev *pdev)
 	u8 midr = pdev->revision & 0xF0;
 
 	return (midr == PCI_REVISION_ID_96XX || midr == PCI_REVISION_ID_95XX ||
-		midr == PCI_REVISION_ID_LOKI || midr == PCI_REVISION_ID_98XX ||
+		midr == PCI_REVISION_ID_95XXN || midr == PCI_REVISION_ID_98XX ||
 		midr == PCI_REVISION_ID_95XXMM || midr == PCI_REVISION_ID_95XXO);
 }
 
