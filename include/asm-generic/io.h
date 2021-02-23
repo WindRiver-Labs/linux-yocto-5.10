@@ -1032,6 +1032,9 @@ extern void ioport_unmap(void __iomem *p);
 struct pci_dev;
 extern void __iomem *pci_iomap(struct pci_dev *dev, int bar, unsigned long max);
 
+#ifdef CONFIG_GENERIC_PCI_IOMAP
+extern void pci_iounmap(struct pci_dev *dev, void __iomem *p);
+#else
 #ifndef __pci_ioport_unmap
 static inline void __pci_ioport_unmap(void __iomem *p) {}
 #endif
@@ -1043,6 +1046,7 @@ static inline void pci_iounmap(struct pci_dev *dev, void __iomem *p)
 	__pci_ioport_unmap(p);
 }
 #endif
+#endif /* CONFIG_GENERIC_PCI_IOMAP */
 #endif /* CONFIG_GENERIC_IOMAP */
 
 /*
