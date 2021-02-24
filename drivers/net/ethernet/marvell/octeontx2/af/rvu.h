@@ -429,6 +429,15 @@ struct ptp;
 
 #define RVU_SWITCH_LBK_CHAN	63
 
+struct rvu_switch {
+	struct mutex switch_lock; /* Serialize flow installation */
+	u32 used_entries;
+	u16 *entry2pcifunc;
+	u16 mode;
+	u16 start_entry;
+};
+
+
 /* KPU profile adapter structure gathering all KPU configuration data and abstracting out the
  * source where it came from.
  */
@@ -475,6 +484,7 @@ struct rvu {
 
 	/* CGX */
 #define PF_CGXMAP_BASE		1 /* PF 0 is reserved for RVU PF */
+	u16			cgx_mapped_vfs; /* maximum CGX mapped VFs */
 	u8			cgx_mapped_pfs;
 	u8			cgx_cnt_max;	 /* CGX port count max */
 	u8			*pf2cgxlmac_map; /* pf to cgx_lmac map */
@@ -507,6 +517,9 @@ struct rvu {
 	struct rvu_debugfs	rvu_dbg;
 #endif
 	struct rvu_devlink	*rvu_dl;
+
+	/* RVU switch implementation over NPC with DMAC rules */
+	struct rvu_switch	rswitch;
 };
 
 static inline void rvu_write64(struct rvu *rvu, u64 block, u64 offset, u64 val)
@@ -762,6 +775,7 @@ void rvu_nix_reset_mac(struct rvu_pfvf *pfvf, int pcifunc);
 bool rvu_nix_is_ptp_tx_enabled(struct rvu *rvu, u16 pcifunc);
 struct nix_hw *get_nix_hw(struct rvu_hwinfo *hw, int blkaddr);
 int rvu_get_next_nix_blkaddr(struct rvu *rvu, int blkaddr);
+int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc);
 
 /* NPC APIs */
 int rvu_npc_init(struct rvu *rvu);
@@ -866,5 +880,10 @@ void rvu_reset_lmt_map_tbl(struct rvu *rvu, u16 pcifunc);
 
 /* CN10K NIX */
 void rvu_nix_block_cn10k_init(struct rvu *rvu, struct nix_hw *nix_hw);
+
+/* RVU Switch */
+void rvu_switch_enable(struct rvu *rvu);
+void rvu_switch_disable(struct rvu *rvu);
+void rvu_switch_update_rules(struct rvu *rvu, u16 pcifunc);
 
 #endif /* RVU_H */
