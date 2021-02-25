@@ -59,10 +59,6 @@
 	status = "disabled";
 };
 
-&rtos_ipc_memory_region {
-	reg = <0x00 0xaa000000 0x00 0x02000000>;
-};
-
 &reserved_memory {
 	#address-cells = <2>;
 	#size-cells = <2>;
@@ -125,6 +121,10 @@
 		compatible = "shared-dma-pool";
 		reg = <0x00 0xfb100000 0x00 0x00f00000>;
 		no-map;
+	};
+
+	ipc-memories@aa000000 {
+		reg = <0x00 0xaa000000 0x00 0x02000000>;
 	};
 };
 
