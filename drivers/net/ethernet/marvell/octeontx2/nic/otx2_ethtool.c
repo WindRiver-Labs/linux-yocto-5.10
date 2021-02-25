@@ -1625,7 +1625,7 @@ static int otx2vf_get_sset_count(struct net_device *netdev, int sset)
 		return -EINVAL;
 
 	qstats_count = otx2_n_queue_stats *
-		       (vf->hw.rx_queues + vf->hw.tot_tx_queues);
+		       (vf->hw.rx_queues + vf->hw.tx_queues);
 
 	return otx2_n_dev_stats + otx2_n_drv_stats + qstats_count + 1;
 }
