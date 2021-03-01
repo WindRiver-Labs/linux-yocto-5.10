@@ -564,6 +564,36 @@ static int rvu_lmac_get_stats(struct rvu *rvu, struct msg_req *req,
 	return 0;
 }
 
+int rvu_mbox_handler_cgx_stats(struct rvu *rvu, struct msg_req *req,
+			       struct cgx_stats_rsp *rsp)
+{
+	return rvu_lmac_get_stats(rvu, req, (void *)rsp);
+}
+
+int rvu_mbox_handler_rpm_stats(struct rvu *rvu, struct msg_req *req,
+			       struct rpm_stats_rsp *rsp)
+{
+	return rvu_lmac_get_stats(rvu, req, (void *)rsp);
+}
+
+int rvu_mbox_handler_cgx_fec_stats(struct rvu *rvu,
+				   struct msg_req *req,
+				   struct cgx_fec_stats_rsp *rsp)
+{
+	int pf = rvu_get_pf(req->hdr.pcifunc);
+	u8 cgx_idx, lmac;
+	int err = 0;
+	void *cgxd;
+
+	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
+		return -EPERM;
+	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_idx, &lmac);
+
+	cgxd = rvu_cgx_pdata(cgx_idx, rvu);
+	err = cgx_get_fec_stats(cgxd, lmac, rsp);
+	return err;
+}
+
 int rvu_mbox_handler_cgx_stats_rst(struct rvu *rvu, struct msg_req *req,
 				   struct msg_rsp *rsp)
 {
@@ -589,24 +619,6 @@ int rvu_mbox_handler_cgx_stats_rst(struct rvu *rvu, struct msg_req *req,
 	cgxd = rvu_cgx_pdata(cgx_idx, rvu);
 
 	return cgx_stats_rst(cgxd, lmac);
-}
-
-int rvu_mbox_handler_cgx_fec_stats(struct rvu *rvu,
-				   struct msg_req *req,
-				   struct cgx_fec_stats_rsp *rsp)
-{
-	int pf = rvu_get_pf(req->hdr.pcifunc);
-	u8 cgx_idx, lmac;
-	int err = 0;
-	void *cgxd;
-
-	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
-		return -EPERM;
-	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_idx, &lmac);
-
-	cgxd = rvu_cgx_pdata(cgx_idx, rvu);
-	err = cgx_get_fec_stats(cgxd, lmac, rsp);
-	return err;
 }
 
 int rvu_mbox_handler_cgx_mac_addr_set(struct rvu *rvu,
@@ -919,40 +931,6 @@ int rvu_mbox_handler_cgx_cfg_pause_frm(struct rvu *rvu,
 	return 0;
 }
 
-int rvu_mbox_handler_cgx_get_aux_link_info(struct rvu *rvu, struct msg_req *req,
-					   struct cgx_fw_data *rsp)
-{
-	int pf = rvu_get_pf(req->hdr.pcifunc);
-	u8 cgx_id, lmac_id;
-
-	if (!rvu->fwdata)
-		return -ENXIO;
-
-	if (!is_pf_cgxmapped(rvu, pf))
-		return -EPERM;
-
-	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-
-	memcpy(&rsp->fwdata, &rvu->fwdata->cgx_fw_data[cgx_id][lmac_id],
-	       sizeof(struct cgx_lmac_fwdata_s));
-	return 0;
-}
-
-int rvu_mbox_handler_cgx_set_fec_param(struct rvu *rvu,
-				       struct fec_mode *req,
-				       struct fec_mode *rsp)
-{
-	int pf = rvu_get_pf(req->hdr.pcifunc);
-	u8 cgx_id, lmac_id;
-
-	if (!is_pf_cgxmapped(rvu, pf))
-		return -EPERM;
-
-	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-	rsp->fec = cgx_set_fec(req->fec, cgx_id, lmac_id);
-	return 0;
-}
-
 int rvu_mbox_handler_cgx_get_phy_fec_stats(struct rvu *rvu, struct msg_req *req,
 					   struct msg_rsp *rsp)
 {
@@ -1113,6 +1091,39 @@ exit:
 	return err;
 }
 
+int rvu_mbox_handler_cgx_set_fec_param(struct rvu *rvu,
+				       struct fec_mode *req,
+				       struct fec_mode *rsp)
+{
+	int pf = rvu_get_pf(req->hdr.pcifunc);
+	u8 cgx_id, lmac_id;
+
+	if (!is_pf_cgxmapped(rvu, pf))
+		return -EPERM;
+
+	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
+	return cgx_get_phy_fec_stats(rvu_cgx_pdata(cgx_id, rvu), lmac_id);
+}
+
+int rvu_mbox_handler_cgx_get_aux_link_info(struct rvu *rvu, struct msg_req *req,
+					   struct cgx_fw_data *rsp)
+{
+	int pf = rvu_get_pf(req->hdr.pcifunc);
+	u8 cgx_id, lmac_id;
+
+	if (!rvu->fwdata)
+		return -ENXIO;
+
+	if (!is_pf_cgxmapped(rvu, pf))
+		return -EPERM;
+
+	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
+
+	memcpy(&rsp->fwdata, &rvu->fwdata->cgx_fw_data[cgx_id][lmac_id],
+	       sizeof(struct cgx_lmac_fwdata_s));
+	return 0;
+}
+
 int rvu_mbox_handler_cgx_set_link_state(struct rvu *rvu,
 					struct cgx_set_link_state_msg *req,
 					struct msg_rsp *rsp)
@@ -1195,16 +1206,4 @@ u32 rvu_cgx_get_fifolen(struct rvu *rvu)
 	fifo_len = mac_ops ? mac_ops->fifo_len : 0;
 
 	return fifo_len;
-}
-
-int rvu_mbox_handler_cgx_stats(struct rvu *rvu, struct msg_req *req,
-			       struct cgx_stats_rsp *rsp)
-{
-	return rvu_lmac_get_stats(rvu, req, (void *)rsp);
-}
-
-int rvu_mbox_handler_rpm_stats(struct rvu *rvu, struct msg_req *req,
-			       struct rpm_stats_rsp *rsp)
-{
-	return rvu_lmac_get_stats(rvu, req, (void *)rsp);
 }
