@@ -835,14 +835,6 @@ struct ale_control_info {
 };
 
 static struct ale_control_info ale_controls[ALE_NUM_CONTROLS] = {
-	[ALE_VERSION]		= {
-		.name		= "version",
-		.offset		= ALE_IDVER,
-		.port_offset	= 0,
-		.shift		= 0,
-		.port_shift	= 0,
-		.bits		= 32,
-	},
 	[ALE_ENABLE]		= {
 		.name		= "enable",
 		.offset		= ALE_CONTROL,
@@ -1011,7 +1003,6 @@ static struct ale_control_info ale_controls[ALE_NUM_CONTROLS] = {
 		.port_shift	= 0,
 		.bits		= 8,
 	},
-	/* Fields below has individual registers on NetCP NU switch */
 	[ALE_PORT_UNKNOWN_VLAN_MEMBER] = {
 		.name		= "unknown_vlan_member",
 		.offset		= ALE_UNKNOWNVLAN,
@@ -1225,12 +1216,8 @@ static void cpsw_ale_aging_stop(struct cpsw_ale *ale)
 	del_timer_sync(&ale->timer);
 }
 
-/* HACK to support sysfs interface to configure ALE for netcp ethss */
-#include "cpsw_ale_sysfs.c"
-
 void cpsw_ale_start(struct cpsw_ale *ale)
 {
-	cpsw_ale_create_sysfs_entries(ale);
 	cpsw_ale_control_set(ale, 0, ALE_ENABLE, 1);
 	cpsw_ale_control_set(ale, 0, ALE_CLEAR, 1);
 
@@ -1242,7 +1229,6 @@ void cpsw_ale_stop(struct cpsw_ale *ale)
 	cpsw_ale_aging_stop(ale);
 	cpsw_ale_control_set(ale, 0, ALE_CLEAR, 1);
 	cpsw_ale_control_set(ale, 0, ALE_ENABLE, 0);
-	cpsw_ale_remove_sysfs_entries(ale);
 }
 
 static const struct cpsw_ale_dev_id cpsw_ale_id_match[] = {
