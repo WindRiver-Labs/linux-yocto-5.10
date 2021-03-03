@@ -20,6 +20,7 @@
 #include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_fdt.h>
 #include <linux/of_device.h>
 #include <linux/of_dma.h>
 #include <linux/serial_core.h>
@@ -28,6 +29,7 @@
 #include <linux/jiffies.h>
 #include <linux/kgdb.h>
 #include <linux/delay.h>
+#include <linux/libfdt.h>
 
 /* All registers are 32-bit width */
 
@@ -1497,11 +1499,36 @@ static void linflex_earlycon_write(struct console *con, const char *s,
 static int __init linflex_early_console_setup(struct earlycon_device *device,
 					      const char *options)
 {
+	unsigned long cr, count;
+	const void *fdt = initial_boot_params;
+	int chosen_offset, uart_offset, l;
+	const char *p, *q;
+
 	if (!device->port.membase)
 		return -ENODEV;
 
 	device->con->write = linflex_earlycon_write;
 	earlycon_port = &device->port;
+
+	chosen_offset = fdt_path_offset(fdt, "/chosen");
+
+	p = fdt_getprop(fdt, chosen_offset, "stdout-path", &l);
+	if (!p)
+		p = fdt_getprop(fdt, chosen_offset, "linux,stdout-path", &l);
+	if (!p || !l)
+		return 0;
+
+	q = strchrnul(p, ':');
+	l = q - p;
+
+	/* Get the node specified by stdout-path */
+	uart_offset = fdt_path_offset_namelen(fdt, p, l);
+	count = fdt_stringlist_count(fdt, uart_offset, "dma-names");
+	if (count > 0) {
+		cr = readl(device->port.membase + UARTCR);
+		cr |= LINFLEXD_UARTCR_TFBM;
+		writel(cr, device->port.membase + UARTCR);
+	}
 
 	return 0;
 }
