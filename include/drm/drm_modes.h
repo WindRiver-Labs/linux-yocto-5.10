@@ -321,6 +321,23 @@ struct drm_display_mode {
 	u16 height_mm;
 
 	/**
+         * @private_flags:
+         *
+         * Similar to @private, but just an integer.
+         */
+        int private_flags;
+
+	/**
+         * @vrefresh:
+         *
+         * Vertical refresh rate, for debug output in human readable form. Not
+         * used in a functional way.
+         *
+         * This value is in Hz.
+         */
+        int vrefresh;
+
+	/**
 	 * @type:
 	 *
 	 * A bitmask of flags, mostly about the source of a mode. Possible flags
