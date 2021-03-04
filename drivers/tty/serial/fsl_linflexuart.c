@@ -297,7 +297,7 @@ static void inline linflex_wait_rx_fifo_empty(struct uart_port *port)
 		return;
 
 	while (LINFLEXD_UARTCR_RDFLRFC(readl(port->membase + UARTCR)))
-		;
+		readb(port->membase + BDRM);
 }
 
 static void inline linflex_wait_tx_fifo_empty(struct uart_port *port)
