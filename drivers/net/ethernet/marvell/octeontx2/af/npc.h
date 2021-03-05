@@ -53,6 +53,7 @@ enum npc_kpu_lb_ltype {
 	NPC_LT_LB_EXDSA,
 	NPC_LT_LB_EXDSA_VLAN,
 	NPC_LT_LB_FDSA,
+	NPC_LT_LB_VLAN_EXDSA,
 	NPC_LT_LB_CUSTOM0 = 0xE,
 	NPC_LT_LB_CUSTOM1 = 0xF,
 };
@@ -68,6 +69,7 @@ enum npc_kpu_lc_ltype {
 	NPC_LT_LC_NSH,
 	NPC_LT_LC_PTP,
 	NPC_LT_LC_FCOE,
+	NPC_LT_LC_NGIO,
 	NPC_LT_LC_CUSTOM0 = 0xE,
 	NPC_LT_LC_CUSTOM1 = 0xF,
 };
@@ -149,6 +151,7 @@ enum npc_kpu_lh_ltype {
  * Ethernet interfaces, LBK interfaces, etc.
  */
 enum npc_pkind_type {
+	NPC_RX_VLAN_EXDSA_PKIND = 56ULL,
 	NPC_RX_CHLEN24B_PKIND = 57ULL,
 	NPC_RX_CPT_HDR_PKIND,
 	NPC_RX_CHLEN90B_PKIND,
@@ -178,6 +181,11 @@ enum key_fields {
 	NPC_DIP_IPV4,
 	NPC_SIP_IPV6,
 	NPC_DIP_IPV6,
+	NPC_IPPROTO_TCP,
+	NPC_IPPROTO_UDP,
+	NPC_IPPROTO_SCTP,
+	NPC_IPPROTO_AH,
+	NPC_IPPROTO_ESP,
 	NPC_SPORT_TCP,
 	NPC_DPORT_TCP,
 	NPC_SPORT_UDP,
@@ -431,6 +439,11 @@ struct nix_tx_action {
 #define TX_VTAG1_OP_MASK		GENMASK_ULL(45, 44)
 #define TX_VTAG1_LID_MASK		GENMASK_ULL(42, 40)
 #define TX_VTAG1_RELPTR_MASK		GENMASK_ULL(39, 32)
+
+/* NPC MCAM reserved entry index per nixlf */
+#define NIXLF_UCAST_ENTRY	0
+#define NIXLF_BCAST_ENTRY	1
+#define NIXLF_PROMISC_ENTRY	2
 
 struct npc_mcam_kex {
 	/* MKEX Profle Header */

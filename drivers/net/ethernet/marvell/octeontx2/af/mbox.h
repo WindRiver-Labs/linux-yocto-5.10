@@ -969,6 +969,8 @@ struct nix_rss_flowkey_cfg {
 #define NIX_FLOW_KEY_TYPE_CUSTOM0	BIT(19)
 #define NIX_FLOW_KEY_TYPE_VLAN		BIT(20)
 #define NIX_FLOW_KEY_TYPE_IPV4_PROTO	BIT(21)
+#define NIX_FLOW_KEY_TYPE_AH		BIT(22)
+#define NIX_FLOW_KEY_TYPE_ESP		BIT(23)
 #define NIX_FLOW_KEY_TYPE_L4_DST_ONLY BIT(28)
 #define NIX_FLOW_KEY_TYPE_L4_SRC_ONLY BIT(29)
 #define NIX_FLOW_KEY_TYPE_L3_DST_ONLY BIT(30)
@@ -1394,6 +1396,7 @@ struct npc_install_flow_req {
 	u64 features;
 	u16 entry;
 	u16 channel;
+	u16 chan_mask;
 	u8 intf;
 	u8 set_cntr; /* If counter is available set counter for this entry ? */
 	u8 default_rule;

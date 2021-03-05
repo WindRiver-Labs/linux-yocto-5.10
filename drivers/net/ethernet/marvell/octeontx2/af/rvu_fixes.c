@@ -890,7 +890,7 @@ int rvu_nix_fixes_init(struct rvu *rvu, struct nix_hw *nix_hw, int blkaddr)
 	if (is_rvu_96xx_A0(rvu))
 		rvu_write64(rvu, blkaddr, NIX_AF_CFG,
 			    rvu_read64(rvu, blkaddr, NIX_AF_CFG) | 0x5EULL);
-	if (!is_rvu_post_96xx_C0(rvu))
+	if (is_rvu_pre_96xx_C0(rvu))
 		rvu_write64(rvu, blkaddr, NIX_AF_CFG,
 			    rvu_read64(rvu, blkaddr, NIX_AF_CFG) | 0x40ULL);
 
@@ -1007,4 +1007,15 @@ void rvu_smqvf_xmit(struct rvu *rvu)
 		usleep_range(50, 60);
 		otx2smqvf_xmit();
 	}
+}
+
+void rvu_tim_hw_fixes(struct rvu *rvu, int blkaddr)
+{
+	u64 cfg;
+	/* Due wrong clock gating, TIM expire counter is updated wrongly.
+	 * Workaround is to enable force clock (FORCE_CSCLK_ENA = 1).
+	 */
+	cfg = rvu_read64(rvu, blkaddr, TIM_AF_FLAGS_REG);
+	cfg |= BIT_ULL(1);
+	rvu_write64(rvu, blkaddr, TIM_AF_FLAGS_REG, cfg);
 }
