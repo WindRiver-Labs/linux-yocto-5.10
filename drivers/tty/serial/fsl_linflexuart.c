@@ -1336,8 +1336,6 @@ linflex_console_write(struct console *co, const char *s, unsigned int count)
 
 	if (sport->port.sysrq)
 		locked = 0;
-	else if (oops_in_progress)
-		locked = spin_trylock_irqsave(&sport->port.lock, flags);
 	else
 		spin_lock_irqsave(&sport->port.lock, flags);
 
