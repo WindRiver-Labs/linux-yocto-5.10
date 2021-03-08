@@ -392,6 +392,7 @@ struct rvu_fwdata {
 #define CGX_MAX         5
 #define CGX_LMACS_MAX   4
 	struct cgx_lmac_fwdata_s cgx_fw_data[CGX_MAX][CGX_LMACS_MAX];
+	/* Do not add new fields below this line */
 	u64 sclk;
 	u64 rclk;
 	u64 mcam_addr;
