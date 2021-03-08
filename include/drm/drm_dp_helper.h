@@ -1645,6 +1645,10 @@ int drm_dp_read_dpcd_caps(struct drm_dp_aux *aux,
 
 int drm_dp_dpcd_read_link_status(struct drm_dp_aux *aux,
 				 u8 status[DP_LINK_STATUS_SIZE]);
+/*
+ * DisplayPort link
+ */
+#define DP_LINK_CAP_ENHANCED_FRAMING (1 << 0)
 
 bool drm_dp_send_real_edid_checksum(struct drm_dp_aux *aux,
 				    u8 real_edid_checksum);
