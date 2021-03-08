@@ -365,10 +365,10 @@ EXPORT_SYMBOL(ethtool_convert_link_mode_to_legacy_u32);
 /* return false if ksettings link modes had higher bits
  * set. legacy_settings always updated (best effort)
  */
-static bool
+bool
 convert_link_ksettings_to_legacy_settings(
 	struct ethtool_cmd *legacy_settings,
-	const struct ethtool_link_ksettings *link_ksettings)
+	struct ethtool_link_ksettings *link_ksettings)
 {
 	bool retval = true;
 
