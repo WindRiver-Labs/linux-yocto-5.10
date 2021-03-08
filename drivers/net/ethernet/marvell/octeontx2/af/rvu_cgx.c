@@ -987,25 +987,6 @@ int rvu_cgx_nix_cuml_stats(struct rvu *rvu, void *cgxd, int lmac_id,
 	return 0;
 }
 
-int rvu_mbox_handler_cgx_set_link_mode(struct rvu *rvu,
-				       struct cgx_set_link_mode_req *req,
-				       struct cgx_set_link_mode_rsp *rsp)
-{
-	int pf = rvu_get_pf(req->hdr.pcifunc);
-	u8 cgx_idx, lmac;
-	void *cgxd;
-
-	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
-		return -EPERM;
-
-	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_idx, &lmac);
-
-	cgxd = rvu_cgx_pdata(cgx_idx, rvu);
-
-	rsp->status =  cgx_set_link_mode(cgxd, req->args, cgx_idx, lmac);
-	return 0;
-}
-
 /* Dont allow cgx mapped VFs to overwrite PKIND config
  * incase of special PKINDs are configured like (HIGIG/EDSA)
  */
@@ -1122,6 +1103,23 @@ int rvu_mbox_handler_cgx_get_aux_link_info(struct rvu *rvu, struct msg_req *req,
 
 	memcpy(&rsp->fwdata, &rvu->fwdata->cgx_fw_data[cgx_id][lmac_id],
 	       sizeof(struct cgx_lmac_fwdata_s));
+	return 0;
+}
+
+int rvu_mbox_handler_cgx_set_link_mode(struct rvu *rvu,
+				       struct cgx_set_link_mode_req *req,
+				       struct cgx_set_link_mode_rsp *rsp)
+{
+	int pf = rvu_get_pf(req->hdr.pcifunc);
+	u8 cgx_idx, lmac;
+	void *cgxd;
+
+	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
+		return -EPERM;
+
+	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_idx, &lmac);
+	cgxd = rvu_cgx_pdata(cgx_idx, rvu);
+	rsp->status = cgx_set_link_mode(cgxd, req->args, cgx_idx, lmac);
 	return 0;
 }
 
