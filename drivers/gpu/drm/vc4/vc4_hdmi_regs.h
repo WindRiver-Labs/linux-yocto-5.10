@@ -31,6 +31,8 @@ enum vc4_hdmi_field {
 	HDMI_CEC_CPU_MASK_STATUS,
 	HDMI_CEC_CPU_MASK_SET,
 	HDMI_CEC_CPU_MASK_CLEAR,
+	HDMI_CEC_CPU_STATUS,
+	HDMI_CEC_CPU_SET,
 
 	/*
 	 * Transmit data, first byte is low byte of the 32-bit reg.
