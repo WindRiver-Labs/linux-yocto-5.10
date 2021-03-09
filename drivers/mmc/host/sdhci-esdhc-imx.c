@@ -1855,10 +1855,8 @@ static int sdhci_esdhc_imx_remove(struct platform_device *pdev)
 	clk_prepare_enable(imx_data->clk_ipg);
 	clk_prepare_enable(imx_data->clk_ahb);
 
-	dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
-
-
 	pm_runtime_get_sync(&pdev->dev);
+	dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
 	pm_runtime_disable(&pdev->dev);
 	pm_runtime_put_noidle(&pdev->dev);
 
