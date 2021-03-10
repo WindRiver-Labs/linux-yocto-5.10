@@ -24,9 +24,6 @@
 /* Subsystem Device ID */
 #define PCI_SUBSYS_DEVID_98XX                  0xB100
 #define PCI_SUBSYS_DEVID_96XX                  0xB200
-#define PCI_SUBSYS_DEVID_95XX                  0xB300
-#define PCI_SUBSYS_DEVID_LOKI                  0xB400
-#define PCI_SUBSYS_DEVID_95XXMM                0xB500
 
 /* PCI BAR nos */
 #define	PCI_AF_REG_BAR_NUM			0
@@ -506,13 +503,13 @@ static inline u64 rvupf_read64(struct rvu *rvu, u64 offset)
 }
 
 /* Silicon revisions */
-
-static inline bool is_rvu_post_96xx_C0(struct rvu *rvu)
+static inline bool is_rvu_pre_96xx_C0(struct rvu *rvu)
 {
 	struct pci_dev *pdev = rvu->pdev;
 
-	return (pdev->revision == 0x08) || (pdev->revision == 0x30) ||
-		(pdev->revision == 0x20);
+	return ((pdev->revision == 0x00) || (pdev->revision == 0x01) ||
+		(pdev->revision == 0x10) || (pdev->revision == 0x11) ||
+		(pdev->revision == 0x14));
 }
 
 static inline bool is_rvu_96xx_A0(struct rvu *rvu)
@@ -529,13 +526,6 @@ static inline bool is_rvu_96xx_B0(struct rvu *rvu)
 	return (pdev->revision == 0x00) || (pdev->revision == 0x01);
 }
 
-static inline bool is_rvu_95xx_B0(struct rvu *rvu)
-{
-	struct pci_dev *pdev = rvu->pdev;
-
-	return (pdev->revision == 0x14);
-}
-
 static inline bool is_rvu_95xx_A0(struct rvu *rvu)
 {
 	struct pci_dev *pdev = rvu->pdev;
@@ -543,13 +533,27 @@ static inline bool is_rvu_95xx_A0(struct rvu *rvu)
 	return (pdev->revision == 0x10) || (pdev->revision == 0x11);
 }
 
+/* REVID for PCIe devices.
+ * Bits 0..1: minor pass, bit 3..2: major pass
+ * bits 7..4: midr id
+ */
+#define PCI_REVISION_ID_96XX		0x00
+#define PCI_REVISION_ID_95XX		0x10
+#define PCI_REVISION_ID_LOKI		0x20
+#define PCI_REVISION_ID_98XX		0x30
+#define PCI_REVISION_ID_95XXMM		0x40
+#define PCI_REVISION_ID_95XXO		0xE0
+
 static inline bool is_rvu_otx2(struct rvu *rvu)
 {
-	unsigned short id = rvu->pdev->subsystem_device;
+	struct pci_dev *pdev = rvu->pdev;
 
-	return (id == PCI_SUBSYS_DEVID_96XX || id == PCI_SUBSYS_DEVID_98XX ||
-		id == PCI_SUBSYS_DEVID_95XX || id == PCI_SUBSYS_DEVID_LOKI ||
-		id == PCI_SUBSYS_DEVID_95XXMM);
+	u8 midr = pdev->revision & 0xF0;
+
+	return (midr == PCI_REVISION_ID_96XX || midr == PCI_REVISION_ID_95XX ||
+		midr == PCI_REVISION_ID_LOKI || midr == PCI_REVISION_ID_98XX ||
+		midr == PCI_REVISION_ID_95XXMM ||
+		midr == PCI_REVISION_ID_95XXO);
 }
 
 static inline bool is_cgx_mapped_to_nix(unsigned short id, u8 cgx_id)
@@ -564,6 +568,12 @@ static inline bool is_cgx_mapped_to_nix(unsigned short id, u8 cgx_id)
 static inline int is_afvf(u16 pcifunc)
 {
 	return !(pcifunc & ~RVU_PFVF_FUNC_MASK);
+}
+
+/* check if PF_FUNC is AF */
+static inline bool is_pffunc_af(u16 pcifunc)
+{
+	return !pcifunc;
 }
 
 static inline bool is_rvu_fwdata_valid(struct rvu *rvu)
@@ -682,7 +692,8 @@ int npc_config_ts_kpuaction(struct rvu *rvu, int pf, u16 pcifunc, bool en);
 void rvu_npc_install_ucast_entry(struct rvu *rvu, u16 pcifunc,
 				 int nixlf, u64 chan, u8 *mac_addr);
 void rvu_npc_install_promisc_entry(struct rvu *rvu, u16 pcifunc,
-				   int nixlf, u64 chan, bool allmulti);
+				   int nixlf, u64 chan, u8 chan_cnt,
+				   bool allmulti);
 void rvu_npc_disable_promisc_entry(struct rvu *rvu, u16 pcifunc, int nixlf);
 void rvu_npc_enable_promisc_entry(struct rvu *rvu, u16 pcifunc, int nixlf);
 void rvu_npc_install_bcast_match_entry(struct rvu *rvu, u16 pcifunc,
@@ -711,9 +722,6 @@ static inline void rvu_dbg_exit(struct rvu *rvu) {}
 
 int npc_flow_steering_init(struct rvu *rvu, int blkaddr);
 const char *npc_get_field_name(u8 hdr);
-bool rvu_npc_write_default_rule(struct rvu *rvu, int blkaddr, int nixlf,
-				u16 pcifunc, u8 intf, struct mcam_entry *entry,
-				int *entry_index);
 int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel);
 int npc_get_bank(struct npc_mcam *mcam, int index);
 void npc_mcam_enable_flows(struct rvu *rvu, u16 target);
@@ -726,6 +734,10 @@ void npc_read_mcam_entry(struct rvu *rvu, struct npc_mcam *mcam,
 bool is_npc_intf_tx(u8 intf);
 bool is_npc_intf_rx(u8 intf);
 bool is_npc_interface_valid(struct rvu *rvu, u8 intf);
+int npc_get_nixlf_mcam_index(struct npc_mcam *mcam, u16 pcifunc, int nixlf,
+			     int type);
+bool is_mcam_entry_enabled(struct rvu *rvu, struct npc_mcam *mcam, int blkaddr,
+			   int index);
 
 /* CPT APIs */
 int rvu_cpt_init(struct rvu *rvu);
@@ -739,6 +751,7 @@ int rvu_tim_lf_teardown(struct rvu *rvu, u16 pcifunc, int lf, int slot);
 /* SDP APIs */
 int rvu_sdp_init(struct rvu *rvu);
 bool is_sdp_pf(u16 pcifunc);
+bool is_sdp_vf(u16 pcifunc);
 
 /* REE APIs */
 int rvu_ree_init(struct rvu *rvu);
@@ -766,4 +779,5 @@ bool is_parse_nibble_config_valid(struct rvu *rvu,
 				  struct npc_mcam_kex *mcam_kex);
 int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 			   u64 pkind);
+void rvu_tim_hw_fixes(struct rvu *rvu, int blkaddr);
 #endif /* RVU_H */
