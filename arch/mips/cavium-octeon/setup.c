@@ -1158,6 +1158,7 @@ void __init device_tree_init(void)
 	bool do_prune;
 	bool fill_mac;
 
+#ifdef CONFIG_MIPS_ELF_APPENDED_DTB
 	if (fw_passed_dtb && (fw_passed_dtb != (ulong)&__dtb_octeon_68xx_begin) &&
 	    (fw_passed_dtb != (ulong)&__dtb_octeon_3xxx_begin)) {
 		fdt = (void *)fw_passed_dtb;
