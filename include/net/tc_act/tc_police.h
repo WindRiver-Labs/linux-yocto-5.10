@@ -107,4 +107,16 @@ static inline u32 tcf_police_tcfp_mtu(const struct tc_action *act)
 	return params->tcfp_mtu;
 }
 
+static inline u64 tcf_police_rate_pkt_ps(const struct tc_action *act)
+{
+	/* Not implemented */
+	return 0;
+}
+
+static inline u32 tcf_police_burst_pkt(const struct tc_action *act)
+{
+	/* Not implemented */
+	return 0;
+}
+
 #endif /* __NET_TC_POLICE_H */
