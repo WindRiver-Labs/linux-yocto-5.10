@@ -166,7 +166,7 @@ static struct clk_hw *imx_lpcg_of_clk_src_get(struct of_phandle_args *clkspec,
                                               void *data)
 {
         struct clk_hw_onecell_data *hw_data = data;
-        unsigned int idx = clkspec->args[0] / 4;
+        unsigned int idx = clkspec->args[0];
 
         if (idx >= hw_data->num) {
                 pr_err("%s: invalid index %u\n", __func__, idx);
@@ -199,7 +199,7 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
         if (IS_ERR(base))
                 return PTR_ERR(base);
 
-        count = of_property_count_u32_elems(np, "clock-indices");
+        count = of_property_count_u32_elems(np, "bit-offset");
         if (count < 0) {
 		dev_err(&pdev->dev, "failed to count clocks\n");
 		return -EINVAL;
@@ -248,21 +248,20 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
         pm_runtime_enable(&pdev->dev);
 
         for (i = 0; i < count; i++) {
-                idx = bit_offset[i] / 4;
-                if (idx > IMX_LPCG_MAX_CLKS) {
+		if (bit_offset[i] > 31) {
                         dev_warn(&pdev->dev, "invalid bit offset of clock %d\n",
                                  i);
                         ret = -EINVAL;
                         goto unreg;
                 }
 
-                clk_hws[idx] = imx_clk_lpcg_scu_dev(&pdev->dev, output_names[i],
+		clk_hws[i] = imx_clk_lpcg_scu_dev(&pdev->dev, output_names[i],
                                                     parent_names[i], 0, base,
                                                     bit_offset[i], false);
-                if (IS_ERR(clk_hws[idx])) {
+		if (IS_ERR(clk_hws[i])) {
                         dev_warn(&pdev->dev, "failed to register clock %d\n",
                                  idx);
-                        ret = PTR_ERR(clk_hws[idx]);
+			ret = PTR_ERR(clk_hws[i]);
                         goto unreg;
                 }
         }
@@ -279,9 +278,8 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
 
 unreg:
         while (--i >= 0) {
-                idx = bit_offset[i] / 4;
-                if (clk_hws[idx])
-                        imx_clk_lpcg_scu_unregister(clk_hws[idx]);
+		if (clk_hws[i])
+			imx_clk_lpcg_scu_unregister(clk_hws[i]);
         }
 
         pm_runtime_disable(&pdev->dev);
