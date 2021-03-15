@@ -464,8 +464,8 @@ tsk	.req	x28		// current thread_info
 /*
  * Interrupt handling.
  */
-	.macro	irq_handler
-	ldr_l	x1, handle_arch_irq
+	.macro	irq_handler, handler:req
+	ldr_l	x1, \handler
 	mov	x0, sp
 	irq_stack_entry
 	blr	x1
@@ -502,6 +502,54 @@ alternative_endif
 	msr_s	SYS_ICC_PMR_EL1, \tmp
 	alternative_else_nop_endif
 #endif
+	.endm
+
+	.macro el1_interrupt_handler, handler:req
+	gic_prio_irq_setup pmr=x20, tmp=x1
+	enable_da_f
+
+	mov	x0, sp
+	bl	enter_el1_irq_or_nmi
+
+	irq_handler	\handler
+
+#ifdef CONFIG_PREEMPTION
+	ldr	x24, [tsk, #TSK_TI_PREEMPT]	// get preempt count
+alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+	/*
+	 * DA_F were cleared at start of handling. If anything is set in DAIF,
+	 * we come back from an NMI, so skip preemption
+	 */
+	mrs	x0, daif
+	orr	x24, x24, x0
+alternative_else_nop_endif
+
+	cbz	x24, 1f					// (need_resched + count) == 0
+	cbnz	w24, 2f					// count != 0
+
+	ldr	w24, [tsk, #TSK_TI_PREEMPT_LAZY]	// get preempt lazy count
+	cbnz	w24, 2f					// preempt lazy count != 0
+
+	ldr	x0, [tsk, #TSK_TI_FLAGS]		// get flags
+	tbz	x0, #TIF_NEED_RESCHED_LAZY, 2f		// needs rescheduling?
+1:
+	bl	arm64_preempt_schedule_irq		// irq en/disable is done inside
+2:
+#endif
+
+	mov	x0, sp
+	bl	exit_el1_irq_or_nmi
+	.endm
+
+	.macro el0_interrupt_handler, handler:req
+	gic_prio_irq_setup pmr=x20, tmp=x0
+	user_exit_irqoff
+	enable_da_f
+
+	tbz	x22, #55, 1f
+	bl	do_el0_irq_bp_hardening
+1:
+	irq_handler	\handler
 	.endm
 
 	.text
@@ -633,41 +681,7 @@ SYM_CODE_END(el1_sync)
 	.align	6
 SYM_CODE_START_LOCAL_NOALIGN(el1_irq)
 	kernel_entry 1
-	gic_prio_irq_setup pmr=x20, tmp=x1
-	enable_da_f
-
-	mov	x0, sp
-	bl	enter_el1_irq_or_nmi
-
-	irq_handler
-
-#ifdef CONFIG_PREEMPTION
-	ldr	x24, [tsk, #TSK_TI_PREEMPT]	// get preempt count
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
-	/*
-	 * DA_F were cleared at start of handling. If anything is set in DAIF,
-	 * we come back from an NMI, so skip preemption
-	 */
-	mrs	x0, daif
-	orr	x24, x24, x0
-alternative_else_nop_endif
-
-	cbz	x24, 1f					// (need_resched + count) == 0
-	cbnz	w24, 2f					// count != 0
-
-	ldr	w24, [tsk, #TSK_TI_PREEMPT_LAZY]	// get preempt lazy count
-	cbnz	w24, 2f					// preempt lazy count != 0
-
-	ldr	x0, [tsk, #TSK_TI_FLAGS]		// get flags
-	tbz	x0, #TIF_NEED_RESCHED_LAZY, 2f		// needs rescheduling?
-1:
-	bl	arm64_preempt_schedule_irq		// irq en/disable is done inside
-2:
-#endif
-
-	mov	x0, sp
-	bl	exit_el1_irq_or_nmi
-
+	el1_interrupt_handler handle_arch_irq
 	kernel_exit 1
 SYM_CODE_END(el1_irq)
 
@@ -707,15 +721,7 @@ SYM_CODE_END(el0_error_compat)
 SYM_CODE_START_LOCAL_NOALIGN(el0_irq)
 	kernel_entry 0
 el0_irq_naked:
-	gic_prio_irq_setup pmr=x20, tmp=x0
-	user_exit_irqoff
-	enable_da_f
-
-	tbz	x22, #55, 1f
-	bl	do_el0_irq_bp_hardening
-1:
-	irq_handler
-
+	el0_interrupt_handler handle_arch_irq
 	b	ret_to_user
 SYM_CODE_END(el0_irq)
 
