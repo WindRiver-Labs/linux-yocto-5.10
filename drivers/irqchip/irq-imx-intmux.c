@@ -352,7 +352,7 @@ static const struct dev_pm_ops imx_intmux_pm_ops = {
 };
 
 static const struct of_device_id imx_intmux_id[] = {
-	{ .compatible = "fsl,imx-intmux", },
+	{ .compatible = "nxp,imx-intmux", },
 	{ /* sentinel */ },
 };
 
