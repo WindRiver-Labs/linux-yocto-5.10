@@ -1695,6 +1695,290 @@ static void rvu_dbg_npa_init(struct rvu *rvu)
 			    &rvu_dbg_npa_ndc_hits_miss_fops);
 }
 
+#define PRINT_CGX_CUML_NIXRX_STATUS(idx, name)				\
+	({								\
+		u64 cnt;						\
+		err = rvu_cgx_nix_cuml_stats(rvu, cgxd, lmac_id, (idx),	\
+					     NIX_STATS_RX, &(cnt));	\
+		if (!err)						\
+			seq_printf(s, "%s: %llu\n", name, cnt);		\
+		cnt;							\
+	})
+
+#define PRINT_CGX_CUML_NIXTX_STATUS(idx, name)			\
+	({								\
+		u64 cnt;						\
+		err = rvu_cgx_nix_cuml_stats(rvu, cgxd, lmac_id, (idx),	\
+					  NIX_STATS_TX, &(cnt));	\
+		if (!err)						\
+			seq_printf(s, "%s: %llu\n", name, cnt);		\
+		cnt;							\
+	})
+
+static int cgx_print_stats(struct seq_file *s, int lmac_id)
+{
+	struct cgx_link_user_info linfo;
+	struct mac_ops *mac_ops;
+	void *cgxd = s->private;
+	u64 ucast, mcast, bcast;
+	int stat = 0, err = 0;
+	u64 tx_stat, rx_stat;
+	struct rvu *rvu;
+
+	rvu = pci_get_drvdata(pci_get_device(PCI_VENDOR_ID_CAVIUM,
+					     PCI_DEVID_OCTEONTX2_RVU_AF, NULL));
+	if (!rvu)
+		return -ENODEV;
+
+	mac_ops = get_mac_ops(cgxd);
+	/* There can be no CGX devices at all */
+	if (!mac_ops)
+		return 0;
+
+	/* Link status */
+	seq_puts(s, "\n=======Link Status======\n\n");
+	err = cgx_get_link_info(cgxd, lmac_id, &linfo);
+	if (err)
+		seq_puts(s, "Failed to read link status\n");
+	seq_printf(s, "\nLink is %s %d Mbps\n\n",
+		   linfo.link_up ? "UP" : "DOWN", linfo.speed);
+
+	/* Rx stats */
+	seq_printf(s, "\n=======NIX RX_STATS(%s port level)======\n\n",
+		   mac_ops->name);
+	ucast = PRINT_CGX_CUML_NIXRX_STATUS(RX_UCAST, "rx_ucast_frames");
+	if (err)
+		return err;
+	mcast = PRINT_CGX_CUML_NIXRX_STATUS(RX_MCAST, "rx_mcast_frames");
+	if (err)
+		return err;
+	bcast = PRINT_CGX_CUML_NIXRX_STATUS(RX_BCAST, "rx_bcast_frames");
+	if (err)
+		return err;
+	seq_printf(s, "rx_frames: %llu\n", ucast + mcast + bcast);
+	PRINT_CGX_CUML_NIXRX_STATUS(RX_OCTS, "rx_bytes");
+	if (err)
+		return err;
+	PRINT_CGX_CUML_NIXRX_STATUS(RX_DROP, "rx_drops");
+	if (err)
+		return err;
+	PRINT_CGX_CUML_NIXRX_STATUS(RX_ERR, "rx_errors");
+	if (err)
+		return err;
+
+	/* Tx stats */
+	seq_printf(s, "\n=======NIX TX_STATS(%s port level)======\n\n",
+		   mac_ops->name);
+	ucast = PRINT_CGX_CUML_NIXTX_STATUS(TX_UCAST, "tx_ucast_frames");
+	if (err)
+		return err;
+	mcast = PRINT_CGX_CUML_NIXTX_STATUS(TX_MCAST, "tx_mcast_frames");
+	if (err)
+		return err;
+	bcast = PRINT_CGX_CUML_NIXTX_STATUS(TX_BCAST, "tx_bcast_frames");
+	if (err)
+		return err;
+	seq_printf(s, "tx_frames: %llu\n", ucast + mcast + bcast);
+	PRINT_CGX_CUML_NIXTX_STATUS(TX_OCTS, "tx_bytes");
+	if (err)
+		return err;
+	PRINT_CGX_CUML_NIXTX_STATUS(TX_DROP, "tx_drops");
+	if (err)
+		return err;
+
+	/* Rx stats */
+	seq_printf(s, "\n=======%s RX_STATS======\n\n", mac_ops->name);
+	while (stat < mac_ops->rx_stats_cnt) {
+		err = mac_ops->mac_get_rx_stats(cgxd, lmac_id, stat, &rx_stat);
+		if (err)
+			return err;
+		if (is_rvu_otx2(rvu))
+			seq_printf(s, "%s: %llu\n", cgx_rx_stats_fields[stat],
+				   rx_stat);
+		else
+			seq_printf(s, "%s: %llu\n", rpm_rx_stats_fields[stat],
+				   rx_stat);
+		stat++;
+	}
+
+	/* Tx stats */
+	stat = 0;
+	seq_printf(s, "\n=======%s TX_STATS======\n\n", mac_ops->name);
+	while (stat < mac_ops->tx_stats_cnt) {
+		err = mac_ops->mac_get_tx_stats(cgxd, lmac_id, stat, &tx_stat);
+		if (err)
+			return err;
+		if (is_rvu_otx2(rvu))
+			seq_printf(s, "%s: %llu\n", cgx_tx_stats_fields[stat],
+				   tx_stat);
+		else
+			seq_printf(s, "%s: %llu\n", rpm_tx_stats_fields[stat],
+				   tx_stat);
+		stat++;
+	}
+
+	return err;
+}
+
+static int rvu_dbg_cgx_stat_display(struct seq_file *filp, void *unused)
+{
+	struct dentry *current_dir;
+	int err, lmac_id;
+	char *buf;
+
+	current_dir = filp->file->f_path.dentry->d_parent;
+	buf = strrchr(current_dir->d_name.name, 'c');
+	if (!buf)
+		return -EINVAL;
+
+	err = kstrtoint(buf + 1, 10, &lmac_id);
+	if (!err) {
+		err = cgx_print_stats(filp, lmac_id);
+		if (err)
+			return err;
+	}
+	return err;
+}
+
+RVU_DEBUG_SEQ_FOPS(cgx_stat, cgx_stat_display, NULL);
+
+static void rvu_dbg_cgx_init(struct rvu *rvu)
+{
+	struct mac_ops *mac_ops;
+	unsigned long lmac_bmap;
+	int i, lmac_id;
+	char dname[20];
+	void *cgx;
+
+	if (!cgx_get_cgxcnt_max())
+		return;
+
+	mac_ops = get_mac_ops(rvu_first_cgx_pdata(rvu));
+	if (!mac_ops)
+		return;
+
+	rvu->rvu_dbg.cgx_root = debugfs_create_dir(mac_ops->name,
+						   rvu->rvu_dbg.root);
+
+	for (i = 0; i < cgx_get_cgxcnt_max(); i++) {
+		cgx = rvu_cgx_pdata(i, rvu);
+		if (!cgx)
+			continue;
+		lmac_bmap = cgx_get_lmac_bmap(cgx);
+		/* cgx debugfs dir */
+		sprintf(dname, "%s%d", mac_ops->name, i);
+		rvu->rvu_dbg.cgx = debugfs_create_dir(dname,
+						      rvu->rvu_dbg.cgx_root);
+		for_each_set_bit(lmac_id, &lmac_bmap, MAX_LMAC_PER_CGX) {
+			/* lmac debugfs dir */
+			sprintf(dname, "lmac%d", lmac_id);
+			rvu->rvu_dbg.lmac =
+				debugfs_create_dir(dname, rvu->rvu_dbg.cgx);
+
+				debugfs_create_file("stats", 0600, rvu->rvu_dbg.lmac,
+						    cgx, &rvu_dbg_cgx_stat_fops);
+		}
+	}
+}
+
+/* NPC debugfs APIs */
+static void rvu_print_npc_mcam_info(struct seq_file *s,
+				    u16 pcifunc, int blkaddr)
+{
+	struct rvu *rvu = s->private;
+	int entry_acnt, entry_ecnt;
+	int cntr_acnt, cntr_ecnt;
+
+	rvu_npc_get_mcam_entry_alloc_info(rvu, pcifunc, blkaddr,
+					  &entry_acnt, &entry_ecnt);
+	rvu_npc_get_mcam_counter_alloc_info(rvu, pcifunc, blkaddr,
+					    &cntr_acnt, &cntr_ecnt);
+	if (!entry_acnt && !cntr_acnt)
+		return;
+
+	if (!(pcifunc & RVU_PFVF_FUNC_MASK))
+		seq_printf(s, "\n\t\t Device \t\t: PF%d\n",
+			   rvu_get_pf(pcifunc));
+	else
+		seq_printf(s, "\n\t\t Device \t\t: PF%d VF%d\n",
+			   rvu_get_pf(pcifunc),
+			   (pcifunc & RVU_PFVF_FUNC_MASK) - 1);
+
+	if (entry_acnt) {
+		seq_printf(s, "\t\t Entries allocated \t: %d\n", entry_acnt);
+		seq_printf(s, "\t\t Entries enabled \t: %d\n", entry_ecnt);
+	}
+	if (cntr_acnt) {
+		seq_printf(s, "\t\t Counters allocated \t: %d\n", cntr_acnt);
+		seq_printf(s, "\t\t Counters enabled \t: %d\n", cntr_ecnt);
+	}
+}
+
+static int rvu_dbg_npc_mcam_info_display(struct seq_file *filp, void *unsued)
+{
+	struct rvu *rvu = filp->private;
+	int pf, vf, numvfs, blkaddr;
+	struct npc_mcam *mcam;
+	u16 pcifunc, counters;
+	u64 cfg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
+	if (blkaddr < 0)
+		return -ENODEV;
+
+	mcam = &rvu->hw->mcam;
+	counters = rvu->hw->npc_counters;
+
+	seq_puts(filp, "\nNPC MCAM info:\n");
+	/* MCAM keywidth on receive and transmit sides */
+	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX));
+	cfg = (cfg >> 32) & 0x07;
+	seq_printf(filp, "\t\t RX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
+		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
+		   "224bits" : "448bits"));
+	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX));
+	cfg = (cfg >> 32) & 0x07;
+	seq_printf(filp, "\t\t TX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
+		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
+		   "224bits" : "448bits"));
+
+	mutex_lock(&mcam->lock);
+	/* MCAM entries */
+	seq_printf(filp, "\n\t\t MCAM entries \t: %d\n", mcam->total_entries);
+	seq_printf(filp, "\t\t Reserved \t: %d\n",
+		   mcam->total_entries - mcam->bmap_entries);
+	seq_printf(filp, "\t\t Available \t: %d\n", mcam->bmap_fcnt);
+
+	/* MCAM counters */
+	seq_printf(filp, "\n\t\t MCAM counters \t: %d\n", counters);
+	seq_printf(filp, "\t\t Reserved \t: %d\n",
+		   counters - mcam->counters.max);
+	seq_printf(filp, "\t\t Available \t: %d\n",
+		   rvu_rsrc_free_count(&mcam->counters));
+
+	if (mcam->bmap_entries == mcam->bmap_fcnt) {
+		mutex_unlock(&mcam->lock);
+		return 0;
+	}
+
+	seq_puts(filp, "\n\t\t Current allocation\n");
+	seq_puts(filp, "\t\t====================\n");
+	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
+		pcifunc = (pf << RVU_PFVF_PF_SHIFT);
+		rvu_print_npc_mcam_info(filp, pcifunc, blkaddr);
+
+		cfg = rvu_read64(rvu, BLKADDR_RVUM, RVU_PRIV_PFX_CFG(pf));
+		numvfs = (cfg >> 12) & 0xFF;
+		for (vf = 0; vf < numvfs; vf++) {
+			pcifunc = (pf << RVU_PFVF_PF_SHIFT) | (vf + 1);
+			rvu_print_npc_mcam_info(filp, pcifunc, blkaddr);
+		}
+	}
+
+	mutex_unlock(&mcam->lock);
+	return 0;
+}
+
 static int parse_sso_cmd_buffer(char *cmd_buf, size_t *count,
 				const char __user *buffer, int *ssolf,
 				bool *all)
@@ -2575,6 +2859,7 @@ static int rvu_dbg_cpt_lfs_info_display(struct seq_file *filp, void *unused)
 	seq_puts(filp, "===========================================\n");
 	for (lf = 0; lf < block->lf.max; lf++) {
 		reg = rvu_read64(rvu, blkaddr, CPT_AF_LFX_CTL(lf));
+
 		seq_printf(filp, "CPT Lf[%u] CTL          0x%llx\n", lf, reg);
 		reg = rvu_read64(rvu, blkaddr, CPT_AF_LFX_CTL2(lf));
 		seq_printf(filp, "CPT Lf[%u] CTL2         0x%llx\n", lf, reg);
@@ -2675,290 +2960,6 @@ static void rvu_dbg_cpt_init(struct rvu *rvu, int blkaddr)
 			    &rvu_dbg_cpt_lfs_info_fops);
 	debugfs_create_file("cpt_err_info", 0600, rvu->rvu_dbg.cpt, rvu,
 			    &rvu_dbg_cpt_err_info_fops);
-}
-
-#define PRINT_CGX_CUML_NIXRX_STATUS(idx, name)				\
-	({								\
-		u64 cnt;						\
-		err = rvu_cgx_nix_cuml_stats(rvu, cgxd, lmac_id, (idx),	\
-					     NIX_STATS_RX, &(cnt));	\
-		if (!err)						\
-			seq_printf(s, "%s: %llu\n", name, cnt);		\
-		cnt;							\
-	})
-
-#define PRINT_CGX_CUML_NIXTX_STATUS(idx, name)			\
-	({								\
-		u64 cnt;						\
-		err = rvu_cgx_nix_cuml_stats(rvu, cgxd, lmac_id, (idx),	\
-					  NIX_STATS_TX, &(cnt));	\
-		if (!err)						\
-			seq_printf(s, "%s: %llu\n", name, cnt);		\
-		cnt;							\
-	})
-
-static int cgx_print_stats(struct seq_file *s, int lmac_id)
-{
-	struct cgx_link_user_info linfo;
-	struct mac_ops *mac_ops;
-	void *cgxd = s->private;
-	u64 ucast, mcast, bcast;
-	int stat = 0, err = 0;
-	u64 tx_stat, rx_stat;
-	struct rvu *rvu;
-
-	rvu = pci_get_drvdata(pci_get_device(PCI_VENDOR_ID_CAVIUM,
-					     PCI_DEVID_OCTEONTX2_RVU_AF, NULL));
-	if (!rvu)
-		return -ENODEV;
-
-	mac_ops = get_mac_ops(cgxd);
-	/* There can be no CGX devices at all */
-	if (!mac_ops)
-		return 0;
-
-	/* Link status */
-	seq_puts(s, "\n=======Link Status======\n\n");
-	err = cgx_get_link_info(cgxd, lmac_id, &linfo);
-	if (err)
-		seq_puts(s, "Failed to read link status\n");
-	seq_printf(s, "\nLink is %s %d Mbps\n\n",
-		   linfo.link_up ? "UP" : "DOWN", linfo.speed);
-
-	/* Rx stats */
-	seq_printf(s, "\n=======NIX RX_STATS(%s port level)======\n\n",
-		   mac_ops->name);
-	ucast = PRINT_CGX_CUML_NIXRX_STATUS(RX_UCAST, "rx_ucast_frames");
-	if (err)
-		return err;
-	mcast = PRINT_CGX_CUML_NIXRX_STATUS(RX_MCAST, "rx_mcast_frames");
-	if (err)
-		return err;
-	bcast = PRINT_CGX_CUML_NIXRX_STATUS(RX_BCAST, "rx_bcast_frames");
-	if (err)
-		return err;
-	seq_printf(s, "rx_frames: %llu\n", ucast + mcast + bcast);
-	PRINT_CGX_CUML_NIXRX_STATUS(RX_OCTS, "rx_bytes");
-	if (err)
-		return err;
-	PRINT_CGX_CUML_NIXRX_STATUS(RX_DROP, "rx_drops");
-	if (err)
-		return err;
-	PRINT_CGX_CUML_NIXRX_STATUS(RX_ERR, "rx_errors");
-	if (err)
-		return err;
-
-	/* Tx stats */
-	seq_printf(s, "\n=======NIX TX_STATS(%s port level)======\n\n",
-		   mac_ops->name);
-	ucast = PRINT_CGX_CUML_NIXTX_STATUS(TX_UCAST, "tx_ucast_frames");
-	if (err)
-		return err;
-	mcast = PRINT_CGX_CUML_NIXTX_STATUS(TX_MCAST, "tx_mcast_frames");
-	if (err)
-		return err;
-	bcast = PRINT_CGX_CUML_NIXTX_STATUS(TX_BCAST, "tx_bcast_frames");
-	if (err)
-		return err;
-	seq_printf(s, "tx_frames: %llu\n", ucast + mcast + bcast);
-	PRINT_CGX_CUML_NIXTX_STATUS(TX_OCTS, "tx_bytes");
-	if (err)
-		return err;
-	PRINT_CGX_CUML_NIXTX_STATUS(TX_DROP, "tx_drops");
-	if (err)
-		return err;
-
-	/* Rx stats */
-	seq_printf(s, "\n=======%s RX_STATS======\n\n", mac_ops->name);
-	while (stat < mac_ops->rx_stats_cnt) {
-		err = mac_ops->mac_get_rx_stats(cgxd, lmac_id, stat, &rx_stat);
-		if (err)
-			return err;
-		if (is_rvu_otx2(rvu))
-			seq_printf(s, "%s: %llu\n", cgx_rx_stats_fields[stat],
-				   rx_stat);
-		else
-			seq_printf(s, "%s: %llu\n", rpm_rx_stats_fields[stat],
-				   rx_stat);
-		stat++;
-	}
-
-	/* Tx stats */
-	stat = 0;
-	seq_printf(s, "\n=======%s TX_STATS======\n\n", mac_ops->name);
-	while (stat < mac_ops->tx_stats_cnt) {
-		err = mac_ops->mac_get_tx_stats(cgxd, lmac_id, stat, &tx_stat);
-		if (err)
-			return err;
-		if (is_rvu_otx2(rvu))
-			seq_printf(s, "%s: %llu\n", cgx_tx_stats_fields[stat],
-				   tx_stat);
-		else
-			seq_printf(s, "%s: %llu\n", rpm_tx_stats_fields[stat],
-				   tx_stat);
-		stat++;
-	}
-
-	return err;
-}
-
-static int rvu_dbg_cgx_stat_display(struct seq_file *filp, void *unused)
-{
-	struct dentry *current_dir;
-	int err, lmac_id;
-	char *buf;
-
-	current_dir = filp->file->f_path.dentry->d_parent;
-	buf = strrchr(current_dir->d_name.name, 'c');
-	if (!buf)
-		return -EINVAL;
-
-	err = kstrtoint(buf + 1, 10, &lmac_id);
-	if (!err) {
-		err = cgx_print_stats(filp, lmac_id);
-		if (err)
-			return err;
-	}
-	return err;
-}
-
-RVU_DEBUG_SEQ_FOPS(cgx_stat, cgx_stat_display, NULL);
-
-static void rvu_dbg_cgx_init(struct rvu *rvu)
-{
-	struct mac_ops *mac_ops;
-	unsigned long lmac_bmap;
-	int i, lmac_id;
-	char dname[20];
-	void *cgx;
-
-	if (!cgx_get_cgxcnt_max())
-		return;
-
-	mac_ops = get_mac_ops(rvu_first_cgx_pdata(rvu));
-	if (!mac_ops)
-		return;
-
-	rvu->rvu_dbg.cgx_root = debugfs_create_dir(mac_ops->name,
-						   rvu->rvu_dbg.root);
-
-	for (i = 0; i < cgx_get_cgxcnt_max(); i++) {
-		cgx = rvu_cgx_pdata(i, rvu);
-		if (!cgx)
-			continue;
-		lmac_bmap = cgx_get_lmac_bmap(cgx);
-		/* cgx debugfs dir */
-		sprintf(dname, "%s%d", mac_ops->name, i);
-		rvu->rvu_dbg.cgx = debugfs_create_dir(dname,
-						      rvu->rvu_dbg.cgx_root);
-		for_each_set_bit(lmac_id, &lmac_bmap, MAX_LMAC_PER_CGX) {
-			/* lmac debugfs dir */
-			sprintf(dname, "lmac%d", lmac_id);
-			rvu->rvu_dbg.lmac =
-				debugfs_create_dir(dname, rvu->rvu_dbg.cgx);
-
-				debugfs_create_file("stats", 0600, rvu->rvu_dbg.lmac,
-						    cgx, &rvu_dbg_cgx_stat_fops);
-		}
-	}
-}
-
-/* NPC debugfs APIs */
-static void rvu_print_npc_mcam_info(struct seq_file *s,
-				    u16 pcifunc, int blkaddr)
-{
-	struct rvu *rvu = s->private;
-	int entry_acnt, entry_ecnt;
-	int cntr_acnt, cntr_ecnt;
-
-	rvu_npc_get_mcam_entry_alloc_info(rvu, pcifunc, blkaddr,
-					  &entry_acnt, &entry_ecnt);
-	rvu_npc_get_mcam_counter_alloc_info(rvu, pcifunc, blkaddr,
-					    &cntr_acnt, &cntr_ecnt);
-	if (!entry_acnt && !cntr_acnt)
-		return;
-
-	if (!(pcifunc & RVU_PFVF_FUNC_MASK))
-		seq_printf(s, "\n\t\t Device \t\t: PF%d\n",
-			   rvu_get_pf(pcifunc));
-	else
-		seq_printf(s, "\n\t\t Device \t\t: PF%d VF%d\n",
-			   rvu_get_pf(pcifunc),
-			   (pcifunc & RVU_PFVF_FUNC_MASK) - 1);
-
-	if (entry_acnt) {
-		seq_printf(s, "\t\t Entries allocated \t: %d\n", entry_acnt);
-		seq_printf(s, "\t\t Entries enabled \t: %d\n", entry_ecnt);
-	}
-	if (cntr_acnt) {
-		seq_printf(s, "\t\t Counters allocated \t: %d\n", cntr_acnt);
-		seq_printf(s, "\t\t Counters enabled \t: %d\n", cntr_ecnt);
-	}
-}
-
-static int rvu_dbg_npc_mcam_info_display(struct seq_file *filp, void *unsued)
-{
-	struct rvu *rvu = filp->private;
-	int pf, vf, numvfs, blkaddr;
-	struct npc_mcam *mcam;
-	u16 pcifunc, counters;
-	u64 cfg;
-
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
-	if (blkaddr < 0)
-		return -ENODEV;
-
-	mcam = &rvu->hw->mcam;
-	counters = rvu->hw->npc_counters;
-
-	seq_puts(filp, "\nNPC MCAM info:\n");
-	/* MCAM keywidth on receive and transmit sides */
-	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX));
-	cfg = (cfg >> 32) & 0x07;
-	seq_printf(filp, "\t\t RX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
-		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
-		   "224bits" : "448bits"));
-	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX));
-	cfg = (cfg >> 32) & 0x07;
-	seq_printf(filp, "\t\t TX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
-		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
-		   "224bits" : "448bits"));
-
-	mutex_lock(&mcam->lock);
-	/* MCAM entries */
-	seq_printf(filp, "\n\t\t MCAM entries \t: %d\n", mcam->total_entries);
-	seq_printf(filp, "\t\t Reserved \t: %d\n",
-		   mcam->total_entries - mcam->bmap_entries);
-	seq_printf(filp, "\t\t Available \t: %d\n", mcam->bmap_fcnt);
-
-	/* MCAM counters */
-	seq_printf(filp, "\n\t\t MCAM counters \t: %d\n", counters);
-	seq_printf(filp, "\t\t Reserved \t: %d\n",
-		   counters - mcam->counters.max);
-	seq_printf(filp, "\t\t Available \t: %d\n",
-		   rvu_rsrc_free_count(&mcam->counters));
-
-	if (mcam->bmap_entries == mcam->bmap_fcnt) {
-		mutex_unlock(&mcam->lock);
-		return 0;
-	}
-
-	seq_puts(filp, "\n\t\t Current allocation\n");
-	seq_puts(filp, "\t\t====================\n");
-	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
-		pcifunc = (pf << RVU_PFVF_PF_SHIFT);
-		rvu_print_npc_mcam_info(filp, pcifunc, blkaddr);
-
-		cfg = rvu_read64(rvu, BLKADDR_RVUM, RVU_PRIV_PFX_CFG(pf));
-		numvfs = (cfg >> 12) & 0xFF;
-		for (vf = 0; vf < numvfs; vf++) {
-			pcifunc = (pf << RVU_PFVF_PF_SHIFT) | (vf + 1);
-			rvu_print_npc_mcam_info(filp, pcifunc, blkaddr);
-		}
-	}
-
-	mutex_unlock(&mcam->lock);
-	return 0;
 }
 
 RVU_DEBUG_SEQ_FOPS(npc_mcam_info, npc_mcam_info_display, NULL);
