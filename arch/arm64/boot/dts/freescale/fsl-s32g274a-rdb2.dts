@@ -74,11 +74,24 @@
 &pfe2_mdio {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl0_pfe2_mdio_b>;
-	/* AR8035 */
+	/* KSZ9031 PFE2*/
 	mdio_b_phy4: ethernet-phy@4 {
+		compatible = "ethernet-phy-ieee802.3-c22";
 		#address-cells = <1>;
 		#size-cells = <0>;
 		reg = <4>;
+		rxdv-skew-ps = <480>;
+		txen-skew-ps = <480>;
+		rxd0-skew-ps = <480>;
+		rxd1-skew-ps = <480>;
+		rxd2-skew-ps = <480>;
+		rxd3-skew-ps = <480>;
+		txd0-skew-ps = <420>;
+		txd1-skew-ps = <420>;
+		txd2-skew-ps = <360>;
+		txd3-skew-ps = <360>;
+		txc-skew-ps = <1020>;
+		rxc-skew-ps = <960>;
 	};
 	/* SJA1110's phys: 0x09-0x0e */
 };
