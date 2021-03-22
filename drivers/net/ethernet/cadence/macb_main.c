@@ -4769,10 +4769,6 @@ static int __maybe_unused macb_suspend(struct device *dev)
 		gem_writel(bp, WOL, MACB_BIT(ARP) | arpipmask);
 		spin_unlock_irqrestore(&bp->lock, flags);
 		enable_irq_wake(bp->queues[0].irq);
-		netif_device_detach(netdev);
-		for (q = 0, queue = bp->queues; q < bp->num_queues;
-		     ++q, ++queue)
-			napi_disable(&queue->napi);
 	}
 
 	netif_device_detach(netdev);
@@ -4797,7 +4793,7 @@ static int __maybe_unused macb_suspend(struct device *dev)
 
 	if (bp->ptp_info)
 		bp->ptp_info->ptp_remove(netdev);
-	if (!device_may_wakeup(dev))
+	if (!device_may_wakeup(&bp->dev->dev))
 		pm_runtime_force_suspend(dev);
 
 	return 0;
@@ -4814,7 +4810,7 @@ static int __maybe_unused macb_resume(struct device *dev)
 	if (!netif_running(netdev))
 		return 0;
 
-	if (!device_may_wakeup(dev))
+	if (!device_may_wakeup(&bp->dev->dev))
 		pm_runtime_force_resume(dev);
 
 	if (device_may_wakeup(&bp->dev->dev)) {
@@ -4827,10 +4823,6 @@ static int __maybe_unused macb_resume(struct device *dev)
 		disable_irq_wake(bp->queues[0].irq);
 		spin_unlock_irqrestore(&bp->lock, flags);
 		macb_writel(bp, NCR, MACB_BIT(MPE));
-		for (q = 0, queue = bp->queues; q < bp->num_queues;
-		     ++q, ++queue)
-			napi_enable(&queue->napi);
-		netif_carrier_on(netdev);
 	}
 
 	for (q = 0, queue = bp->queues; q < bp->num_queues;
@@ -4863,7 +4855,7 @@ static int __maybe_unused macb_runtime_suspend(struct device *dev)
 	struct net_device *netdev = dev_get_drvdata(dev);
 	struct macb *bp = netdev_priv(netdev);
 
-	if (!(device_may_wakeup(dev))) {
+	if (!(device_may_wakeup(&bp->dev->dev))) {
 		clk_disable_unprepare(bp->tx_clk);
 		clk_disable_unprepare(bp->hclk);
 		clk_disable_unprepare(bp->pclk);
@@ -4882,7 +4874,7 @@ static int __maybe_unused macb_runtime_resume(struct device *dev)
 	struct net_device *netdev = dev_get_drvdata(dev);
 	struct macb *bp = netdev_priv(netdev);
 
-	if (!(device_may_wakeup(dev))) {
+	if (!(device_may_wakeup(&bp->dev->dev))) {
 		clk_prepare_enable(bp->pclk);
 		clk_prepare_enable(bp->hclk);
 		clk_prepare_enable(bp->tx_clk);
