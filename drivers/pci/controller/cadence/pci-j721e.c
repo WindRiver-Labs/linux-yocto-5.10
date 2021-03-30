@@ -36,6 +36,10 @@
 #define STATUS_CLR_REG_SYS_0	0x700
 #define INTx_EN(num)		(1 << (num))
 
+#define ENABLE_REG_SYS_1	0x104
+#define STATUS_REG_SYS_1	0x504
+#define SYS1_INTx_EN(num)	(1 << (22 + (num)))
+
 #define J721E_PCIE_USER_CMD_STATUS	0x4
 #define LINK_TRAINING_ENABLE		BIT(0)
 
@@ -47,6 +51,14 @@ enum link_status {
 	LINK_TRAINING_IN_PROGRESS,
 	LINK_UP_DL_IN_PROGRESS,
 	LINK_UP_DL_COMPLETED,
+};
+
+#define USER_EOI_REG		0xC8
+enum eoi_reg {
+	EOI_DOWNSTREAM_INTERRUPT,
+	EOI_FLR_INTERRUPT,
+	EOI_LEGACY_INTERRUPT,
+	EOI_POWER_STATE_INTERRUPT,
 };
 
 #define J721E_MODE_RC			BIT(7)
@@ -66,6 +78,7 @@ struct j721e_pcie {
 	void __iomem		*user_cfg_base;
 	void __iomem		*intd_cfg_base;
 	struct irq_domain	*legacy_irq_domain;
+	bool			is_intc_v1;
 	u32			linkdown_irq_regfield;
 };
 
@@ -76,6 +89,7 @@ enum j721e_pcie_mode {
 
 struct j721e_pcie_data {
 	enum j721e_pcie_mode	mode;
+	bool			is_intc_v1;
 	unsigned int		quirk_retrain_flag:1;
 	unsigned int		quirk_detect_quiet_flag:1;
 	u32			linkdown_irq_regfield;
@@ -116,8 +130,8 @@ static irqreturn_t j721e_pcie_link_irq_handler(int irq, void *priv)
 
 	dev_err(dev, "LINK DOWN!\n");
 
-	j721e_pcie_intd_writel(pcie, STATUS_CLR_REG_SYS_2, pcie->linkdown_irq_regfield);
-	return IRQ_HANDLED;
++	j721e_pcie_intd_writel(pcie, STATUS_CLR_REG_SYS_2, pcie->link_irq_reg_field);
+	 return IRQ_HANDLED;
 }
 
 static void j721e_pcie_config_link_irq(struct j721e_pcie *pcie)
@@ -130,6 +144,30 @@ static void j721e_pcie_config_link_irq(struct j721e_pcie *pcie)
 }
 
 static void j721e_pcie_legacy_irq_handler(struct irq_desc *desc)
+{
+	struct j721e_pcie *pcie = irq_desc_get_handler_data(desc);
+	struct irq_chip *chip = irq_desc_get_chip(desc);
+	int virq;
+	u32 reg;
+	int i;
+
+	chained_irq_enter(chip, desc);
+
+	for (i = 0; i < PCI_NUM_INTX; i++) {
+		reg = j721e_pcie_intd_readl(pcie, STATUS_REG_SYS_1);
+		if (!(reg & SYS1_INTx_EN(i)))
+			continue;
+
+		virq = irq_find_mapping(pcie->legacy_irq_domain, i);
+		generic_handle_irq(virq);
+		j721e_pcie_user_writel(pcie, USER_EOI_REG,
+				       EOI_LEGACY_INTERRUPT);
+	}
+
+	chained_irq_exit(chip, desc);
+}
+
+static void j721e_pcie_v1_legacy_irq_handler(struct irq_desc *desc)
 {
 	struct j721e_pcie *pcie = irq_desc_get_handler_data(desc);
 	struct irq_chip *chip = irq_desc_get_chip(desc);
@@ -185,7 +223,11 @@ static int j721e_pcie_config_legacy_irq(struct j721e_pcie *pcie)
 		dev_err(dev, "Failed to parse and map legacy irq\n");
 		return -EINVAL;
 	}
-	irq_set_chained_handler_and_data(irq, j721e_pcie_legacy_irq_handler, pcie);
+
+	if (pcie->is_intc_v1)
+		irq_set_chained_handler_and_data(irq, j721e_pcie_v1_legacy_irq_handler, pcie);
+	else
+		irq_set_chained_handler_and_data(irq, j721e_pcie_legacy_irq_handler, pcie);
 
 	legacy_irq_domain = irq_domain_add_linear(intc_node, PCI_NUM_INTX,
 						  &j721e_pcie_intx_domain_ops, NULL);
@@ -195,10 +237,18 @@ static int j721e_pcie_config_legacy_irq(struct j721e_pcie *pcie)
 	}
 	pcie->legacy_irq_domain = legacy_irq_domain;
 
-	for (i = 0; i < PCI_NUM_INTX; i++) {
-		reg = j721e_pcie_intd_readl(pcie, ENABLE_REG_SYS_0);
-		reg |= INTx_EN(i);
-		j721e_pcie_intd_writel(pcie, ENABLE_REG_SYS_0, reg);
+	if (pcie->is_intc_v1) {
+		for (i = 0; i < PCI_NUM_INTX; i++) {
+			reg = j721e_pcie_intd_readl(pcie, ENABLE_REG_SYS_0);
+			reg |= INTx_EN(i);
+			j721e_pcie_intd_writel(pcie, ENABLE_REG_SYS_0, reg);
+		}
+	} else {
+		for (i = 0; i < PCI_NUM_INTX; i++) {
+			reg = j721e_pcie_intd_readl(pcie, ENABLE_REG_SYS_1);
+			reg |= SYS1_INTx_EN(i);
+			j721e_pcie_intd_writel(pcie, ENABLE_REG_SYS_1, reg);
+		}
 	}
 
 	return 0;
@@ -240,6 +290,12 @@ static bool j721e_pcie_link_up(struct cdns_pcie *cdns_pcie)
 }
 
 static const struct cdns_pcie_ops j721e_pcie_ops = {
+	.start_link = j721e_pcie_start_link,
+	.stop_link = j721e_pcie_stop_link,
+	.link_up = j721e_pcie_link_up,
+};
+
+static const struct cdns_pcie_ops j7200_pcie_ops = {
 	.start_link = j721e_pcie_start_link,
 	.stop_link = j721e_pcie_stop_link,
 	.link_up = j721e_pcie_link_up,
@@ -372,6 +428,7 @@ static struct pci_ops cdns_ti_pcie_host_ops = {
 static const struct j721e_pcie_data j721e_pcie_rc_data = {
 	.mode = PCI_MODE_RC,
 	.quirk_retrain_flag = true,
+	.is_intc_v1 = true,
 	.byte_access_allowed = false,
 	.linkdown_irq_regfield = LINK_DOWN,
 };
@@ -384,8 +441,9 @@ static const struct j721e_pcie_data j721e_pcie_ep_data = {
 static const struct j721e_pcie_data j7200_pcie_rc_data = {
 	.mode = PCI_MODE_RC,
 	.quirk_detect_quiet_flag = true,
-	.linkdown_irq_regfield = J7200_LINK_DOWN,
+	.is_intc_v1 = false,
 	.byte_access_allowed = true,
+	.linkdown_irq_regfield = J7200_LINK_DOWN,
 };
 
 static const struct j721e_pcie_data j7200_pcie_ep_data = {
@@ -462,6 +520,7 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 
 	pcie->dev = dev;
 	pcie->mode = mode;
+	pcie->is_intc_v1 = data->is_intc_v1;
 	pcie->linkdown_irq_regfield = data->linkdown_irq_regfield;
 
 	base = devm_platform_ioremap_resource_byname(pdev, "intd_cfg");
