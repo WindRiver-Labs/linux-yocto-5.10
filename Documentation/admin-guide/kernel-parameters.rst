@@ -68,27 +68,14 @@ For example one can add to the command line following parameter:
 
 where the final item represents CPUs 100,101,125,126,150,151,...
 
-The following convenience aliases are also accepted and used:
+The value "N" can be used to represent the numerically last CPU on the system,
+i.e "foo_cpus=16-N" would be equivalent to "16-31" on a 32 core system.
 
-        foo_cpus=all
+Keep in mind that "N" is dynamic, so if system changes cause the bitmap width
+to change, such as less cores in the CPU list, then N and any ranges using N
+will also change.  Use the same on a small 4 core system, and "16-N" becomes
+"16-3" and now the same boot input will be flagged as invalid (start > end).
 
-is equivalent to "foo_cpus=0-N" -- where "N" is the numerically last CPU on
-the system, thus avoiding looking up the value in "/sys/devices/system/cpu"
-in advance on each deployed system.
-
-        foo_cpus=none
-
-will provide an empty/cleared cpu mask for the associated boot argument.
-
-Note that "all" and "none" are not necessarily valid/sensible input values
-for each available parameter expecting a CPU list.
-
-        foo_cpus=1,3,5,16-last
-
-will at runtime, replace "last" with the number of the last (highest number)
-present CPU on the system.  Thus a common deployment can be used on multiple
-systems with different total number of cores present, without needing to
-evaluate the total core count in advance on each system.
 
 This document may not be entirely up to date and comprehensive. The command
 "modinfo -p ${modulename}" shows a current list of all parameters of a loadable
