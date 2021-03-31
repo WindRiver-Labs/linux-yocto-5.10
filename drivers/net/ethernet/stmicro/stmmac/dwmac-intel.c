@@ -637,7 +637,6 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	}
 
 	/* Setup MSI vector offset specific to Intel mGbE controller */
-	plat->msi_phy_conv_vec = 30;
 	plat->msi_mac_vec = 29;
 	plat->msi_lpi_vec = 28;
 	plat->msi_sfty_ce_vec = 27;
@@ -1061,9 +1060,6 @@ static int stmmac_config_multi_msi(struct pci_dev *pdev,
 		res->wol_irq = pci_irq_vector(pdev, plat->msi_wol_vec);
 	if (plat->msi_lpi_vec < STMMAC_MSI_VEC_MAX)
 		res->lpi_irq = pci_irq_vector(pdev, plat->msi_lpi_vec);
-	if (plat->msi_phy_conv_vec < STMMAC_MSI_VEC_MAX)
-		res->phy_conv_irq = pci_irq_vector(pdev,
-						   plat->msi_phy_conv_vec);
 	if (plat->msi_sfty_ce_vec < STMMAC_MSI_VEC_MAX)
 		res->sfty_ce_irq = pci_irq_vector(pdev, plat->msi_sfty_ce_vec);
 	if (plat->msi_sfty_ue_vec < STMMAC_MSI_VEC_MAX)
@@ -1146,7 +1142,6 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	plat->msi_mac_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_wol_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_lpi_vec = STMMAC_MSI_VEC_MAX;
-	plat->msi_phy_conv_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_sfty_ce_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_sfty_ue_vec = STMMAC_MSI_VEC_MAX;
 	plat->msi_rx_base_vec = STMMAC_MSI_VEC_MAX;
