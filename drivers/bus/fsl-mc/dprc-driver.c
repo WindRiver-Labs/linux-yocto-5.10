@@ -765,13 +765,6 @@ static int dprc_probe(struct fsl_mc_device *mc_dev)
 	if (error < 0)
 		return error;
 
-	error = device_create_file(&mc_dev->dev, &dev_attr_rescan);
-       if (error < 0) {
-               dev_err(&mc_dev->dev, "device_create_file() failed: %d\n",
-                       error);
-               goto error_cleanup_open;
-       }
-
 	/*
 	 * Discover MC objects in DPRC object:
 	 */
@@ -881,12 +874,6 @@ static int dprc_remove(struct fsl_mc_device *mc_dev)
 		dprc_teardown_irq(mc_dev);
 
 	device_for_each_child(&mc_dev->dev, NULL, __fsl_mc_device_remove);
-
-	error = fsl_mc_uapi_create_device_file(mc_bus);
-        if (error < 0) {
-                error = -EPROBE_DEFER;
-	        goto error_cleanup_msi_domain;
-        }
 
 	dprc_cleanup(mc_dev);
 
