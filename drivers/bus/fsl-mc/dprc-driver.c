@@ -175,7 +175,7 @@ static void fsl_mc_obj_device_add(struct fsl_mc_device *mc_bus_dev,
 		check_plugged_state_change(child_dev, obj_desc);
 		put_device(&child_dev->dev);
 	} else {
-		error = fsl_mc_device_add(obj_desc, NULL, &mc_bus_dev->dev,
+		error = fsl_mc_device_add(obj_desc, NULL, &mc_bus_dev->dev, NULL,
 					  &child_dev);
 		if (error < 0)
 			return;
@@ -197,7 +197,6 @@ static void fsl_mc_obj_device_add(struct fsl_mc_device *mc_bus_dev,
  * in the physical DPRC.
  */
 static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
-				 const char *driver_override,
 				 struct fsl_mc_obj_desc *obj_desc_array,
 				 int num_child_objects_in_mc)
 {
@@ -241,7 +240,7 @@ static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
  * of the device drivers for the non-allocatable devices.
  */
 int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
-			unsigned int *total_irq_count)
+			bool alloc_interrupts)
 {
 	int num_child_objects;
 	int dprc_get_obj_failures;
@@ -342,8 +341,8 @@ int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
 	dprc_remove_devices(mc_bus_dev, child_obj_desc_array,
 			    num_child_objects);
 
-	dprc_add_new_devices(mc_bus_dev, driver_override, child_obj_desc_array,
-			     num_child_objects);
+	dprc_add_new_devices(mc_bus_dev, child_obj_desc_array,
+                             num_child_objects);
 
 	if (child_obj_desc_array)
 		devm_kfree(&mc_bus_dev->dev, child_obj_desc_array);
