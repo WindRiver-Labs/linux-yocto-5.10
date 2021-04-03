@@ -69,6 +69,82 @@ int dpmcp_reset(struct fsl_mc_io *mc_io,
 		u32 cmd_flags,
 		u16 token);
 
+/* Minimal supported DPRC Version */
+#define DPRC_MIN_VER_MAJOR                      6
+#define DPRC_MIN_VER_MINOR                      0
+
+/* DPRC command versioning */
+#define DPRC_CMD_BASE_VERSION                   1
+#define DPRC_CMD_2ND_VERSION                    2
+#define DPRC_CMD_3RD_VERSION                    3
+#define DPRC_CMD_ID_OFFSET                      4
+
+#define DPRC_CMD(id)    (((id) << DPRC_CMD_ID_OFFSET) | DPRC_CMD_BASE_VERSION)
+#define DPRC_CMD_V2(id) (((id) << DPRC_CMD_ID_OFFSET) | DPRC_CMD_2ND_VERSION)
+#define DPRC_CMD_V3(id) (((id) << DPRC_CMD_ID_OFFSET) | DPRC_CMD_3RD_VERSION)
+
+/* DPRC command IDs */
+#define DPRC_CMDID_CLOSE                        DPRC_CMD(0x800)
+#define DPRC_CMDID_OPEN                         DPRC_CMD(0x805)
+#define DPRC_CMDID_GET_API_VERSION              DPRC_CMD(0xa05)
+
+#define DPRC_CMDID_GET_ATTR                     DPRC_CMD(0x004)
+#define DPRC_CMDID_RESET_CONT                   DPRC_CMD(0x005)
+#define DPRC_CMDID_RESET_CONT_V2                DPRC_CMD_V2(0x005)
+
+#define DPRC_CMDID_SET_IRQ                      DPRC_CMD(0x010)
+#define DPRC_CMDID_SET_IRQ_ENABLE               DPRC_CMD(0x012)
+#define DPRC_CMDID_SET_IRQ_MASK                 DPRC_CMD(0x014)
+#define DPRC_CMDID_GET_IRQ_STATUS               DPRC_CMD(0x016)
+#define DPRC_CMDID_CLEAR_IRQ_STATUS             DPRC_CMD(0x017)
+
+#define DPRC_CMDID_GET_CONT_ID                  DPRC_CMD(0x830)
+#define DPRC_CMDID_GET_OBJ_COUNT                DPRC_CMD(0x159)
+#define DPRC_CMDID_GET_OBJ                      DPRC_CMD(0x15A)
+#define DPRC_CMDID_GET_OBJ_REG                  DPRC_CMD(0x15E)
+#define DPRC_CMDID_GET_OBJ_REG_V2               DPRC_CMD_V2(0x15E)
+#define DPRC_CMDID_GET_OBJ_REG_V3               DPRC_CMD_V3(0x15E)
+#define DPRC_CMDID_SET_OBJ_IRQ                  DPRC_CMD(0x15F)
+
+#define DPRC_CMDID_GET_CONNECTION               DPRC_CMD(0x16C)
+
+struct dprc_cmd_get_connection {
+        __le32 ep1_id;
+        __le16 ep1_interface_id;
+        u8 pad[2];
+        u8 ep1_type[16];
+};
+
+struct dprc_rsp_get_connection {
+        __le64 pad[3];
+        __le32 ep2_id;
+        __le16 ep2_interface_id;
+        __le16 pad1;
+        u8 ep2_type[16];
+        __le32 state;
+};
+
+/**
+ * struct dprc_endpoint - Endpoint description for link connect/disconnect
+ *                      operations
+ * @type:       Endpoint object type: NULL terminated string
+ * @id:         Endpoint object ID
+ * @if_id:      Interface ID; should be set for endpoints with multiple
+ *              interfaces ("dpsw", "dpdmux"); for others, always set to 0
+ */
+struct dprc_endpoint {
+        char type[16];
+        int id;
+        u16 if_id;
+};
+
+int dprc_get_connection(struct fsl_mc_io *mc_io,
+                        u32 cmd_flags,
+                        u16 token,
+                        const struct dprc_endpoint *endpoint1,
+                        struct dprc_endpoint *endpoint2,
+                        int *state);
+
 /*
  * Data Path Buffer Pool (DPBP) API
  */
