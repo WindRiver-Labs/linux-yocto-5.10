@@ -572,7 +572,8 @@ struct dprc_cmd_open {
 };
 
 struct dprc_cmd_reset_container {
-       __le32 child_container_id;
+	__le32 child_container_id;
+	__le32 options;
 };
 
 struct dprc_cmd_set_irq {
@@ -861,7 +862,8 @@ int dprc_get_container_id(struct fsl_mc_io *mc_io,
 int dprc_reset_container(struct fsl_mc_io *mc_io,
                         u32 cmd_flags,
                         u16 token,
-                        int child_container_id);
+                        int child_container_id,
+			u32 options);
 
 
 #define DPRC_RESET_OPTION_NON_RECURSIVE                0x00000001
@@ -1062,9 +1064,7 @@ struct fsl_mc_bus {
 };
 
 int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev,
-		      const char *driver_override,
-			  bool alloc_interrupts,
-		      unsigned int *total_irq_count);
+			  bool alloc_interrupts);
 
 int __must_check fsl_create_mc_io(struct device *dev,
 				  phys_addr_t mc_portal_phys_addr,
@@ -1074,8 +1074,7 @@ int __must_check fsl_create_mc_io(struct device *dev,
 
 void fsl_destroy_mc_io(struct fsl_mc_io *mc_io);
 
-int fsl_mc_find_msi_domain(struct device *mc_platform_dev,
-			   struct irq_domain **mc_msi_domain);
+struct irq_domain *fsl_mc_find_msi_domain(struct device *dev);
 
 void fsl_mc_init_all_resource_pools(struct fsl_mc_device *mc_bus_dev);
 
