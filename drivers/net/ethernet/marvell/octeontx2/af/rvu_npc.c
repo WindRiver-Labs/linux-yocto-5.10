@@ -2724,7 +2724,6 @@ int rvu_mbox_handler_npc_mcam_free_counter(struct rvu *rvu,
 		if (index >= mcam->bmap_entries)
 			break;
 		entry = index + 1;
-
 		if (mcam->entry2cntr_map[index] != req->cntr)
 			continue;
 
