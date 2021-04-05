@@ -3227,7 +3227,7 @@ static int axienet_probe(struct platform_device *pdev)
 	lp->regs = devm_ioremap_resource(&pdev->dev, ethres);
 	if (IS_ERR(lp->regs)) {
 		ret = PTR_ERR(lp->regs);
-		goto free_netdev;
+		goto cleanup_clk;
 	}
 #ifdef CONFIG_XILINX_TSN
 	slave = of_property_read_bool(pdev->dev.of_node,
@@ -3529,6 +3529,20 @@ static int axienet_probe(struct platform_device *pdev)
 		if (ret)
 			dev_warn(&pdev->dev,
 				 "error registering MDIO bus: %d\n", ret);
+	}
+	if (lp->phy_mode == PHY_INTERFACE_MODE_SGMII ||
+	    lp->phy_mode == PHY_INTERFACE_MODE_1000BASEX) {
+		if (!lp->phy_node) {
+			dev_err(&pdev->dev, "phy-handle required for 1000BaseX/SGMII\n");
+			ret = -EINVAL;
+			goto cleanup_mdio;
+		}
+		lp->pcs_phy = of_mdio_find_device(lp->phy_node);
+		if (!lp->pcs_phy) {
+			ret = -EPROBE_DEFER;
+			goto cleanup_mdio;
+		}
+		lp->phylink_config.pcs_poll = true;
 	}
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
