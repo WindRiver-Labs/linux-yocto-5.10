@@ -54,6 +54,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	gpio-ir.dtbo \
 	gpio-ir-tx.dtbo \
 	gpio-key.dtbo \
+	gpio-led.dtbo \
 	gpio-no-bank0-irq.dtbo \
 	gpio-no-irq.dtbo \
 	gpio-poweroff.dtbo \
@@ -61,6 +62,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	hd44780-lcd.dtbo \
 	hdmi-backlight-hwhack-gpio.dtbo \
 	hifiberry-amp.dtbo \
+	hifiberry-amp100.dtbo \
 	hifiberry-dac.dtbo \
 	hifiberry-dacplus.dtbo \
 	hifiberry-dacplusadc.dtbo \
@@ -117,6 +119,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	merus-amp.dtbo \
 	midi-uart0.dtbo \
 	midi-uart1.dtbo \
+	minipitft13.dtbo \
 	miniuart-bt.dtbo \
 	mmc.dtbo \
 	mpu6050.dtbo \
@@ -126,9 +129,13 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	ov9281.dtbo \
 	papirus.dtbo \
 	pca953x.dtbo \
+	pcie-32bit-dma.dtbo \
 	pibell.dtbo \
 	pifacedigital.dtbo \
 	pifi-40.dtbo \
+	pifi-dac-hd.dtbo \
+	pifi-dac-zero.dtbo \
+	pifi-mini-210.dtbo \
 	piglow.dtbo \
 	piscreen.dtbo \
 	piscreen2r.dtbo \
@@ -209,6 +216,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	vc4-kms-kippah-7inch.dtbo \
 	vc4-kms-v3d.dtbo \
 	vc4-kms-v3d-pi4.dtbo \
+	vc4-kms-vga666.dtbo \
 	vga666.dtbo \
 	w1-gpio.dtbo \
 	w1-gpio-pullup.dtbo \
