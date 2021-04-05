@@ -1550,9 +1550,8 @@ static int s32gen1_pcie_config_common(struct s32gen1_pcie *s32_pp,
 	/* MSI configuration, for both RC and EP */
 #ifdef CONFIG_PCI_MSI
 	if ((!s32_pp->is_endpoint) && (!s32gen1_has_msi_parent(pp))) {
-		ret = s32gen1_pcie_config_irq(&pp->msi_irq, "msi", pdev,
-					      s32gen1_pcie_msi_handler, pp);
-		if (ret) {
+		pp->msi_irq = platform_get_irq_byname(pdev, "msi");
+		if (pp->msi_irq <= 0) {
 			dev_err(&pdev->dev, "failed to request msi irq\n");
 			return ret;
 		}
