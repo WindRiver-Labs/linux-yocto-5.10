@@ -3542,7 +3542,6 @@ static int axienet_probe(struct platform_device *pdev)
 			ret = -EPROBE_DEFER;
 			goto cleanup_mdio;
 		}
-		lp->phylink_config.pcs_poll = true;
 	}
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
@@ -3558,7 +3557,7 @@ static int axienet_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(lp->dev, "register_netdev() error (%i)\n", ret);
 		axienet_mdio_teardown(lp);
-		goto err_disable_clk;
+		goto cleanup_mdio;
 	}
 
 #ifdef CONFIG_XILINX_TSN_PTP
@@ -3590,10 +3589,18 @@ static int axienet_probe(struct platform_device *pdev)
 #endif
 	return 0;
 
+cleanup_mdio:
+	if (lp->pcs_phy)
+		put_device(&lp->pcs_phy->dev);
+	if (lp->mii_bus)
+		axienet_mdio_teardown(lp);
+	of_node_put(lp->phy_node);
 err_disable_clk:
 	axienet_clk_disable(pdev);
 free_netdev:
 	free_netdev(ndev);
+cleanup_clk:
+	clk_disable_unprepare(lp->clk);
 
 	return ret;
 }
