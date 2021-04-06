@@ -985,7 +985,7 @@ static int s32gen1_pcie_config_hp_irq(struct s32gen1_pcie *s32_pp,
 	return ret;
 }
 
-static int __init s32gen1_add_pcie_port(struct pcie_port *pp)
+static int s32gen1_add_pcie_port(struct pcie_port *pp)
 {
 	struct dw_pcie *pcie = to_dw_pcie_from_pp(pp);
 	int ret;
@@ -1027,7 +1027,7 @@ static struct dw_pcie_ep_ops pcie_ep_ops = {
 	.raise_irq = s32gen1_pcie_ep_raise_irq,
 };
 
-static int __init s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp)
+static int s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp)
 {
 	int ret;
 	struct dw_pcie *pcie = &s32_pp->pcie;
