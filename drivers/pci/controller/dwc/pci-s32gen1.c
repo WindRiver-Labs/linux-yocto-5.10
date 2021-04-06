@@ -782,7 +782,7 @@ static int s32gen1_pcie_config_irq(int *irq_id, char *irq_name,
 	return 0;
 }
 
-static int __init s32gen1_add_pcie_port(struct pcie_port *pp,
+static int s32gen1_add_pcie_port(struct pcie_port *pp,
 			struct platform_device *pdev)
 {
 	int ret;
@@ -833,7 +833,7 @@ static struct dw_pcie_ep_ops pcie_ep_ops = {
 	.raise_irq = s32gen1_pcie_ep_raise_irq,
 };
 
-static int __init s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp,
+static int s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp,
 				     struct platform_device *pdev)
 {
 	int ret;
