@@ -576,11 +576,11 @@ void metricgroup__print(bool metrics, bool metricgroups, char *filter,
                                                        continue;
                                                strlist__add(me->metrics, s);
                                        }
+					if (!raw)
+						free(s);
 				}
 			        free(omg);
 
-				if (!raw)
-					free(s);
 			}
 		}
 	}
