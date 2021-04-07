@@ -163,12 +163,9 @@ static int nxp_config_init(struct phy_device *phydev)
 
 	/* Setup and queue a polling function:
 	 *
-	 * The phy_queue is normally used to schedule the interrupt handler
-	 * from interrupt context after an irq has been received.
-	 * Here it is repurposed as scheduling mechanism for the poll function
+	 * Here the phy_queue is to purposed as scheduling mechanism for the poll function
 	 */
 	if (((struct nxp_specific_data *)phydev->priv)->poll_setup == 0) {
-		cancel_work_sync(&(((struct nxp_specific_data *)phydev->priv)->phy_queue));
 		INIT_WORK(&(((struct nxp_specific_data *)phydev->priv)->phy_queue), poll);
 		queue_work(system_power_efficient_wq, &(((struct nxp_specific_data *)phydev->priv)->phy_queue));
 
