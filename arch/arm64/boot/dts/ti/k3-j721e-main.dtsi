@@ -1810,7 +1810,6 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges = <0x0 0x00 0x0b000000 0x100000>;
-		dma-ranges;
 
 		icssg0_mem: memories@0 {
 			reg = <0x0 0x2000>,
@@ -1968,7 +1967,6 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges = <0x0 0x00 0x0b100000 0x100000>;
-		dma-ranges;
 
 		icssg1_mem: memories@b100000 {
 			reg = <0x0 0x2000>,
