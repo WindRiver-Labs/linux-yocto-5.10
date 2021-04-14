@@ -293,6 +293,13 @@ static int intel_crosststamp(ktime_t *device,
 
 	intel_priv = priv->plat->bsp_priv;
 
+	/* Both internal crosstimestamping and external triggered event
+	 * timestamping cannot be run concurrently.
+	 */
+	if (priv->plat->ext_snapshot_en)
+		return -EBUSY;
+
+	mutex_lock(&priv->aux_ts_lock);
 	/* Enable Internal snapshot trigger */
 	acr_value = readl(ptpaddr + PTP_ACR);
 	acr_value &= ~PTP_ACR_MASK;
@@ -318,6 +325,8 @@ static int intel_crosststamp(ktime_t *device,
 	acr_value = readl(ptpaddr + PTP_ACR);
 	acr_value |= PTP_ACR_ATSFC;
 	writel(acr_value, ptpaddr + PTP_ACR);
+	/* Release the mutex */
+	mutex_unlock(&priv->aux_ts_lock);
 
 	/* Trigger Internal snapshot signal
 	 * Create a rising edge by just toggle the GPO1 to low
@@ -507,6 +516,7 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
 
 	plat->int_snapshot_num = AUX_SNAPSHOT1;
+	plat->ext_snapshot_num = AUX_SNAPSHOT0;
 
 	plat->has_crossts = true;
 	plat->crosststamp = intel_crosststamp;
