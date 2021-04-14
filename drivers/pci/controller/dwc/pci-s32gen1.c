@@ -754,6 +754,7 @@ static struct dw_pcie_host_ops s32gen1_pcie_host_ops = {
 #endif
 };
 
+#if defined(CONFIG_PCI_S32GEN1_EP_MSI) || defined(CONFIG_PCI_DW_DMA)
 #define MAX_IRQ_NAME_SIZE 32
 static int s32gen1_pcie_config_irq(int *irq_id, char *irq_name,
 		struct platform_device *pdev,
@@ -781,6 +782,7 @@ static int s32gen1_pcie_config_irq(int *irq_id, char *irq_name,
 
 	return 0;
 }
+#endif /* CONFIG_PCI_S32GEN1_EP_MSI || CONFIG_PCI_DW_DMA */
 
 static int s32gen1_add_pcie_port(struct pcie_port *pp,
 			struct platform_device *pdev)
