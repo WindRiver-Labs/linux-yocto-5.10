@@ -633,7 +633,9 @@ static int hse_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct hse_drvdata *drv;
 	u16 status, init_ok_mask;
+#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
 	int err;
+#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 	dev_dbg(dev, "probing driver\n");
 
