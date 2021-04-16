@@ -2255,8 +2255,6 @@ static void zynqmp_disp_enable(struct zynqmp_disp *disp)
  */
 static void zynqmp_disp_disable(struct zynqmp_disp *disp, bool force)
 {
-	struct drm_crtc *crtc = &disp->xlnx_crtc.crtc;
-
 	if (!force && (!disp->enabled || zynqmp_disp_layer_is_enabled(disp)))
 		return;
 
