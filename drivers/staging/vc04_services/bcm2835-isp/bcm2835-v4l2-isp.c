@@ -1285,6 +1285,7 @@ static int register_node(struct bcm2835_isp_dev *dev,
 	int ret;
 
 	mutex_init(&node->lock);
+	mutex_init(&node->queue_lock);
 
 	node->dev = dev;
 	vfd = &node->vfd;
