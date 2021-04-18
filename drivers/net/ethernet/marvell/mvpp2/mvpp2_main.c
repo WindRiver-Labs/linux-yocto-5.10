@@ -1493,6 +1493,21 @@ static void mvpp22_gop_init_rgmii(struct mvpp2_port *port)
 	regmap_write(priv->sysctrl_base, GENCONF_CTRL0, val);
 }
 
+static void mvpp22_gop_init_mii(struct mvpp2_port *port)
+{
+	struct mvpp2 *priv = port->priv;
+	u32 val;
+
+	regmap_read(priv->sysctrl_base, GENCONF_PORT_CTRL0, &val);
+	val |= GENCONF_PORT_CTRL0_BUS_WIDTH_SELECT;
+	regmap_write(priv->sysctrl_base, GENCONF_PORT_CTRL0, val);
+
+	regmap_read(priv->sysctrl_base, GENCONF_CTRL0, &val);
+	val |= GENCONF_CTRL0_PORT1_RGMII_MII;
+	val &= ~GENCONF_CTRL0_PORT1_RGMII;
+	regmap_write(priv->sysctrl_base, GENCONF_CTRL0, val);
+}
+
 static void mvpp22_gop_init_sgmii(struct mvpp2_port *port)
 {
 	struct mvpp2 *priv = port->priv;
@@ -1610,6 +1625,11 @@ static int mvpp22_gop_init(struct mvpp2_port *port)
 		return 0;
 
 	switch (port->phy_interface) {
+	case PHY_INTERFACE_MODE_MII:
+		if (port->gop_id == 0 || port->gop_id == 2)
+			goto invalid_conf;
+		mvpp22_gop_init_mii(port);
+		break;
 	case PHY_INTERFACE_MODE_RGMII:
 	case PHY_INTERFACE_MODE_RGMII_ID:
 	case PHY_INTERFACE_MODE_RGMII_RXID:
@@ -1670,6 +1690,7 @@ static void mvpp22_gop_unmask_irq(struct mvpp2_port *port)
 
 	if (phy_interface_mode_is_rgmii(port->phy_interface) ||
 	    phy_interface_mode_is_8023z(port->phy_interface) ||
+	    port->phy_interface == PHY_INTERFACE_MODE_MII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_SGMII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_2500BASET) {
 		/* Enable the GMAC link status irq for this port */
@@ -1704,6 +1725,7 @@ static void mvpp22_gop_mask_irq(struct mvpp2_port *port)
 
 	if (phy_interface_mode_is_rgmii(port->phy_interface) ||
 	    phy_interface_mode_is_8023z(port->phy_interface) ||
+	    port->phy_interface == PHY_INTERFACE_MODE_MII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_SGMII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_2500BASET) {
 		val = readl(port->base + MVPP22_GMAC_INT_SUM_MASK);
@@ -1723,6 +1745,7 @@ static void mvpp22_gop_setup_irq(struct mvpp2_port *port)
 	if (port->phylink ||
 	    phy_interface_mode_is_rgmii(port->phy_interface) ||
 	    phy_interface_mode_is_8023z(port->phy_interface) ||
+	    port->phy_interface == PHY_INTERFACE_MODE_MII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_SGMII) {
 		val = readl(port->base + MVPP22_GMAC_INT_MASK);
 		val |= MVPP22_GMAC_INT_MASK_LINK_STAT;
@@ -2227,6 +2250,7 @@ static void mvpp2_defaults_set(struct mvpp2_port *port)
 	int tx_port_num, val, queue, ptxq, lrxq;
 
 	if (phy_interface_mode_is_rgmii(port->phy_interface) ||
+	    port->phy_interface == PHY_INTERFACE_MODE_MII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_SGMII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_1000BASEX ||
 	    port->phy_interface == PHY_INTERFACE_MODE_2500BASEX)
@@ -3597,6 +3621,7 @@ static void mvpp2_isr_handle_gmac_internal(struct mvpp2_port *port)
 
 	if (phy_interface_mode_is_rgmii(port->phy_interface) ||
 	    phy_interface_mode_is_8023z(port->phy_interface) ||
+	    port->phy_interface == PHY_INTERFACE_MODE_MII ||
 	    port->phy_interface == PHY_INTERFACE_MODE_SGMII) {
 		val = readl(port->base + MVPP22_GMAC_INT_STAT);
 		if (val & MVPP22_GMAC_INT_STAT_LINK) {
@@ -7180,6 +7205,10 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 		if (!mvpp2_port_supports_xlg(port))
 			goto empty_set;
 		break;
+	case PHY_INTERFACE_MODE_MII:
+		if (port->gop_id == 2)
+			goto empty_set;
+		/* Fall-through */
 	case PHY_INTERFACE_MODE_GMII:
 	case PHY_INTERFACE_MODE_RGMII:
 	case PHY_INTERFACE_MODE_RGMII_ID:
@@ -7225,11 +7254,13 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 	case PHY_INTERFACE_MODE_RGMII_RXID:
 	case PHY_INTERFACE_MODE_RGMII_TXID:
 	case PHY_INTERFACE_MODE_SGMII:
+		phylink_set(mask, 1000baseT_Full);
+		/* Fall-through */
+	case PHY_INTERFACE_MODE_MII:
 		phylink_set(mask, 10baseT_Half);
 		phylink_set(mask, 10baseT_Full);
 		phylink_set(mask, 100baseT_Half);
 		phylink_set(mask, 100baseT_Full);
-		phylink_set(mask, 1000baseT_Full);
 		phylink_set(mask, 1000baseX_Full);
 		if (state->interface != PHY_INTERFACE_MODE_NA)
 			break;
@@ -7309,7 +7340,8 @@ static void mvpp2_gmac_config(struct mvpp2_port *port, unsigned int mode,
 		ctrl4 |= MVPP22_CTRL4_SYNC_BYPASS_DIS |
 			 MVPP22_CTRL4_DP_CLK_SEL |
 			 MVPP22_CTRL4_QSGMII_BYPASS_ACTIVE;
-	} else if (phy_interface_mode_is_rgmii(state->interface)) {
+	} else if ((phy_interface_mode_is_rgmii(state->interface)) ||
+		   (state->interface == PHY_INTERFACE_MODE_MII)) {
 		ctrl4 &= ~MVPP22_CTRL4_DP_CLK_SEL;
 		ctrl4 |= MVPP22_CTRL4_EXT_PIN_GMII_SEL |
 			 MVPP22_CTRL4_SYNC_BYPASS_DIS |
