@@ -1111,7 +1111,7 @@ static int fsl_qspi_resume(struct platform_device *pdev)
 
 static struct platform_driver fsl_qspi_driver = {
 	.driver = {
-		.name	= "fsl-quadspi",
+		.name	= "nxp-fsl-quadspi",
 		.of_match_table = fsl_qspi_dt_ids,
 	},
 	.probe          = fsl_qspi_probe,
