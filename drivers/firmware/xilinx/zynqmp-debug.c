@@ -306,7 +306,7 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 						   pm_api_arg[2]);
 		break;
 	case PM_IOCTL:
-		ret = zynqmp_pm_ioctl(pm_api_arg[0], pm_api_arg[1],
+		ret = zynqmp_pm_invoke_fn(PM_IOCTL, pm_api_arg[0], pm_api_arg[1],
 				      pm_api_arg[2], pm_api_arg[3],
 				      &pm_api_ret[0]);
 		if (!ret && (pm_api_arg[1] == IOCTL_GET_RPU_OPER_MODE ||
