@@ -1167,7 +1167,7 @@ int wbm2m_init(struct wb_dev *dev)
 	vfd->lock = &dev->lock;
 	vfd->v4l2_dev = &wbm2m->v4l2_dev;
 
-	ret = video_register_device(vfd, VFL_TYPE_GRABBER, 10);
+	ret = video_register_device(vfd, VFL_TYPE_VIDEO, 10);
 	if (ret) {
 		log_err(wbm2m, "Failed to register video device\n");
 		goto rel_m2m;
