@@ -35,3 +35,5 @@ obj-$(CONFIG_POWER_RESET_SC27XX) += sc27xx-poweroff.o
 obj-$(CONFIG_NVMEM_REBOOT_MODE) += nvmem-reboot-mode.o
 obj-$(CONFIG_POWER_RESET_S32V) += s32v-reboot.o
 obj-$(CONFIG_POWER_RESET_S32GEN1) += s32gen1-reboot.o
+
+ccflags-$(CONFIG_POWER_RESET_S32GEN1) += -I$(srctree)/drivers/clk/
