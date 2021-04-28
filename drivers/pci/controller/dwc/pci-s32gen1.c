@@ -694,7 +694,7 @@ static void s32gen1_pcie_stop_link(struct dw_pcie *pcie)
 	s32gen1_pcie_disable_ltssm(s32_pp);
 }
 
-#ifdef CONFIG_PCI_MSI
+#ifdef CONFIG_PCI_S32GEN1_EP_MSI
 /* msi IRQ handler
  * irq - interrupt number
  * arg - pointer to the "struct pcie_port" object
@@ -711,7 +711,7 @@ static irqreturn_t s32gen1_pcie_msi_handler(int irq, void *arg)
 
 	return dw_handle_msi_irq(pp);
 }
-#endif
+#endif /* CONFIG_PCI_S32GEN1_EP_MSI */
 
 static int s32gen1_pcie_host_init(struct pcie_port *pp)
 {
