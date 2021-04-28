@@ -1023,7 +1023,7 @@ int wbcap_init(struct wb_dev *dev)
 
 	build_input_table(wbcap);
 
-	ret = video_register_device(vdev, VFL_TYPE_GRABBER, 11);
+	ret = video_register_device(vdev, VFL_TYPE_VIDEO, 11);
 	if (ret)
 		goto free_hdl;
 

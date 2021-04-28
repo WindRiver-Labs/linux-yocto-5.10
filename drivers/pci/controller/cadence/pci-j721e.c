@@ -6,6 +6,7 @@
  * Author: Kishon Vijay Abraham I <kishon@ti.com>
  */
 
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/io.h>
@@ -86,7 +87,6 @@ enum j721e_pcie_mode {
 
 struct j721e_pcie_data {
 	enum j721e_pcie_mode	mode;
-	bool quirk_retrain_flag;
 	bool			is_intc_v1;
 	bool			byte_access_allowed;
 	const struct cdns_pcie_ops *ops;
@@ -420,7 +420,6 @@ static struct pci_ops cdns_ti_pcie_host_ops = {
 
 static const struct j721e_pcie_data j721e_pcie_rc_data = {
 	.mode = PCI_MODE_RC,
-	.quirk_retrain_flag = true,
 	.is_intc_v1 = true,
 	.byte_access_allowed = false,
 	.ops = &j721e_pcie_ops,
@@ -468,6 +467,7 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 	struct cdns_pcie_ep *ep;
 	struct gpio_desc *gpiod;
 	void __iomem *base;
+	struct clk *clk;
 	u32 num_lanes;
 	u32 mode;
 	int ret;
@@ -555,7 +555,6 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 		if (!byte_access_allowed)
 			bridge->ops = &cdns_ti_pcie_host_ops;
 		rc = pci_host_bridge_priv(bridge);
-		rc->quirk_retrain_flag = data->quirk_retrain_flag;
 
 		cdns_pcie = &rc->pcie;
 		cdns_pcie->dev = dev;
@@ -573,6 +572,19 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 		ret = cdns_pcie_init_phy(dev, cdns_pcie);
 		if (ret) {
 			dev_err(dev, "Failed to init phy\n");
+			goto err_get_sync;
+		}
+
+		clk = devm_clk_get_optional(dev, "pcie_refclk");
+		if (IS_ERR(clk)) {
+			dev_err(dev, "failed to get pcie_refclk\n");
+			ret = PTR_ERR(clk);
+			goto err_get_sync;
+		}
+
+		ret = clk_prepare_enable(clk);
+		if (ret) {
+			dev_err(dev, "failed to enable pcie_refclk\n");
 			goto err_get_sync;
 		}
 

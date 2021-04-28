@@ -3555,7 +3555,7 @@ static int vip_create_streams(struct vip_port *port,
 	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL) {
 		port->flags |= FLAG_MULT_PORT;
 		port->num_streams_configured = 1;
-		alloc_stream(port, 0, VFL_TYPE_GRABBER);
+		alloc_stream(port, 0, VFL_TYPE_VIDEO);
 	} else if (port->endpoint.bus_type == V4L2_MBUS_BT656) {
 		port->flags |= FLAG_MULT_PORT;
 		bus = &port->endpoint.bus.parallel;
@@ -3564,7 +3564,7 @@ static int vip_create_streams(struct vip_port *port,
 		for (i = 0; i < bt656_ep->num_channels; i++) {
 			if (bt656_ep->channels[i] >= 16)
 				continue;
-			alloc_stream(port, bt656_ep->channels[i], VFL_TYPE_GRABBER);
+			alloc_stream(port, bt656_ep->channels[i], VFL_TYPE_VIDEO);
 		}
 	}
 	return 0;

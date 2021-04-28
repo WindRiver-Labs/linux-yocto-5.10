@@ -231,10 +231,6 @@
 	ti,usb2-only;
 };
 
-&serdes_wiz0 {
-	status = "disabled";
-};
-
 &usb0 {
 	dr_mode = "otg";
 	maximum-speed = "high-speed";
@@ -313,7 +309,6 @@
 	phys = <&serdes0_pcie_link>;
 	phy-names = "pcie_phy";
 	num-lanes = <2>;
-	status = "disabled";
 };
 
 &pcie1_ep {

@@ -156,6 +156,12 @@
 			};
 		};
 	};
+
+	clk_ov5640_fixed: ov5640-xclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <25000000>;
+	};
 };
 
 &main_pmx0 {
@@ -188,6 +194,13 @@
 		pinctrl-single,pins = <
 			J721E_IOPAD(0x228, PIN_INPUT_PULLUP, 0) /* (Y6) I2C1_SCL */
 			J721E_IOPAD(0x22c, PIN_INPUT_PULLUP, 0) /* (AA6) I2C1_SDA */
+		>;
+	};
+
+	main_i2c2_pins_default: main-i2c2-pins-default {
+		pinctrl-single,pins = <
+			J721E_IOPAD(0x1c8, PIN_INPUT_PULLUP, 2) /* (AB5) SPI0_CLK.I2C2_SCL */
+			J721E_IOPAD(0x1cc, PIN_INPUT_PULLUP, 2) /* (AA1) SPI0_D0.I2C2_SDA */
 		>;
 	};
 
@@ -491,6 +504,14 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 
+		p08-hog {
+			/* P10 - PM_I2C_CTRL_OE */
+			gpio-hog;
+			gpios = <8 GPIO_ACTIVE_HIGH>;
+			output-high;
+			line-name = "CTRL_PM_I2C_OE";
+		};
+
 		p09-hog {
 			/* P11 - MCASP/TRACE_MUX_S0 */
 			gpio-hog;
@@ -506,6 +527,108 @@
 			output-high;
 			line-name = "MCASP/TRACE_MUX_S1";
 		};
+	};
+};
+
+&main_i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&main_i2c2_pins_default>;
+	clock-frequency = <400000>;
+
+	ina226@40 {
+		compatible = "ti,ina226";
+		reg = <0x40>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@41 {
+		compatible = "ti,ina226";
+		reg = <0x41>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@42 {
+		compatible = "ti,ina226";
+		reg = <0x42>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@43 {
+		compatible = "ti,ina226";
+		reg = <0x43>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@44 {
+		compatible = "ti,ina226";
+		reg = <0x44>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@45 {
+		compatible = "ti,ina226";
+		reg = <0x45>;
+		shunt-resistor = <5000>;
+	};
+
+	ina226@46 {
+		compatible = "ti,ina226";
+		reg = <0x46>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@47 {
+		compatible = "ti,ina226";
+		reg = <0x47>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@48 {
+		compatible = "ti,ina226";
+		reg = <0x48>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@49 {
+		compatible = "ti,ina226";
+		reg = <0x49>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4a {
+		compatible = "ti,ina226";
+		reg = <0x4a>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4b {
+		compatible = "ti,ina226";
+		reg = <0x4b>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4c {
+		compatible = "ti,ina226";
+		reg = <0x4c>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4d {
+		compatible = "ti,ina226";
+		reg = <0x4d>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4e {
+		compatible = "ti,ina226";
+		reg = <0x4e>;
+		shunt-resistor = <10000>;
+	};
+
+	ina226@4f {
+		compatible = "ti,ina226";
+		reg = <0x4f>;
+		shunt-resistor = <10000>;
 	};
 };
 
@@ -590,6 +713,23 @@
 		reg = <0x20>;
 		gpio-controller;
 		#gpio-cells = <2>;
+	};
+
+	ov5640: camera@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+
+		clocks = <&clk_ov5640_fixed>;
+		clock-names = "xclk";
+		reset-gpios = <&exp5 0 GPIO_ACTIVE_LOW>;
+
+		port {
+			csi2_cam0: endpoint {
+				remote-endpoint = <&csi2rx0_in_sensor>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
 	};
 };
 
@@ -863,4 +1003,13 @@
 
 &main_mcan13 {
 	status = "disabled";
+};
+
+&csi2_0 {
+	csi2rx0_in_sensor: endpoint {
+		remote-endpoint = <&csi2_cam0>;
+		bus-type = <4>; /* CSI2 DPHY. */
+		clock-lanes = <0>;
+		data-lanes = <1 2>;
+	};
 };

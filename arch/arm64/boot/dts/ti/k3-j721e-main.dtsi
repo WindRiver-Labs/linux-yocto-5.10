@@ -720,7 +720,7 @@
 		power-domains = <&k3_pds 239 TI_SCI_PD_EXCLUSIVE>;
 		clocks = <&k3_clks 239 1>;
 		clock-names = "fck";
-		cdns,max-outbound-regions = <16>;
+		cdns,max-outbound-regions = <32>;
 		max-functions = /bits/ 8 <6>;
 		max-virtual-functions = /bits/ 16 <4 4 4 4 0 0>;
 		dma-coherent;
@@ -782,7 +782,7 @@
 		power-domains = <&k3_pds 240 TI_SCI_PD_EXCLUSIVE>;
 		clocks = <&k3_clks 240 1>;
 		clock-names = "fck";
-		cdns,max-outbound-regions = <16>;
+		cdns,max-outbound-regions = <32>;
 		max-functions = /bits/ 8 <6>;
 		max-virtual-functions = /bits/ 16 <4 4 4 4 0 0>;
 		dma-coherent;
@@ -844,7 +844,7 @@
 		power-domains = <&k3_pds 241 TI_SCI_PD_EXCLUSIVE>;
 		clocks = <&k3_clks 241 1>;
 		clock-names = "fck";
-		cdns,max-outbound-regions = <16>;
+		cdns,max-outbound-regions = <32>;
 		max-functions = /bits/ 8 <6>;
 		max-virtual-functions = /bits/ 16 <4 4 4 4 0 0>;
 		dma-coherent;
@@ -906,7 +906,7 @@
 		power-domains = <&k3_pds 242 TI_SCI_PD_EXCLUSIVE>;
 		clocks = <&k3_clks 242 1>;
 		clock-names = "fck";
-		cdns,max-outbound-regions = <16>;
+		cdns,max-outbound-regions = <32>;
 		max-functions = /bits/ 8 <6>;
 		max-virtual-functions = /bits/ 16 <4 4 4 4 0 0>;
 		dma-coherent;
@@ -1368,6 +1368,21 @@
 		clock-names = "fck";
 		clocks = <&k3_clks 193 0>;
 		power-domains = <&k3_pds 193 TI_SCI_PD_EXCLUSIVE>;
+	};
+
+	d5520: video-decoder@4300000 {
+	       /* IMG D5520 driver configuration */
+	       compatible = "img,d5500-vxd";
+	       reg = <0x00 0x04300000 0x00 0x100000>;
+	       power-domains = <&k3_pds 144 TI_SCI_PD_EXCLUSIVE>;
+	       interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	vxe384: video-encoder@4200000 {
+		compatible = "img,vxe384";
+		reg = <0x00 0x04200000 0x00 0x100000>;
+		power-domains = <&k3_pds 153 TI_SCI_PD_EXCLUSIVE>;
+		interrupts = <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>;
 	};
 
 	ufs_wrapper: ufs-wrapper@4e80000 {
@@ -2438,4 +2453,38 @@
 		interrupt-names = "int0", "int1";
 		bosch,mram-cfg = <0x0 0 0 32 0 0 1 1>;
 	};
+
+	ti_csi2rx0: ticsi2rx@4500000 {
+		compatible = "ti,csi2rx";
+		dmas = <&main_udmap 0x4940>;
+		dma-names = "rx0";
+		reg = <0x0 0x4500000 0x0 0x1000>;
+		power-domains = <&k3_pds 26 TI_SCI_PD_EXCLUSIVE>;
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		cdns_csi2rx: csi-bridge@4504000 {
+			compatible = "cdns,csi2rx";
+			reg = <0x0 0x4504000 0x0 0x1000>;
+			clocks = <&k3_clks 26 2>, <&k3_clks 26 0>, <&k3_clks 26 2>,
+				<&k3_clks 26 2>, <&k3_clks 26 3>, <&k3_clks 26 3>;
+			clock-names = "sys_clk", "p_clk", "pixel_if0_clk",
+				"pixel_if1_clk", "pixel_if2_clk", "pixel_if3_clk";
+			phys = <&dphy0>;
+			phy-names = "dphy";
+
+			ports {
+				csi2_0: port { };
+			};
+		};
+	};
+
+	dphy0: phy@4580000 {
+		compatible = "cdns,dphy";
+		reg = <0x0 0x4580000 0x0 0x1100>;
+		#phy-cells = <0>;
+		power-domains = <&k3_pds 147 TI_SCI_PD_EXCLUSIVE>;
+	};
 };
+

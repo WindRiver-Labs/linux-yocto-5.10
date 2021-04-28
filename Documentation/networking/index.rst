@@ -17,6 +17,7 @@ Contents:
    devlink/index
    caif/index
    ethtool-netlink
+   devlink/am65-nuss-cpsw-switch
    ieee802154
    j1939
    kapi
