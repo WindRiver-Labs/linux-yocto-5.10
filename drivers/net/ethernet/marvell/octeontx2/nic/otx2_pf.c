@@ -126,12 +126,6 @@ static void otx2_flr_handler(struct work_struct *work)
 		/* clear transcation pending bit */
 		otx2_write64(pf, RVU_PF_VFTRPENDX(reg), BIT_ULL(vf));
 		otx2_write64(pf, RVU_PF_VFFLR_INT_ENA_W1SX(reg), BIT_ULL(vf));
-		/* Re-enable MBOX and ME interrupt as it gets cleared
-		 * in HWVF_RST reset.
-		 */
-		otx2_write64(pf, RVU_PF_VFME_INT_ENA_W1SX(reg), BIT_ULL(vf));
-		otx2_write64(pf, RVU_PF_VFPF_MBOX_INT_ENA_W1SX(reg),
-			     BIT_ULL(vf));
 	}
 
 	mutex_unlock(&mbox->lock);
@@ -2465,8 +2459,6 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			       NETIF_F_SG | NETIF_F_TSO | NETIF_F_TSO6 |
 			       NETIF_F_GSO_UDP_L4);
 
-	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL;
-
 	err = otx2_mcam_flow_init(pf);
 	if (err)
 		goto err_ptp_destroy;
@@ -2486,13 +2478,14 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 				       NETIF_F_HW_VLAN_STAG_RX;
 	netdev->features |= netdev->hw_features;
 
+	netdev->hw_features |= NETIF_F_LOOPBACK | NETIF_F_RXALL;
+
 	netdev->gso_max_segs = OTX2_MAX_GSO_SEGS;
 	netdev->watchdog_timeo = netdev->watchdog_timeo ?
 				 netdev->watchdog_timeo : OTX2_TX_TIMEOUT;
 
 	netdev->netdev_ops = &otx2_netdev_ops;
 
-	/* MTU range: 64 - 9190 */
 	netdev->min_mtu = OTX2_MIN_MTU;
 	netdev->max_mtu = OTX2_MAX_MTU;
 

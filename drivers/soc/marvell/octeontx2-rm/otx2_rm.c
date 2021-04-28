@@ -47,6 +47,9 @@
 #define PCI_CFG_REG_BAR_NUM	2
 #define PCI_MBOX_BAR_NUM	4
 
+/* Misc */
+#define RVU_PF_INT_VEC_VFME_MAX	2
+
 /* Supported devices */
 static const struct pci_device_id rvu_rm_id_table[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_SSO_PF)},
@@ -67,8 +70,7 @@ static dev_t devno; /* Char device major:minor */
 static spinlock_t rm_lst_lock;
 LIST_HEAD(rm_dev_lst_head);
 
-static void
-rm_write64(struct rm_dev *rvu, u64 b, u64 s, u64 o, u64 v)
+static void rm_write64(struct rm_dev *rvu, u64 b, u64 s, u64 o, u64 v)
 {
 	writeq_relaxed(v, rvu->bar2 + ((b << 20) | (s << 12) | o));
 }
@@ -153,7 +155,6 @@ handle_af_req(struct rm_dev *rm, struct rvu_vf *vf, struct mbox_msghdr *req,
 	return forward_to_mbox(rm, &rm->pfvf_mbox_up, vf->vf_id, req, size,
 			       "VF");
 }
-
 
 static void rm_afpf_mbox_handler_up(struct work_struct *work)
 {
@@ -437,6 +438,7 @@ static void rm_pfvf_flr_handler(struct work_struct *work)
 	struct rvu_vf *vf = container_of(work, struct rvu_vf, pfvf_flr_work);
 	struct rm_dev *rm = vf->rm;
 	struct otx2_mbox *mbox = &rm->pfvf_mbox;
+	int idx;
 
 	rm_send_flr_to_dpi(rm);
 	rm_send_flr_msg(rm, vf);
@@ -451,16 +453,8 @@ static void rm_pfvf_flr_handler(struct work_struct *work)
 	vf->in_use = false;
 	vf->got_flr = false;
 	enable_af_mbox_int(rm->pdev);
-	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(vf->vf_id / 64),
-		   BIT_ULL(vf->intr_idx));
-
-	/* Re-enable MBOX and FLR interrupt as it gets cleared
-	 * in HWVF_RST reset
-	 */
-	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFFLR_INT_ENA_W1SX(vf->vf_id),
-		   BIT_ULL(vf->intr_idx));
-	rm_write64(rm, BLKADDR_RVUM, 0,
-		   RVU_PF_VFPF_MBOX_INT_ENA_W1SX(vf->vf_id / 64),
+	idx = vf->vf_id / 64;
+	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(idx),
 		   BIT_ULL(vf->intr_idx));
 }
 
@@ -591,8 +585,7 @@ static void __handle_vf_flr(struct rm_dev *rm, struct rvu_vf *vf_ptr)
 {
 	if (vf_ptr->in_use) {
 		/* Using the same MBOX workqueue here, so that we can
-		 * synchronize with other VF->PF messages being forwarded to
-		 * AF
+		 * synchronize with other VF->PF messages being forwarded to AF.
 		 */
 		vf_ptr->got_flr = true;
 		queue_work(rm->pfvf_mbox_wq, &vf_ptr->pfvf_flr_work);
@@ -625,7 +618,31 @@ static irqreturn_t rm_pf_vf_flr_intr(int irq, void *arg)
 			}
 		}
 	}
+	return IRQ_HANDLED;
+}
 
+static void vfme_intr_clear(struct rm_dev *rm, int idx, uint64_t mask)
+{
+	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INTX(idx), mask);
+	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(idx), mask);
+}
+
+static irqreturn_t rm_pf_vf_me_intr(int irq, void *arg)
+{
+	struct rm_dev *rm = (struct rm_dev *)arg;
+	struct rvu_vf *vf;
+	u64 intr;
+	int i, vfi;
+
+	for (i = 0; i < RVU_PF_INT_VEC_VFME_MAX; i++) {
+		intr = rm_read64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INTX(i));
+		for (vfi = i * 64; vfi < rm->num_vfs; vfi++) {
+			vf = &rm->vf_info[vfi];
+			if ((intr & (1ULL << vf->intr_idx)) == 0)
+				continue;
+			vfme_intr_clear(rm, i, BIT_ULL(vf->intr_idx));
+		}
+	}
 	return IRQ_HANDLED;
 }
 
@@ -669,7 +686,6 @@ static irqreturn_t rm_pf_vf_mbox_intr(int irq, void *arg)
 				   BIT_ULL(vf->intr_idx));
 		}
 	}
-
 	return IRQ_HANDLED;
 }
 
@@ -698,11 +714,9 @@ static int rm_register_flr_irq(struct pci_dev *pdev)
 		}
 		rm->irq_allocated[vec + i] = true;
 	}
-
 	return 0;
 
 reg_fail:
-
 	return err;
 }
 
@@ -710,6 +724,38 @@ static void rm_free_flr_irq(struct pci_dev *pdev)
 {
 	(void) pdev;
 	/* Nothing here but will free workqueues */
+}
+
+static int rm_register_me_irq(struct pci_dev *pdev)
+{
+	struct rm_dev *rm;
+	int err, vec;
+
+	rm = pci_get_drvdata(pdev);
+	for (vec = RVU_PF_INT_VEC_VFME0; vec <= RVU_PF_INT_VEC_VFME1; vec++) {
+		sprintf(&rm->irq_names[vec * NAME_SIZE],
+			"PF%02d_VF_ME_IRQ%d", pdev->devfn, vec - 2);
+		err = request_irq(pci_irq_vector(pdev, vec),
+				  rm_pf_vf_me_intr, 0,
+				  &rm->irq_names[vec * NAME_SIZE], rm);
+		if (err) {
+			dev_err(&pdev->dev, "Failed to install PFVF ME intr\n");
+			goto reg_fail;
+		}
+		rm->irq_allocated[vec] = true;
+	}
+	return 0;
+
+reg_fail:
+	return err;
+}
+
+static void rm_free_me_irq(struct pci_dev *pdev)
+{
+	(void) pdev;
+	/* Nothing to do here.
+	 * The function is used for maintaining consistent driver design.
+	 */
 }
 
 static int rm_alloc_irqs(struct pci_dev *pdev)
@@ -1209,6 +1255,13 @@ static int rm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto reg_flr_irq_failed;
 	}
 
+	if (rm_register_me_irq(pdev) != 0) {
+		dev_err(&pdev->dev,
+			"Unable to allocate ME Interrupt vectors\n");
+		err = -ENODEV;
+		goto reg_me_irq_failed;
+	}
+
 	enable_af_mbox_int(pdev);
 
 	if (rm_get_pcifunc(rm)) {
@@ -1227,6 +1280,9 @@ static int rm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 get_pcifunc_failed:
 	disable_af_mbox_int(pdev);
+	rm_afpf_mbox_term(pdev);
+	rm_free_me_irq(pdev);
+reg_me_irq_failed:
 	rm_free_flr_irq(pdev);
 reg_flr_irq_failed:
 	rm_afpf_mbox_term(pdev);
@@ -1309,6 +1365,55 @@ static void disable_vf_flr_int(struct pci_dev *pdev)
 	}
 }
 
+static void enable_vf_me_int(struct pci_dev *pdev)
+{
+	struct rm_dev *rm;
+	int i, ena_bits;
+
+	rm = pci_get_drvdata(pdev);
+	/* Clear any pending interrupts */
+	for (i = 0; i < RVU_PF_INT_VEC_VFME_MAX; i++) {
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(i), ~0x0ULL);
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INTX(i), ~0x0ULL);
+	}
+	/* Enable interrupts */
+	ena_bits = GENMASK_ULL((rm->num_vfs - 1) % 64, 0);
+	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INT_ENA_W1SX(0), ena_bits);
+
+	if (rm->num_vfs > 64) {
+		ena_bits = GENMASK_ULL(rm->num_vfs - 64 - 1, 0);
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INT_ENA_W1SX(1),
+			   ena_bits);
+	}
+}
+
+static void disable_vf_me_int(struct pci_dev *pdev)
+{
+	struct rm_dev *rm;
+	int ena_bits;
+	u64 intr;
+	int i;
+
+	rm = pci_get_drvdata(pdev);
+
+	/* Clear pending interrupt */
+	for (i = 0; i < RVU_PF_INT_VEC_VFME_MAX; i++) {
+		intr = rm_read64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INTX(i));
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INTX(i), intr);
+		intr = rm_read64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(i));
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFTRPENDX(i), intr);
+	}
+	/* Disable interrupts */
+	ena_bits = GENMASK_ULL((rm->num_vfs - 1) % 64, 0);
+	rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INT_ENA_W1CX(0), ena_bits);
+
+	if (rm->num_vfs > 64) {
+		ena_bits = GENMASK_ULL(rm->num_vfs - 64 - 1, 0);
+		rm_write64(rm, BLKADDR_RVUM, 0, RVU_PF_VFME_INT_ENA_W1CX(1),
+			   ena_bits);
+	}
+}
+
 static void enable_vf_mbox_int(struct pci_dev *pdev)
 {
 	struct rm_dev *rm;
@@ -1379,6 +1484,7 @@ static int __sriov_disable(struct pci_dev *pdev)
 		return -EPERM;
 	}
 
+	disable_vf_me_int(pdev);
 	disable_vf_flr_int(pdev);
 	disable_vf_mbox_int(pdev);
 
@@ -1524,6 +1630,7 @@ static int __sriov_enable(struct pci_dev *pdev, int num_vfs)
 
 	enable_vf_mbox_int(pdev);
 	enable_vf_flr_int(pdev);
+	enable_vf_me_int(pdev);
 	return num_vfs;
 
 #ifdef CONFIG_OCTEONTX2_RM_DOM_SYSFS
@@ -1604,7 +1711,6 @@ static int mem_read(struct otx_mem *umem)
 {
 	struct otx_mem mem;
 	uint8_t *base;
-	int rc;
 
 	if (copy_from_user(&mem, umem, sizeof(struct otx_mem)))
 		return -EIO;
@@ -1613,8 +1719,42 @@ static int mem_read(struct otx_mem *umem)
 	if (base == NULL)
 		return -ENOMEM;
 
-	rc = copy_to_user(mem.buf, base, mem.nbytes);
-	iounmap(base);
+	return copy_to_user(mem.buf, base, mem.nbytes);
+}
+
+static int mem_readv(struct otx_memv *umemv)
+{
+	struct otx_memv memv;
+	struct otx_mem *mm;
+	uint8_t *base, *addr;
+	int i, rc = 0;
+
+	if (copy_from_user(&memv, umemv, sizeof(struct otx_memv)))
+		return -EIO;
+
+	mm = kcalloc(memv.msize, sizeof(struct otx_mem), GFP_KERNEL);
+	if (mm == NULL)
+		return -ENOMEM;
+
+	base = phys_to_virt(memv.pbase);
+	if (base == NULL) {
+		rc = -ENOMEM;
+		goto eexit;
+	}
+	for (i = 0; i < memv.msize; i++) {
+		if (copy_from_user(&mm[i], &memv.mm[i],
+				   sizeof(struct otx_mem))) {
+			rc = -EIO;
+			goto eexit;
+		}
+		addr = base + mm[i].pa;
+		if (copy_to_user(mm[i].buf, addr, mm[i].nbytes)) {
+			rc = -EIO;
+			goto eexit;
+		}
+	}
+eexit:
+	kfree(mm);
 	return rc;
 }
 
@@ -1625,6 +1765,9 @@ static ssize_t rm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case IOC_MEMREAD:
 		rc = mem_read((void *)arg);
+		break;
+	case IOC_MEMREADV:
+		rc = mem_readv((void *)arg);
 		break;
 	default:
 		return -EINVAL;

@@ -1069,7 +1069,6 @@ cpt:
 			       sizeof(struct rvu_pfvf), GFP_KERNEL);
 	if (!rvu->pf)
 		return -ENOMEM;
-
 	rvu->hwvf = devm_kcalloc(rvu->dev, hw->total_vfs,
 				 sizeof(struct rvu_pfvf), GFP_KERNEL);
 	if (!rvu->hwvf)
@@ -1466,6 +1465,10 @@ static int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc)
 	if (is_pf_cgxmapped(rvu, rvu_get_pf(pcifunc))) {
 		pf = rvu_get_pfvf(rvu, pcifunc & ~RVU_PFVF_FUNC_MASK);
 		blkaddr = pf->nix_blkaddr;
+
+		/* if SDP1 then the blkaddr is NIX1 */
+		if (is_sdp_pfvf(pcifunc) && pf->sdp_info->node_id == 1)
+			blkaddr = BLKADDR_NIX1;
 	} else if (is_afvf(pcifunc)) {
 		vf = pcifunc - 1;
 		/* Assign NIX based on VF number. All even numbered VFs get
@@ -2582,26 +2585,6 @@ static void rvu_sso_pfvf_rst(struct rvu *rvu, u16 pcifunc)
 	}
 }
 
-/* Reset PF/VF MSIX config space */
-static void rvu_pfvf_msix_reset(struct rvu *rvu, u16 pcifunc)
-{
-	u64 reg, val;
-	int pfvf;
-
-	if (pcifunc & RVU_PFVF_FUNC_MASK) {
-		pfvf = rvu_get_hwvf(rvu, pcifunc);
-		reg = RVU_AF_HWVF_RST;
-		val = (pfvf & 0xFF) | BIT_ULL(12);
-	} else {
-		pfvf = rvu_get_pf(pcifunc);
-		reg = RVU_AF_PF_RST;
-		val = (pfvf & 0x1F) | BIT_ULL(12);
-	}
-
-	rvu_write64(rvu, BLKADDR_RVUM, reg, val);
-	rvu_poll_reg(rvu, BLKADDR_RVUM, reg, BIT_ULL(12), true);
-}
-
 static void __rvu_flr_handler(struct rvu *rvu, u16 pcifunc)
 {
 	mutex_lock(&rvu->flr_lock);
@@ -2622,7 +2605,6 @@ static void __rvu_flr_handler(struct rvu *rvu, u16 pcifunc)
 	rvu_blklf_teardown(rvu, pcifunc, BLKADDR_NPA);
 	rvu_detach_rsrcs(rvu, NULL, pcifunc);
 	rvu_sso_pfvf_rst(rvu, pcifunc);
-	rvu_pfvf_msix_reset(rvu, pcifunc);
 	mutex_unlock(&rvu->flr_lock);
 }
 
@@ -2641,11 +2623,6 @@ static void rvu_afvf_flr_handler(struct rvu *rvu, int vf)
 	/* Signal FLR finish and enable IRQ */
 	rvupf_write64(rvu, RVU_PF_VFTRPENDX(reg), BIT_ULL(vf));
 	rvupf_write64(rvu, RVU_PF_VFFLR_INT_ENA_W1SX(reg), BIT_ULL(vf));
-	/* Re-enable MBOX and ME interrupt as it gets cleared
-	 * in HWVF_RST reset.
-	 */
-	rvupf_write64(rvu, RVU_PF_VFME_INT_ENA_W1SX(reg), BIT_ULL(vf));
-	rvupf_write64(rvu, RVU_PF_VFPF_MBOX_INT_ENA_W1SX(0), BIT_ULL(vf));
 }
 
 static void rvu_flr_handler(struct work_struct *work)
