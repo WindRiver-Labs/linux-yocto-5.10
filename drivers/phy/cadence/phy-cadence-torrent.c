@@ -2489,9 +2489,10 @@ static int cdns_torrent_phy_probe(struct platform_device *pdev)
 				 cdns_phy->max_bit_rate / 1000,
 				 cdns_phy->max_bit_rate % 1000);
 
-			gphy->attrs.bus_width = cdns_phy->phys[node].num_lanes;
-			gphy->attrs.max_link_rate = cdns_phy->max_bit_rate;
-			gphy->attrs.mode = PHY_MODE_DP;
+			torrent_attr.bus_width = cdns_phy->phys[node].num_lanes;
+			torrent_attr.max_link_rate = cdns_phy->max_bit_rate;
+			torrent_attr.mode = PHY_MODE_DP;
+
 			phy_set_attrs(gphy, torrent_attr);
 		}
 
