@@ -228,6 +228,8 @@ M(REE_RULE_DB_LEN_GET,	0xE04, ree_rule_db_len_get, ree_req_msg,	\
 M(REE_RULE_DB_GET,	0xE05, ree_rule_db_get,				\
 				ree_rule_db_get_req_msg,		\
 				ree_rule_db_get_rsp_msg)		\
+/* SDP mbox IDs (range 0x1000 - 0x11FF) */				\
+M(SET_SDP_CHAN_INFO, 0x1000, set_sdp_chan_info, sdp_chan_info_msg, msg_rsp) \
 /* NPC mbox IDs (range 0x6000 - 0x7FFF) */				\
 M(NPC_MCAM_ALLOC_ENTRY,	0x6000, npc_mcam_alloc_entry, npc_mcam_alloc_entry_req,\
 				npc_mcam_alloc_entry_rsp)		\
@@ -538,6 +540,19 @@ struct cgx_pause_frm_cfg {
 	u8 tx_pause;
 };
 
+enum fec_type {
+	OTX2_FEC_NONE,
+	OTX2_FEC_BASER,
+	OTX2_FEC_RS,
+	OTX2_FEC_STATS_CNT = 2,
+	OTX2_FEC_OFF,
+};
+
+struct fec_mode {
+	struct mbox_msghdr hdr;
+	int fec;
+};
+
 struct sfp_eeprom_s {
 #define SFP_EEPROM_SIZE 256
 	u16 sff_id;
@@ -545,17 +560,11 @@ struct sfp_eeprom_s {
 	u64 reserved;
 };
 
-enum fec_type {
-	OTX2_FEC_NONE,
-	OTX2_FEC_BASER,
-	OTX2_FEC_RS,
-};
-
 struct phy_s {
 	struct {
-		u64 can_change_mod_type : 1;
-		u64 mod_type            : 1;
-		u64 has_fec_stats       : 1;
+		u64 can_change_mod_type:1;
+		u64 mod_type:1;
+		u64 has_fec_stats:1;
 	} misc;
 	struct fec_stats_s {
 		u32 rsfec_corr_cws;
@@ -585,9 +594,23 @@ struct cgx_fw_data {
 	struct cgx_lmac_fwdata_s fwdata;
 };
 
-struct fec_mode {
+struct cgx_set_link_mode_args {
+	u32 speed;
+	u8 duplex;
+	u8 an;
+	u8 ports;
+	u64 mode;
+};
+
+struct cgx_set_link_mode_req {
+#define AUTONEG_UNKNOWN		0xff
 	struct mbox_msghdr hdr;
-	int fec;
+	struct cgx_set_link_mode_args args;
+};
+
+struct cgx_set_link_mode_rsp {
+	struct mbox_msghdr hdr;
+	int status;
 };
 
 struct cgx_set_link_state_msg {
@@ -613,24 +636,7 @@ struct npc_set_pkind {
 	u8 dir;
 	u8 pkind; /* valid only in case custom flag */
 };
-struct cgx_set_link_mode_args {
-	u32 speed;
-	u8 duplex;
-	u8 an;
-	u8 ports;
-	u64 mode;
-};
 
-struct cgx_set_link_mode_req {
-#define AUTONEG_UNKNOWN		0xff
-	struct mbox_msghdr hdr;
-	struct cgx_set_link_mode_args args;
-};
-
-struct cgx_set_link_mode_rsp {
-	struct mbox_msghdr hdr;
-	int status;
-};
 /* NPA mbox message formats */
 
 /* NPA mailbox error codes
@@ -1695,4 +1701,18 @@ struct ptp_rsp {
 	u64 tsc;
 };
 
+struct sdp_node_info {
+	/* Node to which this PF belons to */
+	u8 node_id;
+	u8 max_vfs;
+	u8 num_pf_rings;
+	u8 pf_srn;
+#define SDP_MAX_VFS	128
+	u8 vf_rings[SDP_MAX_VFS];
+};
+
+struct sdp_chan_info_msg {
+	struct mbox_msghdr hdr;
+	struct sdp_node_info info;
+};
 #endif /* MBOX_H */

@@ -68,11 +68,8 @@ void otx2_update_lmac_fec_stats(struct otx2_nic *pfvf)
 		return;
 	mutex_lock(&pfvf->mbox.lock);
 	req = otx2_mbox_alloc_msg_cgx_fec_stats(&pfvf->mbox);
-	if (!req) {
-		mutex_unlock(&pfvf->mbox.lock);
-		return;
-	}
-	otx2_sync_mbox_msg(&pfvf->mbox);
+	if (req)
+		otx2_sync_mbox_msg(&pfvf->mbox);
 	mutex_unlock(&pfvf->mbox.lock);
 }
 
@@ -1146,9 +1143,13 @@ static int otx2_aura_init(struct otx2_nic *pfvf, int aura_id,
 		 * In the above description 'One bit per NIX-RX' is written
 		 * presumably by mistake in HRM.
 		 */
-		if (pfvf->nix_blkaddr == BLKADDR_NIX1)
+		if (pfvf->nix_blkaddr == BLKADDR_NIX1) {
 			aq->aura.bp_ena = 1;
-		aq->aura.nix0_bpid = pfvf->bpid[0];
+			aq->aura.nix1_bpid = pfvf->bpid[0];
+		} else {
+			aq->aura.nix0_bpid = pfvf->bpid[0];
+		}
+
 		/* Set backpressure level for RQ's Aura */
 		aq->aura.bp = RQ_BP_LVL_AURA;
 	}
@@ -1497,8 +1498,8 @@ void mbox_handler_cgx_stats(struct otx2_nic *pfvf,
 void mbox_handler_cgx_fec_stats(struct otx2_nic *pfvf,
 				struct cgx_fec_stats_rsp *rsp)
 {
-		pfvf->hw.cgx_fec_corr_blks += rsp->fec_corr_blks;
-		pfvf->hw.cgx_fec_uncorr_blks += rsp->fec_uncorr_blks;
+	pfvf->hw.cgx_fec_corr_blks += rsp->fec_corr_blks;
+	pfvf->hw.cgx_fec_uncorr_blks += rsp->fec_uncorr_blks;
 }
 
 void mbox_handler_nix_txsch_alloc(struct otx2_nic *pf,

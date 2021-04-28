@@ -184,6 +184,15 @@
 								((y) << 4))
 #define DPI_EPFX_PP_VF_LINTX_ENA_W1S(x, y)	(0x7800ULL | ((x) << 5) |\
 								((y) << 4))
+
+#define DPI_EBUS_MRRS_MIN			128
+#define DPI_EBUS_MRRS_MAX			1024
+#define DPI_EBUS_MPS_MIN			128
+#define DPI_EBUS_MPS_MAX			1024
+#define DPI_EBUS_MAX_PORTS			2
+#define DPI_EBUS_PORTX_CFG_MRRS(x)		(((x) & 0x7) << 0)
+#define DPI_EBUS_PORTX_CFG_MPS(x)		(((x) & 0x7) << 4)
+
 /* VF Registers: */
 #define DPI_VDMA_EN		(0x0ULL)
 #define DPI_VDMA_REQQ_CTL	(0x8ULL)
@@ -243,4 +252,13 @@ union dpi_mbox_message_t {
 		uint64_t npa_pf_func    :16;
 	} s;
 };
+
+struct otx2_dpipf_com_s {
+	int (*queue_config)(struct pci_dev *pfdev,
+			    union dpi_mbox_message_t *req);
+	int (*get_vf_count)(struct pci_dev *pfdev);
+};
+
+extern struct otx2_dpipf_com_s otx2_dpipf_com;
+
 #endif

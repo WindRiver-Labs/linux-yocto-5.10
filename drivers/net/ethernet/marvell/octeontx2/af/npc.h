@@ -186,6 +186,8 @@ enum key_fields {
 	NPC_IPPROTO_SCTP,
 	NPC_IPPROTO_AH,
 	NPC_IPPROTO_ESP,
+	NPC_IPPROTO_ICMP,
+	NPC_IPPROTO_ICMP6,
 	NPC_SPORT_TCP,
 	NPC_DPORT_TCP,
 	NPC_SPORT_UDP,
@@ -445,6 +447,17 @@ struct nix_tx_action {
 #define NIXLF_BCAST_ENTRY	1
 #define NIXLF_PROMISC_ENTRY	2
 
+struct npc_coalesced_kpu_prfl {
+#define NPC_SIGN	0x00666f727063706e
+#define NPC_PRFL_NAME   "npc_prfls_array"
+#define NPC_NAME_LEN	32
+	u64 signature; /* "npcprof\0" (8 bytes/ASCII characters) */
+	u8 name[NPC_NAME_LEN]; /* KPU Profile name */
+	u64 version; /* KPU firmware/profile version */
+	u8 num_prfl; /* No of NPC profiles. */
+	u16 prfl_sz[0];
+};
+
 struct npc_mcam_kex {
 	/* MKEX Profle Header */
 	u64 mkex_sign; /* "mcam-kex-profile" (8 bytes/ASCII characters) */
@@ -486,6 +499,29 @@ struct npc_lt_def_ipsec {
 	u8	spi_nz;
 };
 
+struct npc_lt_def_apad {
+	u8	ltype_mask;
+	u8	ltype_match;
+	u8	lid;
+	u8	valid;
+} __packed;
+
+struct npc_lt_def_color {
+	u8	ltype_mask;
+	u8	ltype_match;
+	u8	lid;
+	u8	noffset;
+	u8	offset;
+} __packed;
+
+struct npc_lt_def_et {
+	u8	ltype_mask;
+	u8	ltype_match;
+	u8	lid;
+	u8	valid;
+	u8	offset;
+} __packed;
+
 struct npc_lt_def_cfg {
 	struct npc_lt_def	rx_ol2;
 	struct npc_lt_def	rx_oip4;
@@ -503,6 +539,13 @@ struct npc_lt_def_cfg {
 	struct npc_lt_def	pck_oip4;
 	struct npc_lt_def	pck_oip6;
 	struct npc_lt_def	pck_iip4;
+	struct npc_lt_def_apad	rx_apad0;
+	struct npc_lt_def_apad	rx_apad1;
+	struct npc_lt_def_color	rx_ovlan;
+	struct npc_lt_def_color	rx_ivlan;
+	struct npc_lt_def_color	rx_gen0_color;
+	struct npc_lt_def_color	rx_gen1_color;
+	struct npc_lt_def_et	rx_et[2];
 };
 
 /* Loadable KPU profile firmware data */

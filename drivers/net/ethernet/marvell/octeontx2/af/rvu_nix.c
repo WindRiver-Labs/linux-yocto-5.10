@@ -215,10 +215,13 @@ static bool is_valid_txschq(struct rvu *rvu, int blkaddr,
 static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 			      struct nix_lf_alloc_rsp *rsp)
 {
-	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
+	struct rvu_pfvf *parent_pf, *pfvf = rvu_get_pfvf(rvu, pcifunc);
+	u16 req_chan_base, req_chan_end, req_chan_cnt;
 	struct rvu_hwinfo *hw = rvu->hw;
-	int pkind, pf, vf, lbkid;
+	struct sdp_node_info *sdp_info;
+	int pkind, pf, vf, lbkid, vfid;
 	u8 cgx_id, lmac_id;
+	bool from_vf;
 	int err;
 
 	pf = rvu_get_pf(pcifunc);
@@ -283,11 +286,38 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 					      pfvf->rx_chan_cnt, false);
 		break;
 	case NIX_INTF_TYPE_SDP:
-		/* Added single interface and single channel support for now */
-		pfvf->rx_chan_base = NIX_CHAN_SDP_CHX(0);
+		from_vf = !!(pcifunc & RVU_PFVF_FUNC_MASK);
+		parent_pf = &rvu->pf[rvu_get_pf(pcifunc)];
+		sdp_info = parent_pf->sdp_info;
+		if (!sdp_info) {
+			dev_err(rvu->dev, "Invalid sdp_info pointer\n");
+			return -EINVAL;
+		}
+		if (from_vf) {
+			req_chan_base = NIX_CHAN_SDP_CHX(0) + sdp_info->pf_srn +
+				sdp_info->num_pf_rings;
+			vf = (pcifunc & RVU_PFVF_FUNC_MASK) - 1;
+			for (vfid = 0; vfid < vf; vfid++)
+				req_chan_base += sdp_info->vf_rings[vfid];
+			req_chan_cnt = sdp_info->vf_rings[vf];
+			req_chan_end = req_chan_base + req_chan_cnt;
+			if (req_chan_base < NIX_CHAN_SDP_CHX(0) ||
+			    req_chan_end > NIX_CHAN_SDP_CHX(255)) {
+				dev_err(rvu->dev,
+					"PF_Func 0x%x: Invalid channel base and count\n",
+					pcifunc);
+				return -EINVAL;
+			}
+		} else {
+			req_chan_base = NIX_CHAN_SDP_CHX(0) + sdp_info->pf_srn;
+			req_chan_cnt = sdp_info->num_pf_rings;
+		}
+
+		pfvf->rx_chan_base = req_chan_base;
+		pfvf->rx_chan_cnt = req_chan_cnt;
 		pfvf->tx_chan_base = pfvf->rx_chan_base;
-		pfvf->rx_chan_cnt = 1;
-		pfvf->tx_chan_cnt = 1;
+		pfvf->tx_chan_cnt = pfvf->rx_chan_cnt;
+
 		rsp->tx_link = hw->cgx_links + hw->lbk_links;
 		rvu_npc_install_promisc_entry(rvu, pcifunc, nixlf,
 					      pfvf->rx_chan_base,
@@ -1220,7 +1250,7 @@ int rvu_mbox_handler_nix_lf_alloc(struct rvu *rvu,
 	}
 
 	intf = is_afvf(pcifunc) ? NIX_INTF_TYPE_LBK : NIX_INTF_TYPE_CGX;
-	if (is_sdp_pf(pcifunc))
+	if (is_sdp_pfvf(pcifunc))
 		intf = NIX_INTF_TYPE_SDP;
 
 	err = nix_interface_init(rvu, pcifunc, intf, nixlf, rsp);
@@ -2531,7 +2561,7 @@ int nix_update_bcast_mce_list(struct rvu *rvu, u16 pcifunc, bool add)
 	int blkaddr;
 
 	/* Broadcast pkt replication is not needed for AF's VFs, hence skip */
-	if (is_afvf(pcifunc))
+	if (is_afvf(pcifunc) || is_sdp_pfvf(pcifunc))
 		return 0;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
@@ -3897,6 +3927,40 @@ static int rvu_nix_block_init(struct rvu *rvu, struct nix_hw *nix_hw)
 		rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_ISCTP,
 			    (ltdefs->rx_isctp.lid << 8) | (ltdefs->rx_isctp.ltype_match << 4) |
 			    ltdefs->rx_isctp.ltype_mask);
+
+		if (!is_rvu_otx2(rvu)) {
+			/* Enable APAD calculation for other protocols
+			 * matching APAD0 and APAD1 lt def registers.
+			 */
+			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_CST_APAD0,
+				    (ltdefs->rx_apad0.valid << 11) |
+				    (ltdefs->rx_apad0.lid << 8) |
+				    (ltdefs->rx_apad0.ltype_match << 4) |
+				    ltdefs->rx_apad0.ltype_mask);
+			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_CST_APAD1,
+				    (ltdefs->rx_apad1.valid << 11) |
+				    (ltdefs->rx_apad1.lid << 8) |
+				    (ltdefs->rx_apad1.ltype_match << 4) |
+				    ltdefs->rx_apad1.ltype_mask);
+
+			/* Receive ethertype defination register defines layer
+			 * information in NPC_RESULT_S to identify the Ethertype
+			 * location in L2 header. Used for Ethertype overwriting
+			 * in inline IPsec flow.
+			 */
+			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_ET(0),
+				    (ltdefs->rx_et[0].offset << 12) |
+				    (ltdefs->rx_et[0].valid << 11) |
+				    (ltdefs->rx_et[0].lid << 8) |
+				    (ltdefs->rx_et[0].ltype_match << 4) |
+				    ltdefs->rx_et[0].ltype_mask);
+			rvu_write64(rvu, blkaddr, NIX_AF_RX_DEF_ET(1),
+				    (ltdefs->rx_et[1].offset << 12) |
+				    (ltdefs->rx_et[1].valid << 11) |
+				    (ltdefs->rx_et[1].lid << 8) |
+				    (ltdefs->rx_et[1].ltype_match << 4) |
+				    ltdefs->rx_et[1].ltype_mask);
+		}
 
 		err = nix_rx_flowkey_alg_cfg(rvu, blkaddr);
 		if (err)
