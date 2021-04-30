@@ -28,6 +28,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/machine.h> /* FIXME: using chip internals */
 #include <linux/gpio/driver.h> /* FIXME: using chip internals */
+#include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/spi/spi.h>
 
@@ -1297,6 +1298,11 @@ static int bcm2835_spi_probe(struct platform_device *pdev)
 	struct spi_controller *ctlr;
 	struct bcm2835_spi *bs;
 	int err;
+
+	if (of_gpio_named_count(pdev->dev.of_node, "cs-gpios") >
+	    BCM2835_SPI_NUM_CS)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "too many chip selects\n");
 
 	ctlr = devm_spi_alloc_master(&pdev->dev, ALIGN(sizeof(*bs),
 						  dma_get_cache_alignment()));
