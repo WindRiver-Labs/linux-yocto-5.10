@@ -1950,6 +1950,8 @@ static int sdhci_esdhc_resume(struct device *dev)
 	if (!ret)
 		ret = mmc_gpio_set_cd_wake(host->mmc, false);
 
+	return ret;
+
 disable_per_clk:
 	clk_disable_unprepare(imx_data->clk_per);
 disable_ipg_clk:
