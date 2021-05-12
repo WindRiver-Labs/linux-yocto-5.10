@@ -66,12 +66,11 @@ enum ipi_msg_type {
 	IPI_CPU_STOP,
 	IPI_IRQ_WORK,
 	IPI_COMPLETION,
-	NR_IPI_P = NR_IPI,
 	/*
 	 * CPU_BACKTRACE is special and not included in NR_IPI
 	 * or tracable with trace_ipi_*
 	 */
-	IPI_CPU_BACKTRACE = NR_IPI,
+	IPI_CPU_BACKTRACE,
 	/*
 	 * SGI8-15 can be reserved by secure firmware, and thus may
 	 * not be usable by the kernel. Please keep the above limited
@@ -82,7 +81,7 @@ enum ipi_msg_type {
 
 static int ipi_irq_base __read_mostly;
 static int nr_ipi __read_mostly = NR_IPI;
-static struct irq_desc *ipi_desc[MAX_IPI] __read_mostly;
+static struct irq_desc *ipi_desc[NR_IPI] __read_mostly;
 
 static void ipi_setup(int cpu);
 
@@ -530,6 +529,7 @@ struct ipi {
 
 static void ipi_cpu_stop(void);
 static void ipi_complete(void);
+static void ipi_cpu_backtrace(void);
 
 #define IPI_DESC_STRING_IPI_WAKEUP "CPU wakeup interrupts"
 #define IPI_DESC_STRING_IPI_TIMER "Timer broadcast interrupts"
@@ -538,6 +538,7 @@ static void ipi_complete(void);
 #define IPI_DESC_STRING_IPI_CPU_STOP "CPU stop interrupts"
 #define IPI_DESC_STRING_IPI_IRQ_WORK "IRQ work interrupts"
 #define IPI_DESC_STRING_IPI_COMPLETION "completion interrupts"
+#define IPI_DESC_STRING_IPI_CPU_BACKTRACE "CPU backtrace interrupts"
 
 #define IPI_DESC_STR(x) IPI_DESC_STRING_ ## x
 
@@ -550,6 +551,7 @@ static const char* ipi_desc_strings[] __tracepoint_string =
 			[IPI_CPU_STOP] = IPI_DESC_STR(IPI_CPU_STOP),
 			[IPI_IRQ_WORK] = IPI_DESC_STR(IPI_IRQ_WORK),
 			[IPI_COMPLETION] = IPI_DESC_STR(IPI_COMPLETION),
+			[IPI_CPU_BACKTRACE] = IPI_DESC_STR(IPI_CPU_BACKTRACE),
 		};
 
 
@@ -571,6 +573,7 @@ static struct ipi ipi_types[NR_IPI] = {
 	S(IPI_IRQ_WORK, irq_work_run),
 #endif
 	S(IPI_COMPLETION, ipi_complete),
+	S(IPI_CPU_BACKTRACE, ipi_cpu_backtrace),
 };
 
 
@@ -669,6 +672,13 @@ static void ipi_complete(void)
 	complete(per_cpu(cpu_completion, cpu));
 }
 
+static void ipi_cpu_backtrace(void)
+{
+	printk_nmi_enter();
+	nmi_cpu_backtrace(get_irq_regs());
+	printk_nmi_exit();
+}
+
 /*
  * Main handler for inter-processor interrupts
  */
@@ -758,7 +768,7 @@ void __init set_smp_ipi_range(int ipi_base, int n)
 {
 	int i;
 
-	nr_ipi = min(n, MAX_IPI);
+	nr_ipi = min(n, NR_IPI);
 
 	for (i = 0; i < nr_ipi; i++) {
 		int err;
