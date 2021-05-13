@@ -346,22 +346,27 @@ int spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 
 	spi_message_init(&msg);
 
-	tmpbuf[0] = op->cmd.opcode;
+	if (op->cmd.nbytes == 1)
+		tmpbuf[0] = op->cmd.opcode;
+	else { /* nbytes == 2 */
+		tmpbuf[0] = op->cmd.opcode >> 8;
+		tmpbuf[1] = op->cmd.opcode;
+	}
 	xfers[xferpos].tx_buf = tmpbuf;
 	xfers[xferpos].len = op->cmd.nbytes;
 	xfers[xferpos].tx_nbits = op->cmd.buswidth;
 	spi_message_add_tail(&xfers[xferpos], &msg);
 	xferpos++;
-	totalxferlen++;
+	totalxferlen += op->cmd.nbytes;
 
 	if (op->addr.nbytes) {
 		int i;
 
 		for (i = 0; i < op->addr.nbytes; i++)
-			tmpbuf[i + 1] = op->addr.val >>
+			tmpbuf[i + totalxferlen] = op->addr.val >>
 					(8 * (op->addr.nbytes - i - 1));
 
-		xfers[xferpos].tx_buf = tmpbuf + 1;
+		xfers[xferpos].tx_buf = tmpbuf + totalxferlen;
 		xfers[xferpos].len = op->addr.nbytes;
 		xfers[xferpos].tx_nbits = op->addr.buswidth;
 		spi_message_add_tail(&xfers[xferpos], &msg);
@@ -370,8 +375,8 @@ int spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	}
 
 	if (op->dummy.nbytes) {
-		memset(tmpbuf + op->addr.nbytes + 1, 0xff, op->dummy.nbytes);
-		xfers[xferpos].tx_buf = tmpbuf + op->addr.nbytes + 1;
+		memset(tmpbuf + totalxferlen, 0xff, op->dummy.nbytes);
+		xfers[xferpos].tx_buf = tmpbuf + totalxferlen;
 		xfers[xferpos].len = op->dummy.nbytes;
 		xfers[xferpos].tx_nbits = op->dummy.buswidth;
 		xfers[xferpos].dummy = op->dummy.nbytes * 8;
