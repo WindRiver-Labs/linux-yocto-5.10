@@ -2105,7 +2105,7 @@ static const struct spi_nor_locking_ops spi_nor_sr_locking_ops = {
 static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
-	u8 status;
+	u8 status[2];
 	u8 lock_bits;
 	int ret;
 
@@ -2130,16 +2130,16 @@ static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	if (ret)
 		goto err;
 
-	ret = spi_nor_read_sr(nor, &status);
+	ret = spi_nor_read_sr(nor, status);
 	if (ret)
 		goto err;
 
 	lock_bits = min_protected_area_including_offset(nor, ofs);
 
 	/* Only modify protection if it will not unlock other areas */
-	if (lock_bits > bp_bits_from_sr(nor, status)) {
+	if (lock_bits > bp_bits_from_sr(nor, status[0])) {
 		nor->is_lock = 1;
-		ret = write_sr_modify_protection(nor, status, lock_bits);
+		ret = write_sr_modify_protection(nor, status[0], lock_bits);
 	} else {
 		dev_err(nor->dev, "trying to unlock already locked area\n");
 	}
