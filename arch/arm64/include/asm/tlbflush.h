@@ -344,7 +344,9 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 		if (!system_supports_tlb_range() ||
 		    pages % 2 == 1) {
 			addr = __TLBI_VADDR(start, asid);
-			if (last_level) {
+			if (TKT340553_SW_WORKAROUND) {
+				__tlbi(vmalle1is);
+			} else if (last_level) {
 				__tlbi_level(vale1is, addr, tlb_level);
 				__tlbi_user_level(vale1is, addr, tlb_level);
 			} else {
