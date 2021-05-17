@@ -16,7 +16,7 @@ void imx_check_clk_hws(struct clk_hw *clks[], unsigned int count);
 #ifndef MODULE
 void imx_register_uart_clocks(void);
 #else
-static inline void imx_register_uart_clocks(struct clk ** const clks[])
+static inline void imx_register_uart_clocks(unsigned int clk_count)
 {
 }
 #endif
