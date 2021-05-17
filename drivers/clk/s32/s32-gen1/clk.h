@@ -1,5 +1,5 @@
 /*
- * Copyright 2018,2020 NXP
+ * Copyright 2018,2020-2021 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -10,16 +10,15 @@
 #ifndef __MACH_S32GEN1_CLK_H
 #define __MACH_S32GEN1_CLK_H
 
-#include <linux/spinlock.h>
-#include <linux/clk-provider.h>
+#include "../clk.h"
 #include "dfs.h"
 #include "pll.h"
-#include "../clk.h"
+#include <linux/clk-provider.h>
+#include <linux/regmap.h>
+#include <linux/spinlock.h>
 
 struct s32gen1_clk_modules {
-	void __iomem *mc_me;
-	void __iomem *rdc;
-	void __iomem *rgm;
+	struct regmap *mc_me;
 	void __iomem *mc_cgm0_base;
 	void __iomem *mc_cgm1_base;
 	void __iomem *mc_cgm2_base;

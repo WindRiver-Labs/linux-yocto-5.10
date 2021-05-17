@@ -1,19 +1,20 @@
 /*
  * Copyright 2016 Freescale Semiconductor, Inc.
- * Copyright 2018 NXP
+ * Copyright 2018,2021 NXP
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 2
  * of the License, or (at your option) any later version.
  */
-
-#include <linux/interrupt.h>
-#include <linux/clockchips.h>
 #include <linux/clk.h>
+#include <linux/clockchips.h>
 #include <linux/cpuhotplug.h>
+#include <linux/interrupt.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/sched_clock.h>
 
 /*
@@ -37,22 +38,29 @@
 #define MASTER_CPU	0
 #define STM_TIMER_NAME	"FSL stm timer"
 
+struct stm_work {
+	struct work_struct work;
+	int status;
+};
+
 struct stm_timer {
 	void __iomem *timer_base;
 	void __iomem *clkevt_base;
 	int irq;
 	unsigned int cpu;
 	struct clk *stm_clk;
+	struct device *dev;
 	unsigned long cycle_per_jiffy;
 	struct clock_event_device clockevent_stm;
 	struct irqaction stm_timer_irq;
 	unsigned long delta;
 	struct list_head list;
+	struct clocksource clksrc;
+	struct stm_work work;
+	u32 saved_cnt;
 };
 
-static LIST_HEAD(stms_list);
 static struct stm_timer *clocksource;
-static bool registered;
 
 static inline struct stm_timer *stm_timer_from_evt(
 		struct clock_event_device *evt)
@@ -60,22 +68,33 @@ static inline struct stm_timer *stm_timer_from_evt(
 	return container_of(evt, struct stm_timer, clockevent_stm);
 }
 
-static struct stm_timer *stm_timer_from_cpu(unsigned int cpu)
+static struct stm_timer *cs_to_stm(struct clocksource *cs)
 {
-	struct stm_timer *stm;
+	return container_of(cs, struct stm_timer, clksrc);
+}
 
-	list_for_each_entry(stm, &stms_list, list)
-		if (stm->cpu == cpu)
-			return stm;
+static struct stm_timer *work_to_stm(struct work_struct *work)
+{
+	struct stm_work *swork = container_of(work, struct stm_work, work);
 
-	return NULL;
+	return container_of(swork, struct stm_timer, work);
+}
+
+static void enable_stm(struct stm_timer *stm)
+{
+	/* enable the stm module */
+	__raw_writel(STM_CR_CPS | STM_CR_FRZ | STM_CR_TEN,
+		     stm->timer_base + STM_CR);
+}
+
+static void disable_stm(struct stm_timer *stm)
+{
+	__raw_writel(0,  stm->timer_base + STM_CR);
 }
 
 static inline void stm_timer_enable(struct stm_timer *stm)
 {
-	/* enable the stm module */
-	__raw_writel(STM_CR_CPS | STM_CR_FRZ | STM_CR_TEN,
-			stm->timer_base + STM_CR);
+	enable_stm(stm);
 
 	/* enable clockevent channel */
 	__raw_writel(STM_CCR_CEN, stm->clkevt_base + STM_CCR);
@@ -115,17 +134,56 @@ static u64 stm_read_sched_clock(void)
 	return __raw_readl(clocksource->timer_base + STM_CNT);
 }
 
+static void stm_clksrc_save_cnt(struct stm_timer *stm)
+{
+	stm->saved_cnt = __raw_readl(stm->timer_base + STM_CNT);
+}
+
+static void stm_clksrc_suspend(struct clocksource *cs)
+{
+	struct stm_timer *stm = cs_to_stm(cs);
+
+	disable_stm(stm);
+	stm_clksrc_save_cnt(stm);
+}
+
+static void stm_clksrc_setcnt(struct stm_timer *stm, u32 cnt)
+{
+	__raw_writel(cnt, stm->timer_base + STM_CNT);
+}
+
+static void stm_clksrc_resume(struct clocksource *cs)
+{
+	struct stm_timer *stm = cs_to_stm(cs);
+
+	stm_clksrc_setcnt(stm,  stm->saved_cnt);
+	enable_stm(stm);
+}
+
+static u64 stm_clksrc_read(struct clocksource *cs)
+{
+	struct stm_timer *stm = cs_to_stm(cs);
+
+	return (u64)get_counter(stm);
+}
+
 static int __init stm_clocksource_init(struct stm_timer *stm,
-						unsigned long rate)
+				       unsigned long rate)
 {
 	clocksource = stm;
+	local_irq_disable();
 	sched_clock_register(stm_read_sched_clock, 32, rate);
-	clocksource_mmio_init(clocksource->timer_base + STM_CNT,
-			     "fsl-stm", rate,
-			     CONFIG_STM_CLKSRC_RATE, 32,
-			     clocksource_mmio_readl_up);
+	local_irq_enable();
 
-	return 0;
+	stm->clksrc.name = "fsl-stm";
+	stm->clksrc.rating = CONFIG_STM_CLKSRC_RATE;
+	stm->clksrc.read = stm_clksrc_read;
+	stm->clksrc.mask = CLOCKSOURCE_MASK(32);
+	stm->clksrc.flags = CLOCK_SOURCE_IS_CONTINUOUS;
+	stm->clksrc.suspend = stm_clksrc_suspend;
+	stm->clksrc.resume = stm_clksrc_resume;
+
+	return clocksource_register_hz(&stm->clksrc, rate);
 }
 
 static int stm_set_next_event(unsigned long delta,
@@ -218,29 +276,23 @@ static int stm_clockevent_init(struct stm_timer *stm, unsigned long rate,
 	return 0;
 }
 
-static int stm_timer_starting_cpu(unsigned int cpu)
+static void register_clkevent_work(struct work_struct *work)
 {
-	struct stm_timer *stm = stm_timer_from_cpu(cpu);
+	struct stm_timer *stm = work_to_stm(work);
+	unsigned long clk_rate = clk_get_rate(stm->stm_clk);
+	int ret;
 
-	if (stm)
-		return stm_clockevent_init(stm, stm->cycle_per_jiffy * (HZ),
-					   stm->irq);
+	ret = stm_clockevent_init(stm, clk_rate, stm->irq);
+	if (ret)
+		dev_err(stm->dev, "Failed to register STM clockevent\n");
 
-	return 0;
+	stm->work.status = ret;
 }
 
-static int stm_timer_dying_cpu(unsigned int cpu)
+static int __init fsl_stm_timer_probe(struct platform_device *pdev)
 {
-	struct stm_timer *stm = stm_timer_from_cpu(cpu);
-
-	if (stm)
-		stm_timer_disable(stm);
-
-	return 0;
-}
-
-static int __init stm_timer_init(struct device_node *np)
-{
+	struct device *dev = &pdev->dev;
+	struct device_node *np = dev->of_node;
 	void __iomem *timer_base;
 	unsigned long clk_rate;
 	unsigned int cpu;
@@ -254,18 +306,21 @@ static int __init stm_timer_init(struct device_node *np)
 		return -EINVAL;
 	}
 
-	stm = kzalloc(sizeof(struct stm_timer), GFP_KERNEL);
+	stm = devm_kzalloc(dev, sizeof(*stm), GFP_KERNEL);
 	if (stm == NULL)
 		return -ENOMEM;
 
-	list_add_tail(&stm->list, &stms_list);
+	INIT_WORK(&stm->work.work, register_clkevent_work);
+	stm->dev = dev;
+
+	platform_set_drvdata(pdev, stm);
 
 	stm->cpu = cpu;
 
-	timer_base = of_iomap(np, 0);
-	if (!timer_base) {
-		pr_err("Failed to iomap\n");
-		return -ENXIO;
+	timer_base = devm_of_iomap(dev, np, 0, NULL);
+	if (IS_ERR(timer_base)) {
+		dev_err(dev, "Failed to iomap\n");
+		return PTR_ERR(timer_base);
 	}
 
 	stm->timer_base = timer_base;
@@ -277,9 +332,11 @@ static int __init stm_timer_init(struct device_node *np)
 	if (stm->irq <= 0)
 		return -EINVAL;
 
-	stm->stm_clk = of_clk_get(np, 0);
-	if (IS_ERR(stm->stm_clk))
+	stm->stm_clk = devm_clk_get(dev, NULL);
+	if (IS_ERR(stm->stm_clk)) {
+		dev_err(dev, "Clock not found\n");
 		return PTR_ERR(stm->stm_clk);
+	}
 
 	ret = clk_prepare_enable(stm->stm_clk);
 	if (ret)
@@ -288,32 +345,61 @@ static int __init stm_timer_init(struct device_node *np)
 	clk_rate = clk_get_rate(stm->stm_clk);
 	stm->cycle_per_jiffy = clk_rate / (HZ);
 
-	if (registered == false) {
-		ret = cpuhp_setup_state_nocalls(CPUHP_AP_FSL_STM_TIMER_STARTING,
-			"AP_FSL_STM_TIMER_STARTING",
-			stm_timer_starting_cpu,
-			stm_timer_dying_cpu);
-		if (ret)
-			return ret;
-		registered = true;
-	}
-
 	if (cpu == MASTER_CPU) {
 		ret = stm_clocksource_init(stm, clk_rate);
 		if (ret)
 			return ret;
-		ret = stm_clockevent_init(stm, clk_rate, stm->irq);
-		if (ret)
-			return ret;
 	}
 
+        /* Register event on requested CPU */
+        schedule_work_on(cpu, &stm->work.work);
+        flush_work(&stm->work.work);
+
 	/* reset counter value */
-	__raw_writel(0, timer_base + STM_CNT);
-	/* enable the stm module */
-	__raw_writel(STM_CR_CPS | STM_CR_FRZ | STM_CR_TEN,
-					timer_base + STM_CR);
+        stm_clksrc_setcnt(stm, 0);
+        enable_stm(stm);
+
+        return 0;
+}
+
+static int __maybe_unused fsl_stm_resume(struct device *dev)
+{
+        struct stm_timer *stm = dev_get_drvdata(dev);
+        int ret;
+
+        ret = clk_prepare_enable(stm->stm_clk);
+        if (ret)
+                return ret;
+
+        enable_stm(stm);
 
 	return 0;
 }
-TIMER_OF_DECLARE(s32v234, "fsl,s32v234-stm", stm_timer_init);
-TIMER_OF_DECLARE(s32gen1, "fsl,s32gen1-stm", stm_timer_init);
+
+static int fsl_stm_timer_remove(struct platform_device *pdev)
+{
+        return -EBUSY;
+}
+
+static const struct of_device_id fsl_stm_of_match[] = {
+        { .compatible = "fsl,s32v234-stm", },
+        { .compatible = "fsl,s32gen1-stm", },
+        {},
+};
+MODULE_DEVICE_TABLE(of, fsl_stm_of_match);
+
+static SIMPLE_DEV_PM_OPS(stm_timer_pm_ops, NULL, fsl_stm_resume);
+
+static struct platform_driver fsl_stm_probe = {
+        .probe  = fsl_stm_timer_probe,
+        .remove = fsl_stm_timer_remove,
+        .driver = {
+                .name = "fsl-stm",
+                .of_match_table = of_match_ptr(fsl_stm_of_match),
+		.pm = &stm_timer_pm_ops,
+        },
+};
+module_platform_driver(fsl_stm_probe);
+
+MODULE_DESCRIPTION("NXP System Timer Module driver");
+MODULE_LICENSE("GPL v2");

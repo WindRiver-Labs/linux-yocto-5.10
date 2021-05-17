@@ -33,10 +33,14 @@
 };
 
 &i2c0 {
+	pinctrl-0 = <&pinctrl0_i2c0>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
 &i2c1 {
+	pinctrl-0 = <&pinctrl0_i2c1 &pinctrl1_i2c1>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -167,6 +171,22 @@
 		pinctrl0_can5: can5rp {
 			fsl,pins = <
 				S32_GEN1_PAD_PC2__CAN5_TXD
+			>;
+		};
+
+		pinctrl0_i2c0: i2c0grp {
+			fsl,pins = <
+				S32_GEN1_PAD_PB0__I2C0_DATA_OUT
+				S32_GEN1_PAD_PB1__I2C0_SCLK_OUT
+				S32_GEN1_PAD_PB0__I2C0_DATA_IN
+				S32_GEN1_PAD_PB1__I2C0_SCLK_IN
+			>;
+		};
+
+		pinctrl0_i2c1: i2c1grp {
+			fsl,pins = <
+				S32_GEN1_PAD_PA14__I2C1_SCLK_OUT
+				S32_GEN1_PAD_PA15__I2C1_DATA_OUT
 			>;
 		};
 
@@ -460,6 +480,13 @@
 			>;
 		};
 
+		pinctrl1_i2c1: i2c1grp {
+			fsl,pins = <
+				S32_GEN1_PAD_PA14__I2C1_SCLK_IN
+				S32_GEN1_PAD_PA15__I2C1_DATA_IN
+			>;
+		};
+
 		pinctrl_gpio1: gpiogrp1 {
 			fsl,pins = <
 				S32R45_PAD_PH_06_SIUL_GPIO102
@@ -559,12 +586,16 @@
 		compatible = "rohm,dh2228fv";
 		spi-max-frequency = <10000000>;
 		reg = <0>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
 	};
 
 	spidev11: spidev@1 {
 		compatible = "rohm,dh2228fv";
 		spi-max-frequency = <10000000>;
 		reg = <1>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
 	};
 };
 
@@ -579,12 +610,16 @@
 		compatible = "rohm,dh2228fv";
 		spi-max-frequency = <10000000>;
 		reg = <0>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
 	};
 
 	spidev21: spidev@1 {
 		compatible = "rohm,dh2228fv";
 		spi-max-frequency = <10000000>;
 		reg = <1>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
 	};
 };
 
@@ -599,6 +634,8 @@
 		compatible = "rohm,dh2228fv";
 		spi-max-frequency = <4000000>;
 		reg = <0>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
 	};
 };
 

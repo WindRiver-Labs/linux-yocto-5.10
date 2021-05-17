@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2017-2020 NXP
+ * Copyright 2017-2021 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,11 +42,18 @@
 		      <0x0 0x40054000 0x0 0x3000>, /*armdfs*/
 		      <0x0 0x40058000 0x0 0x3000>; /*periphdfs*/
 		#clock-cells = <1>;
+		#reset-cells = <1>;
 	};
 
 	mc_cgm2: mc_cgm2@440C0000 {
 		compatible = "fsl,s32gen1-mc_cgm2";
 		reg = <0x0 0x440C0000 0x0 0x3000>;
+	};
+
+	reset: rgm@40078000 {
+		compatible = "fsl,s32gen1-rgm", "fsl,s32r45-reset", "syscon";
+		reg = <0x0 0x40078000 0x0 0x3000>;
+		#reset-cells = <1>;
 	};
 
 	can4: flexcan@44000000 {
@@ -110,10 +117,6 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 		status = "okay";
-			  /* MSCR 0-101 */
-		ranges = <1 0 0x0 0x4009C240 0x0 0x198>,
-			 /* IMCR range */
-			 <2 0 0x0 0x4009CA40 0x0 0x150>;
 		pinctrl0: siul2-pinctrl0@4009C000 {
 			compatible = "fsl,s32r45-siul2_0-pinctrl";
 			#pinctrl-cells = <2>;
@@ -246,10 +249,16 @@
 			 <&clks S32R45_SCMI_CLK_GMAC1_TX_SGMII>,
 			 <&clks S32R45_SCMI_CLK_GMAC1_TX_RGMII>,
 			 <&clks S32R45_SCMI_CLK_GMAC1_TX_RMII>,
-			 <&clks S32R45_SCMI_CLK_GMAC1_TX_MII>;
+			 <&clks S32R45_SCMI_CLK_GMAC1_TX_MII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_SGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_RGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_RMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_MII>;
 		clock-names = "stmmaceth", "pclk",
 			      "tx_sgmii", "tx_rgmii",
-			      "tx_rmii", "tx_mii";
+			      "tx_rmii", "tx_mii",
+			      "rx_sgmii", "rx_rgmii",
+			      "rx_rmii", "rx_mii";
 		gmac1_mdio: mdio0 {
 			compatible = "snps,dwmac-mdio";
 			#address-cells = <1>;

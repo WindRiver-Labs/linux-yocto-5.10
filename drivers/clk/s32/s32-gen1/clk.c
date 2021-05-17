@@ -6,12 +6,13 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  */
-#include <linux/of_address.h>
-#include <linux/clk.h>
-#include <linux/clk-provider.h>
+#include <dt-bindings/clock/s32g-scmi-clock.h>
 #include <dt-bindings/clock/s32gen1-clock.h>
-#include <dt-bindings/clock/s32g274a-scmi-clock.h>
 #include <dt-bindings/clock/s32r45-scmi-clock.h>
+#include <linux/clk-provider.h>
+#include <linux/clk.h>
+#include <linux/mfd/syscon.h>
+#include <linux/of_address.h>
 #include <linux/syscore_ops.h>
 
 #include "clk.h"
@@ -94,16 +95,39 @@ static u32 ddr_mux_idx[] = {
 	MC_CGM_MUXn_CSC_SEL_DDR_PLL_PHI0,
 };
 
-PNAME(gmac_0_tx_sels) = {"firc", "periphpll_phi5", "serdes_0_lane_0", };
+PNAME(gmac_0_tx_sels) = {"firc", "periphpll_phi5", "serdes_0_lane_0_tx", };
 static u32 gmac_0_tx_mux_idx[] = {
 	MC_CGM_MUXn_CSC_SEL_FIRC, MC_CGM_MUXn_CSC_SEL_PERIPH_PLL_PHI5,
 	MC_CGM_MUXn_CSC_SEL_SERDES_0_LANE_0_TX_CLK,
+};
+
+PNAME(gmac_0_rx_sels) = {
+	"firc", "gmac0_rx_ext",
+	"serdes_0_lane_0_cdr",
+	"gmac0_ref_div"
+};
+static u32 gmac_0_rx_mux_idx[] = {
+	MC_CGM_MUXn_CSC_SEL_FIRC,
+	MC_CGM_MUXn_CSC_SEL_GMAC_0_RX_CLK,
+	MC_CGM_MUXn_CSC_SEL_SERDES_0_LANE_0_CDR_CLK,
+	MC_CGM_MUXn_CSC_SEL_GMAC_0_REF_DIV_CLK
 };
 
 PNAME(gmac_0_ts_sels) = {"firc", "periphpll_phi4", "periphpll_phi5", };
 static u32 gmac_0_ts_mux_idx[] = {
 	MC_CGM_MUXn_CSC_SEL_FIRC, MC_CGM_MUXn_CSC_SEL_PERIPH_PLL_PHI4,
 	MC_CGM_MUXn_CSC_SEL_PERIPH_PLL_PHI5,
+};
+
+PNAME(gmac_1_rx_sels) = {
+	"firc", "gmac_1_ref_div",
+	"gmac_1_ext_rx", "serdes_1_lane_1_cdr"
+};
+static u32 gmac_1_rx_mux_idx[] = {
+	MC_CGM_MUXn_CSC_SEL_FIRC,
+	MC_CGM_MUXn_CSC_SEL_GMAC_1_REF_DIV_CLK,
+	MC_CGM_MUXn_CSC_SEL_GMAC_1_EXT_RX_CLK,
+	MC_CGM_MUXn_CSC_SEL_SERDES_1_LANE_1_CDR_CLK_R45
 };
 
 PNAME(gmac_1_tx_sels) = {"firc", "periphpll_phi5", "serdes_1_lane_0", };
@@ -276,6 +300,11 @@ static void __init s32r45_extra_clocks_init(struct device_node *clocking_node)
 	c = s32gen1_clk_cgm_div("gmac_1_tx", "gmac_1_tx_sel",
 				clk_modules.mc_cgm2_base, 2, &s32gen1_lock);
 	set_plat_clk(S32GEN1_CLK_GMAC_1_TX, c);
+
+	c = s32gen1_clk_cgm_mux("gmac_1_rx", clk_modules.mc_cgm2_base,  4,
+				gmac_1_rx_sels, ARRAY_SIZE(gmac_1_rx_sels),
+				gmac_1_rx_mux_idx, &s32gen1_lock);
+	set_plat_clk(S32GEN1_CLK_GMAC_1_RX, c);
 }
 
 void __init s32gen1_clocks_init(struct device_node *clocking_node)
@@ -348,20 +377,12 @@ void __init s32gen1_clocks_init(struct device_node *clocking_node)
 	if (WARN_ON(!clk_modules.mc_cgm5_base))
 		return;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,s32gen1-mc_me");
-	clk_modules.mc_me = of_iomap(np, 0);
-	if (WARN_ON(!clk_modules.mc_me))
+	clk_modules.mc_me =
+		syscon_regmap_lookup_by_compatible("fsl,s32gen1-mc_me");
+	if (IS_ERR(clk_modules.mc_me)) {
+		pr_err("s32gen1_clk: Cannot map 'MC_ME' resource\n");
 		return;
-
-	np = of_find_compatible_node(NULL, NULL, "fsl,s32gen1-rdc");
-	clk_modules.rdc = of_iomap(np, 0);
-	if (WARN_ON(!clk_modules.rdc))
-		return;
-
-	np = of_find_compatible_node(NULL, NULL, "fsl,s32gen1-rgm");
-	clk_modules.rgm = of_iomap(np, 0);
-	if (WARN_ON(!clk_modules.rgm))
-		return;
+	}
 
 	c = s32gen1_fxosc("fsl,s32gen1-fxosc");
 	set_plat_clk(S32GEN1_CLK_FXOSC, c);
@@ -666,6 +687,11 @@ void __init s32gen1_clocks_init(struct device_node *clocking_node)
 				clk_modules.mc_cgm0_base, 10, &s32gen1_lock);
 	set_plat_clk(S32GEN1_CLK_GMAC_0_TX, c);
 
+	c = s32gen1_clk_cgm_mux("gmac_0_rx", clk_modules.mc_cgm0_base,  11,
+				gmac_0_rx_sels, ARRAY_SIZE(gmac_0_rx_sels),
+				gmac_0_rx_mux_idx, &s32gen1_lock);
+	set_plat_clk(S32GEN1_CLK_GMAC_0_RX, c);
+
 	c = s32gen1_clk_cgm_mux("gmac_0_ts_sel", clk_modules.mc_cgm0_base,  9,
 				gmac_0_ts_sels, ARRAY_SIZE(gmac_0_ts_sels),
 				gmac_0_ts_mux_idx, &s32gen1_lock);
@@ -702,6 +728,8 @@ void s32gen1_scmi_clocks_init(void)
 		      S32GEN1_CLK_FIRC);
 	init_scmi_clk(S32GEN1_SCMI_CLK_SERDES_APB,
 		      S32GEN1_CLK_XBAR_DIV3);
+	init_scmi_clk(S32GEN1_SCMI_CLK_SERDES_REF,
+		      S32GEN1_CLK_SERDES_INT_REF);
 	init_scmi_clk(S32GEN1_SCMI_CLK_FTM0_SYS,
 		      S32GEN1_CLK_PER);
 	init_scmi_clk(S32GEN1_SCMI_CLK_FTM0_EXT,
@@ -838,76 +866,76 @@ void s32gen1_scmi_clocks_init(void)
 static void s32g274a_scmi_clocks_init(void)
 {
 	/* LLCE */
-	init_scmi_clk(S32G274A_SCMI_CLK_LLCE_SYS,
+	init_scmi_clk(S32G_SCMI_CLK_LLCE_SYS,
 		      S32GEN1_CLK_XBAR_DIV2);
-	init_scmi_clk(S32G274A_SCMI_CLK_LLCE_CAN_PE,
+	init_scmi_clk(S32G_SCMI_CLK_LLCE_CAN_PE,
 		      S32GEN1_CLK_CAN);
 
-	init_scmi_clk(S32G274A_SCMI_CLK_USB_MEM,
+	init_scmi_clk(S32G_SCMI_CLK_USB_MEM,
 		      S32GEN1_CLK_XBAR_DIV4);
-	init_scmi_clk(S32G274A_SCMI_CLK_USB_LOW,
+	init_scmi_clk(S32G_SCMI_CLK_USB_LOW,
 		      S32GEN1_CLK_SIRC);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE_AXI,
+	init_scmi_clk(S32G_SCMI_CLK_PFE_AXI,
 		      S32GEN1_CLK_PFE_SYS);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE_APB,
+	init_scmi_clk(S32G_SCMI_CLK_PFE_APB,
 		      S32GEN1_CLK_PFE_SYS);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE_PE,
+	init_scmi_clk(S32G_SCMI_CLK_PFE_PE,
 		      S32GEN1_CLK_PFE_PE);
 
 	/* PFE timestamp clock */
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE_TS,
+	init_scmi_clk(S32G_SCMI_CLK_PFE_TS,
 		      S32GEN1_CLK_GMAC_0_TS);
 
 	/* PFE 0 */
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_RX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_RX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_0_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_TX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_TX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_0_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_RX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_RX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_0_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_TX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_TX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_0_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_RX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_RX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_0_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_TX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_TX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_0_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_RX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_RX_MII,
 		      S32GEN1_CLK_PFE_EMAC_0_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE0_TX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE0_TX_MII,
 		      S32GEN1_CLK_PFE_EMAC_0_TX);
 	/* PFE 1 */
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_RX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_RX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_1_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_TX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_TX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_1_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_RX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_RX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_1_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_TX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_TX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_1_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_RX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_RX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_1_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_TX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_TX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_1_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_RX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_RX_MII,
 		      S32GEN1_CLK_PFE_EMAC_1_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE1_TX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE1_TX_MII,
 		      S32GEN1_CLK_PFE_EMAC_1_TX);
 	/* PFE 2 */
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_RX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_RX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_2_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_TX_SGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_TX_SGMII,
 		      S32GEN1_CLK_PFE_EMAC_2_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_RX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_RX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_2_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_TX_RGMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_TX_RGMII,
 		      S32GEN1_CLK_PFE_EMAC_2_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_RX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_RX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_2_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_TX_RMII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_TX_RMII,
 		      S32GEN1_CLK_PFE_EMAC_2_TX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_RX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_RX_MII,
 		      S32GEN1_CLK_PFE_EMAC_2_RX);
-	init_scmi_clk(S32G274A_SCMI_CLK_PFE2_TX_MII,
+	init_scmi_clk(S32G_SCMI_CLK_PFE2_TX_MII,
 		      S32GEN1_CLK_PFE_EMAC_2_TX);
 }
 

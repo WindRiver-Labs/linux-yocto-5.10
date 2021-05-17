@@ -10,6 +10,9 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/clock/s32gen1-clock.h>
 #include <dt-bindings/clock/s32gen1-scmi-clock.h>
+#include <dt-bindings/phy/phy-s32gen1-serdes.h>
+#include <dt-bindings/phy/phy.h>
+#include <dt-bindings/reset/s32gen1-scmi-reset.h>
 
 /memreserve/ 0x8000fff8 0x00010000;
 
@@ -29,6 +32,19 @@
 		serial2 = &uart2;
 
 		clks = &clks;
+		reset = &reset;
+
+		pcie0 = &pcie0;
+		pcie1 = &pcie1;
+
+		serdes0 = &serdes0;
+		serdes1 = &serdes1;
+
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		i2c3 = &i2c3;
+		i2c4 = &i2c4;
 	};
 
 	reserved-memory {
@@ -49,6 +65,9 @@
 			no-map;
 		};
 
+		hse_reserved: shm@0x34000000 {
+			reg = <0x0 0x34000000 0x0 0x40000>;	/* 256k */
+		};
 	};
 
 	firmware {
@@ -71,6 +90,12 @@
 				reg = <0x14>;
 				#clock-cells = <1>;
 			};
+
+			scmi_reset: protocol@16 {
+				reg = <0x16>;
+				#reset-cells = <1>;
+			};
+
 		};
 	};
 
@@ -133,8 +158,14 @@
 			clock-frequency = <32000>;
 			#clock-cells = <0>;
 		};
-		serdes_ext: serdes_ext {
+		serdes_125_ext: serdes_125_ext {
 			compatible = "fixed-clock";
+			clock-frequency = <125000000>;
+			#clock-cells = <0>;
+		};
+		serdes_100_ext: serdes_100_ext {
+			compatible = "fixed-clock";
+			clock-frequency = <100000000>;
 			#clock-cells = <0>;
 		};
 	};
@@ -165,12 +196,12 @@
 	};
 
 	rgm: rgm@40078000 {
-		compatible = "fsl,s32gen1-rgm";
+		compatible = "fsl,s32gen1-rgm", "syscon";
 		reg = <0x0 0x40078000 0x0 0x3000>;
 	};
 
 	mc_me: mc_me@40088000 {
-		compatible = "fsl,s32gen1-mc_me";
+		compatible = "fsl,s32gen1-mc_me", "syscon";
 		reg = <0x0 0x40088000 0x0 0x3000>;
 	};
 
@@ -190,11 +221,7 @@
 	};
 
 	reset_0: reset@40078000 {
-		compatible = "fsl,s32gen1-reset";
-		      /* MC RGM */
-		reg = <0x0 0x40078000 0x0 0x3000>,
-		      /* MC ME */
-		      <0x0 0x40088000 0x0 0x1000>;
+		compatible = "fsl,s32gen1-prstc";
 	};
 
 	a53_gpr: a53_gpr@4007C400 {
@@ -225,6 +252,22 @@
 		 */
 		midr-reg = <0x0 0x4009C000 0x0 0x10>;
 		status = "disabled";
+			  /* MIDR */
+		ranges = <0 0 0x0 0x4009C000 0x0 0x10>,
+			  /* MSCR 0-101 */
+			 <1 0 0x0 0x4009C240 0x0 0x198>,
+			 /* IMCR range 512–595 */
+			 <2 0 0x0 0x4009CA40 0x0 0x150>;
+		nvram: nvram@4009C000 {
+			compatible = "fsl,s32gen1-siul2-nvmem";
+			reg = <0x0 0x0 0x0 0x10>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			status = "okay";
+			soc_revision: soc_revision@0 {
+				reg = <0x0 0x4>;
+			};
+		};
 	};
 
 	siul2_1 {
@@ -521,11 +564,15 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 		#interrupt-cells = <3>;
-		ranges = <0x0 0x0 0x0 0x40210000 0x0 0x4000>;
+		memory-region = <&hse_reserved>;
+		ranges;
 
 		mu0b@40210000 {
 			compatible = "fsl,s32gen1-hse";
-			reg = <0x0 0x0 0x0 0x1000>;
+			reg = <0x0 0x40210000 0x0 0x1000>,
+			      <0x0 0x22C00000 0x0 0x1000>;
+			reg-names = "hse-mu0b-regs",
+				    "hse-mu0b-desc";
 			interrupts = <GIC_SPI 103 IRQ_TYPE_EDGE_RISING>, /* GIC 135 */
 			             <GIC_SPI 104 IRQ_TYPE_EDGE_RISING>, /* GIC 136 */
 			             <GIC_SPI 105 IRQ_TYPE_EDGE_RISING>; /* GIC 137 */
@@ -535,7 +582,10 @@
 		};
 		mu1b@40211000 {
 			compatible = "fsl,s32gen1-hse";
-			reg = <0x0 0x1000 0x0 0x1000>;
+			reg = <0x0 0x40211000 0x0 0x1000>,
+			      <0x0 0x22C01000 0x0 0x1000>;
+			reg-names = "hse-mu1b-regs",
+				    "hse-mu1b-desc";
 			interrupts = <GIC_SPI 106 IRQ_TYPE_EDGE_RISING>, /* GIC 138 */
 			             <GIC_SPI 107 IRQ_TYPE_EDGE_RISING>, /* GIC 139 */
 			             <GIC_SPI 108 IRQ_TYPE_EDGE_RISING>; /* GIC 140 */
@@ -545,7 +595,10 @@
 		};
 		mu2b@40212000 {
 			compatible = "fsl,s32gen1-hse";
-			reg = <0x0 0x2000 0x0 0x1000>;
+			reg = <0x0 0x40212000 0x0 0x1000>,
+			      <0x0 0x22C02000 0x0 0x1000>;
+			reg-names = "hse-mu2b-regs",
+				    "hse-mu2b-desc";
 			interrupts = <GIC_SPI 109 IRQ_TYPE_EDGE_RISING>, /* GIC 141 */
 			             <GIC_SPI 110 IRQ_TYPE_EDGE_RISING>, /* GIC 142 */
 			             <GIC_SPI 111 IRQ_TYPE_EDGE_RISING>; /* GIC 143 */
@@ -555,7 +608,10 @@
 		};
 		mu3b@40213000 {
 			compatible = "fsl,s32gen1-hse";
-			reg = <0x0 0x3000 0x0 0x1000>;
+			reg = <0x0 0x40213000 0x0 0x1000>,
+			      <0x0 0x22C03000 0x0 0x1000>;
+			reg-names = "hse-mu3b-regs",
+				    "hse-mu3b-desc";
 			interrupts = <GIC_SPI 112 IRQ_TYPE_EDGE_RISING>, /* GIC 144 */
 			             <GIC_SPI 113 IRQ_TYPE_EDGE_RISING>, /* GIC 145 */
 			             <GIC_SPI 114 IRQ_TYPE_EDGE_RISING>; /* GIC 146 */
@@ -735,6 +791,10 @@
 		      <0 0x50410000 0 0x2000>,
 		      <0 0x50420000 0 0x2000>;
 		interrupts = <1 9 0xf04>;
+
+		msi-controller;
+		/* GIC interrupts between 167 and 182 can be used as MBIs. */
+		mbi-ranges = <167 16>;
 	};
 
 	rtc0: rtc@40060000 {
@@ -763,10 +823,16 @@
 			 <&clks S32GEN1_SCMI_CLK_GMAC0_TX_SGMII>,
 			 <&clks S32GEN1_SCMI_CLK_GMAC0_TX_RGMII>,
 			 <&clks S32GEN1_SCMI_CLK_GMAC0_TX_RMII>,
-			 <&clks S32GEN1_SCMI_CLK_GMAC0_TX_MII>;
+			 <&clks S32GEN1_SCMI_CLK_GMAC0_TX_MII>,
+			 <&clks S32GEN1_SCMI_CLK_GMAC0_RX_SGMII>,
+			 <&clks S32GEN1_SCMI_CLK_GMAC0_RX_RGMII>,
+			 <&clks S32GEN1_SCMI_CLK_GMAC0_RX_RMII>,
+			 <&clks S32GEN1_SCMI_CLK_GMAC0_RX_MII>;
 		clock-names = "stmmaceth", "pclk",
 			      "tx_sgmii", "tx_rgmii",
-			      "tx_rmii", "tx_mii";
+			      "tx_rmii", "tx_mii",
+			      "rx_sgmii", "rx_rgmii",
+			      "rx_rmii", "rx_mii";
 		gmac0_mdio: mdio0 {
 			compatible = "snps,dwmac-mdio";
 			#address-cells = <1>;
@@ -774,21 +840,39 @@
 		};
 	};
 
+	serdes0: serdes@40480000 {
+		#phy-cells = <3>;
+		compatible = "fsl,s32gen1-serdes";
+		clocks = <&clks S32GEN1_SCMI_CLK_SERDES_AXI>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_AUX>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_APB>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_REF>;
+		clock-names = "axi", "aux", "apb", "ref";
+		resets = <&reset S32GEN1_SCMI_RST_SERDES0>,
+			 <&reset S32GEN1_SCMI_RST_PCIE0>;
+		reset-names = "serdes", "pcie";
+		fsl,sys-mode = <PCIE_GEN3X2_MODE>;
+		reg = <0x0 0x40480000 0x0 0x108>,
+		      <0x0 0x40483008 0x0 0x10>,
+		      <0x0 0x40482000 0x0 0x800>,
+		      <0x0 0x40482800 0x0 0x800>;
+		reg-names = "ss_pcie", "pcie_phy", "xpcs0", "xpcs1";
+	};
+
 	pcie0: pcie@40400000 {
 		compatible = "fsl,s32gen1-pcie";
 		reg = <0x00 0x40400000 0x0 0x00001000   /* dbi registers */
-			0x00 0x40420000 0x0 0x00001000   /* dbi2 registers */
-			0x00 0x40460000 0x0 0x00001000   /* atu registers */
-			0x00 0x40470000 0x0 0x00001000   /* dma registers */
-			/* ctrl (serdes) registers */
-			0x00 0x40480000 0x0 0x00004000
-			/* RC configuration space, 4KB each for cfg0 and cfg1
-			 * at the end of the outbound memory map
-			 */
-			0x5f 0xffffe000 0x0 0x00002000
-			0x58 0x00000000 0x0 0x40000000>; /* 1GB EP addr space */
+		       0x00 0x40420000 0x0 0x00001000   /* dbi2 registers */
+		       0x00 0x40460000 0x0 0x00001000   /* atu registers */
+		       0x00 0x40470000 0x0 0x00001000   /* dma registers */
+		       0x00 0x40481000 0x0 0x000000F8   /* ctrl registers */
+		       /* RC configuration space, 4KB each for cfg0 and cfg1
+			* at the end of the outbound memory map
+			*/
+		       0x5f 0xffffe000 0x0 0x00002000
+		       0x58 0x00000000 0x0 0x40000000>; /* 1GB EP addr space */
 		reg-names = "dbi", "dbi2", "atu", "dma", "ctrl",
-				"config", "addr_space";
+			    "config", "addr_space";
 		#address-cells = <3>;
 		#size-cells = <2>;
 		device_type = "pci";
@@ -818,6 +902,7 @@
 					<0 0 0 2 &gic 0 0 0 129 4>,
 					<0 0 0 3 &gic 0 0 0 130 4>,
 					<0 0 0 4 &gic 0 0 0 131 4>;
+		/* msi-parent = <&gic>; */
 
 		/* EP mode only */
 		num-ib-windows = <6>;
@@ -826,21 +911,40 @@
 		status = "disabled";
 	};
 
+	serdes1: serdes@44180000 {
+		#phy-cells = <3>;
+		compatible = "fsl,s32gen1-serdes";
+		clocks = <&clks S32GEN1_SCMI_CLK_SERDES_AXI>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_AUX>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_APB>,
+			 <&clks S32GEN1_SCMI_CLK_SERDES_REF>;
+		clock-names = "axi", "aux", "apb", "ref";
+		resets = <&reset S32GEN1_SCMI_RST_SERDES1>,
+			 <&reset S32GEN1_SCMI_RST_PCIE1>;
+		reset-names = "serdes", "pcie";
+		fsl,sys-mode = <XPCSX2_MODE>;
+		reg = <0x0 0x44180000 0x0 0x108>,
+		      <0x0 0x44183008 0x0 0x10>,
+		      <0x0 0x44182000 0x0 0x800>,
+		      <0x0 0x44182800 0x0 0x800>;
+		reg-names = "ss_pcie", "pcie_phy", "xpcs0", "xpcs1";
+		status = "okay";
+	};
+
 	pcie1: pcie@44100000 {
 		compatible = "fsl,s32gen1-pcie";
 		reg = <0x00 0x44100000 0x0 0x00001000   /* dbi registers */
-			0x00 0x44120000 0x0 0x00001000   /* dbi2 registers */
-			0x00 0x44160000 0x0 0x00001000   /* atu registers */
-			0x00 0x44170000 0x0 0x00001000   /* dma registers */
-			/* ctrl (serdes) registers */
-			0x00 0x44180000 0x0 0x00004000
-			/* RC configuration space, 4KB each for cfg0 and cfg1
-			 * at the end of the outbound memory map
-			 */
-			0x48 0xffffe000 0x0 0x00002000
-			0x48 0x00000000 0x0 0x40000000>; /* 1GB EP addr space */
+		       0x00 0x44120000 0x0 0x00001000   /* dbi2 registers */
+		       0x00 0x44160000 0x0 0x00001000   /* atu registers */
+		       0x00 0x44170000 0x0 0x00001000   /* dma registers */
+		       0x00 0x44181000 0x0 0x000000F8   /* ctrl registers */
+		       /* RC configuration space, 4KB each for cfg0 and cfg1
+			* at the end of the outbound memory map
+			*/
+		       0x48 0xffffe000 0x0 0x00002000
+		       0x48 0x00000000 0x0 0x40000000>; /* 1GB EP addr space */
 		reg-names = "dbi", "dbi2", "atu", "dma", "ctrl",
-				"config", "addr_space";
+			    "config", "addr_space";
 		#address-cells = <3>;
 		#size-cells = <2>;
 		device_type = "pci";
@@ -870,6 +974,7 @@
 					<0 0 0 2 &gic 0 0 0 220 4>,
 					<0 0 0 3 &gic 0 0 0 221 4>,
 					<0 0 0 4 &gic 0 0 0 222 4>;
+		/* msi-parent = <&gic>; */
 
 		/* EP mode only */
 		num-ib-windows = <6>;

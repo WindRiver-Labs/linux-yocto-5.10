@@ -9,8 +9,11 @@
 #include <linux/clk.h>
 #include <linux/cpuhotplug.h>
 #include <linux/cpu.h>
+#include <linux/interrupt.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/sched_clock.h>
 #include <linux/slab.h>
 
@@ -43,38 +46,34 @@
 #define CONFIG_PIT_CLKEVT_RATE	460
 #endif
 
+struct pit_work {
+	struct work_struct work;
+	int status;
+};
+
 struct pit_timer {
+	void __iomem *module_base;
 	void __iomem *clksrc_base;
 	void __iomem *clkevt_base;
 	int irq;
 	unsigned int cpu;
 	struct clk *pit_clk;
+	struct device *dev;
 	unsigned long cycle_per_jiffy;
 	struct clock_event_device clockevent_pit;
 	struct irqaction pit_timer_irq;
 	struct list_head list;
+	struct clocksource clksrc;
+	struct pit_work work;
+	u32 saved_cnt;
 };
 
-
-static LIST_HEAD(pits_list);
 static struct pit_timer *clocksource;
-static bool registered;
 
 static inline struct pit_timer *evt_pit_timer(
 		struct clock_event_device *evt)
 {
 	return container_of(evt, struct pit_timer, clockevent_pit);
-}
-
-static struct pit_timer *cpu_pit_timer(unsigned int cpu)
-{
-	struct pit_timer *pit;
-
-	list_for_each_entry(pit, &pits_list, list)
-		if (pit->cpu == cpu)
-			return pit;
-
-	return NULL;
 }
 
 static inline void pit_timer_enable(struct pit_timer *pit)
@@ -93,26 +92,110 @@ static inline void pit_irq_acknowledge(struct pit_timer *pit)
 	__raw_writel(PITTFLG_TIF, pit->clkevt_base + PITTFLG);
 }
 
+static struct pit_timer *cs_to_pit(struct clocksource *cs)
+{
+	return container_of(cs, struct pit_timer, clksrc);
+}
+
+static struct pit_timer *work_to_pit(struct work_struct *work)
+{
+	struct pit_work *pwork = container_of(work, struct pit_work, work);
+
+	return container_of(pwork, struct pit_timer, work);
+}
+
+static u64 pit_read_down_val(struct pit_timer *pit)
+{
+	return ~__raw_readl(pit->clksrc_base + PITCVAL);
+}
+
 static u64 notrace pit_read_sched_clock(void)
 {
-	return ~__raw_readl(clocksource->clksrc_base + PITCVAL);
+	return pit_read_down_val(clocksource);
+}
+
+static u64 pit_clksrc_read(struct clocksource *cs)
+{
+	struct pit_timer *pit = cs_to_pit(cs);
+
+	return pit_read_down_val(pit);
+}
+
+static void pit_clksrc_disable(struct pit_timer *pit)
+{
+	__raw_writel(0,  pit->clksrc_base + PITTCTRL);
+}
+
+static void pit_clksrc_enable(struct pit_timer *pit)
+{
+	__raw_writel(PITTCTRL_TEN,  pit->clksrc_base + PITTCTRL);
+}
+
+static void pit_clksrc_loadval(struct pit_timer *pit, u32 val)
+{
+	__raw_writel(val, pit->clksrc_base + PITLDVAL);
+}
+
+static void pit_clksrc_save_cnt(struct pit_timer *pit)
+{
+	pit->saved_cnt = __raw_readl(pit->clksrc_base + PITCVAL);
+}
+
+static void pit_clksrc_suspend(struct clocksource *cs)
+{
+	struct pit_timer *pit = cs_to_pit(cs);
+
+	pit_clksrc_save_cnt(pit);
+	pit_clksrc_disable(pit);
+}
+
+static void pit_clksrc_resume(struct clocksource *cs)
+{
+	struct pit_timer *pit = cs_to_pit(cs);
+
+	pit_clksrc_disable(clocksource);
+
+	if (pit->saved_cnt) {
+		pit_clksrc_loadval(pit, pit->saved_cnt);
+		pit_clksrc_enable(clocksource);
+		/**
+		 * From PIT documentation:
+		 *   Writing a new value to this register does not restart the
+		 *   timer; instead the value is loaded after the timer expires.
+		 * Writing 0xFFFFFFFFU will artificially reset the conter once
+		 * pit->saved_cnt expires.
+		 */
+		pit_clksrc_loadval(clocksource, 0xFFFFFFFFU);
+
+		return;
+	}
+
+	pit_clksrc_loadval(clocksource, 0xFFFFFFFFU);
+	pit_clksrc_enable(clocksource);
 }
 
 static int __init pit_clocksource_init(struct pit_timer *pit,
-						unsigned long rate)
+				       unsigned long rate)
 {
 	clocksource = pit;
-	__raw_writel(0,  clocksource->clksrc_base + PITTCTRL);
-	__raw_writel(0xFFFFFFFF,  clocksource->clksrc_base + PITLDVAL);
-	__raw_writel(PITTCTRL_TEN, clocksource->clksrc_base + PITTCTRL);
 
+	pit_clksrc_disable(clocksource);
+	pit_clksrc_loadval(clocksource, 0xFFFFFFFFU);
+	pit_clksrc_enable(clocksource);
+
+	local_irq_disable();
 	sched_clock_register(pit_read_sched_clock, 32, rate);
-	clocksource_mmio_init(clocksource->clksrc_base + PITCVAL,
-			     "vf-pit", rate,
-			     CONFIG_PIT_CLKSRC_RATE, 32,
-			     clocksource_mmio_readl_down);
+	local_irq_enable();
 
-	return 0;
+	pit->clksrc.name = "vf-pit";
+	pit->clksrc.rating = CONFIG_PIT_CLKSRC_RATE;
+	pit->clksrc.read = pit_clksrc_read;
+	pit->clksrc.mask = CLOCKSOURCE_MASK(32);
+	pit->clksrc.flags = CLOCK_SOURCE_IS_CONTINUOUS;
+	pit->clksrc.suspend = pit_clksrc_suspend;
+	pit->clksrc.resume = pit_clksrc_resume;
+
+	return clocksource_register_hz(&pit->clksrc, rate);
 }
 
 static int pit_set_next_event(unsigned long delta,
@@ -215,29 +298,28 @@ static int pit_clockevent_init(struct pit_timer *pit,
 	return 0;
 }
 
-static int pit_timer_starting_cpu(unsigned int cpu)
+static void enable_pit(struct pit_timer *pit)
 {
-	struct pit_timer *pit = cpu_pit_timer(cpu);
-
-	if (pit)
-		return pit_clockevent_init(pit, pit->cycle_per_jiffy * (HZ),
-					   pit->irq);
-
-	return 0;
+        __raw_writel(~PITMCR_MDIS, pit->module_base + PITMCR);
 }
 
-static int pit_timer_dying_cpu(unsigned int cpu)
+static void register_clkevent_work(struct work_struct *work)
 {
-	struct pit_timer *pit = cpu_pit_timer(cpu);
+        struct pit_timer *pit = work_to_pit(work);
+        unsigned long clk_rate = clk_get_rate(pit->pit_clk);
+        int ret;
 
-	if (pit)
-		pit_timer_disable(pit);
+        ret = pit_clockevent_init(pit, clk_rate, pit->irq);
+        if (ret)
+                dev_err(pit->dev, "Failed to register PIT clockevent\n");
 
-	return 0;
+        pit->work.status = ret;
 }
 
-static int __init pit_timer_init(struct device_node *np)
+static int __init fsl_pit_timer_probe(struct platform_device *pdev)
 {
+        struct device *dev = &pdev->dev;
+        struct device_node *np = dev->of_node;
 	void __iomem *timer_base;
 	unsigned long clk_rate;
 	int ret;
@@ -246,25 +328,29 @@ static int __init pit_timer_init(struct device_node *np)
 
 	of_property_read_u32(np, "cpu", &cpu);
 	if (cpu < 0 || cpu >= num_possible_cpus()) {
-		pr_err("%s: please specify a cpu number between 0 and %d.\n",
-				TIMER_NAME, num_possible_cpus() - 1);
+                dev_err(dev, "Please specify a cpu number between 0 and %d.\n",
+                        num_possible_cpus() - 1);
 		return;
 	}
 
-	pit = kzalloc(sizeof(struct pit_timer), GFP_KERNEL);
+	pit = devm_kzalloc(dev, sizeof(struct pit_timer), GFP_KERNEL);
+        pit = devm_kzalloc(dev, sizeof(*pit), GFP_KERNEL);
 	if (pit == NULL) {
 		pr_err("%s: impossible to allocate memory\n", TIMER_NAME);
 		return;
 	}
 
-	list_add_tail(&pit->list, &pits_list);
+        INIT_WORK(&pit->work.work, register_clkevent_work);
+        pit->dev = dev;
+
+	platform_set_drvdata(pdev, pit);
 
 	pit->cpu = cpu;
 
-	timer_base = of_iomap(np, 0);
-	if (!timer_base) {
-		pr_err("Failed to iomap\n");
-		return -ENXIO;
+	timer_base = devm_of_iomap(dev, np, 0, NULL);
+	if (IS_ERR(timer_base)) {
+		dev_err(dev, "Failed to iomap\n");
+		return PTR_ERR(timer_base);
 	}
 
 	/*
@@ -272,15 +358,18 @@ static int __init pit_timer_init(struct device_node *np)
 	 * so choose PIT2 as clocksource, PIT3 as clockevent device,
 	 * and leave PIT0 and PIT1 unused for anyone else who needs them.
 	 */
+	pit->module_base = timer_base;
 	pit->clksrc_base = timer_base + PIT_CH(2);
 	pit->clkevt_base = timer_base + PIT_CH(3);
 
 	pit->irq = irq_of_parse_and_map(np, 0);
 	BUG_ON(pit->irq <= 0);
 
-	pit->pit_clk = of_clk_get(np, 0);
-	if (IS_ERR(pit->pit_clk))
+        pit->pit_clk = devm_clk_get(dev, NULL);
+        if (IS_ERR(pit->pit_clk)) {
+                dev_err(dev, "Clock not found\n");
 		return PTR_ERR(pit->pit_clk);
+	}
 
 	ret = clk_prepare_enable(pit->pit_clk);
 	if (ret)
@@ -290,29 +379,62 @@ static int __init pit_timer_init(struct device_node *np)
 	pit->cycle_per_jiffy = clk_rate / (HZ);
 
 	/* enable the pit module */
-	__raw_writel(~PITMCR_MDIS, timer_base + PITMCR);
-
-	if (registered == false) {
-		ret = cpuhp_setup_state_nocalls(CPUHP_AP_VF_PIT_TIMER_STARTING,
-			"AP_VF_PIT_TIMER_STARTING",
-			pit_timer_starting_cpu,
-			pit_timer_dying_cpu);
-		if (ret)
-			return ret;
-		registered = true;
-	}
+	enable_pit(pit);
 
 	if (cpu == MASTER_CPU) {
 		ret = pit_clocksource_init(pit, clk_rate);
-		if (ret)
+		if (ret) {
+			dev_err(dev, "Failed to register PIT as clocksource\n");
 			return ret;
-		ret = pit_clockevent_init(pit, clk_rate, pit->irq);
-		if (ret)
-			return ret;
+		}
 	}
+
+	/* Register event on requested CPU */
+	schedule_work_on(cpu, &pit->work.work);
+	flush_work(&pit->work.work);
+
+	return pit->work.status;
+}
+
+static int __maybe_unused fsl_pit_resume(struct device *dev)
+{
+	struct pit_timer *pit = dev_get_drvdata(dev);
+	int ret;
+
+	ret = clk_prepare_enable(pit->pit_clk);
+	if (ret)
+		return ret;
+
+	enable_pit(pit);
 
 	return 0;
 }
-TIMER_OF_DECLARE(s32v234, "fsl,s32v234-pit", pit_timer_init);
-TIMER_OF_DECLARE(vf610, "fsl,vf610-pit", pit_timer_init);
-TIMER_OF_DECLARE(s32gen1, "fsl,s32gen1-pit", pit_timer_init);
+
+static int fsl_pit_timer_remove(struct platform_device *pdev)
+{
+	return -EBUSY;
+}
+
+static const struct of_device_id fsl_pit_of_match[] = {
+	{ .compatible = "fsl,s32v234-pit", },
+	{ .compatible = "fsl,vf610-pit", },
+	{ .compatible = "fsl,s32gen1-pit", },
+	{},
+};
+MODULE_DEVICE_TABLE(of, fsl_pit_of_match);
+
+static SIMPLE_DEV_PM_OPS(pit_timer_pm_ops, NULL, fsl_pit_resume);
+
+static struct platform_driver fsl_pit_probe = {
+	.probe	= fsl_pit_timer_probe,
+	.remove = fsl_pit_timer_remove,
+	.driver	= {
+		.name = "fsl-pit",
+		.of_match_table = of_match_ptr(fsl_pit_of_match),
+		.pm = &pit_timer_pm_ops,
+	},
+};
+module_platform_driver(fsl_pit_probe);
+
+MODULE_DESCRIPTION("NXP System Timer Module driver");
+MODULE_LICENSE("GPL v2");

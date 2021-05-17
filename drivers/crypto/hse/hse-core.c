@@ -19,17 +19,29 @@
 #include "hse-core.h"
 #include "hse-mu.h"
 
+#if !defined(CONFIG_CRYPTO_DEV_NXP_HSE_UIO)
+#define HSE_KS_RAM_AES_GID       CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_ID
+#define HSE_KS_RAM_AES_GSIZE     CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_SIZE
+#define HSE_KS_RAM_HMAC_GID      CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_ID
+#define HSE_KS_RAM_HMAC_GSIZE    CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_SIZE
+#else
+#define HSE_KS_RAM_AES_GID       0u
+#define HSE_KS_RAM_AES_GSIZE     0u
+#define HSE_KS_RAM_HMAC_GID      0u
+#define HSE_KS_RAM_HMAC_GSIZE    0u
+#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
+
 /**
  * struct hse_drvdata - HSE driver private data
- * @srv_desc: service descriptor used to get attributes
- * @fw_ver: firmware version attribute structure
+ * @srv_desc[n].ptr: service descriptor virtual address for channel n
+ * @srv_desc[n].dma: service descriptor DMA address for channel n
  * @ahash_algs: registered hash and hash-based MAC algorithms
  * @skcipher_algs: registered symmetric key cipher algorithms
- * @aead_algs: registered AEAD algorithms
- * @mu: MU instance handle
+ * @aead_algs: registered authenticated encryption and AEAD algorithms
+ * @mu: MU instance handle returned by lower abstraction layer
  * @uio: user-space I/O device handle
  * @channel_busy[n]: internally cached status of MU channel n
- * @refcnt: acquired service channel reference count
+ * @refcnt: acquired service channel reference counter
  * @rx_cbk[n].fn: upper layer RX callback for channel n
  * @rx_cbk[n].ctx: context passed to the RX callback on channel n
  * @sync[n].done: completion for synchronous requests on channel n
@@ -41,8 +53,10 @@
  * @key_ring_lock: lock used for key slot acquisition
  */
 struct hse_drvdata {
-	struct hse_srv_desc srv_desc;
-	struct hse_attr_fw_version fw_ver;
+	struct {
+		void *ptr;
+		dma_addr_t dma;
+	} srv_desc[HSE_NUM_CHANNELS];
 	struct list_head ahash_algs;
 	struct list_head skcipher_algs;
 	struct list_head aead_algs;
@@ -69,51 +83,38 @@ struct hse_drvdata {
  * hse_print_fw_version - print firmware version
  * @dev: HSE device
  *
- * Get firmware version attribute from HSE and print it.
+ * Get firmware version attribute from HSE and print it. Attribute buffer is
+ * encoded into the descriptor to get around HSE memory access limitations.
  */
 static void hse_print_fw_version(struct device *dev)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
-	dma_addr_t srv_desc_dma, fw_ver_dma;
+	struct hse_srv_desc srv_desc;
+	struct hse_attr_fw_version *fw_ver;
+	unsigned int fw_ver_attr_offset;
 	int err;
 
-	fw_ver_dma = dma_map_single(dev, &drv->fw_ver, sizeof(drv->fw_ver),
-				    DMA_FROM_DEVICE);
-	if (unlikely(dma_mapping_error(dev, fw_ver_dma)))
-		return;
+	/* place attribute right after descriptor */
+	fw_ver_attr_offset = offsetof(struct hse_srv_desc, get_attr_req) +
+			     sizeof(struct hse_get_attr_srv);
+	fw_ver = drv->srv_desc[HSE_CHANNEL_ADM].ptr + fw_ver_attr_offset;
 
-	drv->srv_desc.srv_id = HSE_SRV_ID_GET_ATTR;
-	drv->srv_desc.get_attr_req.attr_id = HSE_FW_VERSION_ATTR_ID;
-	drv->srv_desc.get_attr_req.attr_len = sizeof(drv->fw_ver);
-	drv->srv_desc.get_attr_req.attr = fw_ver_dma;
+	srv_desc.srv_id = HSE_SRV_ID_GET_ATTR;
+	srv_desc.get_attr_req.attr_id = HSE_FW_VERSION_ATTR_ID;
+	srv_desc.get_attr_req.attr_len = sizeof(*fw_ver);
+	srv_desc.get_attr_req.attr = drv->srv_desc[HSE_CHANNEL_ADM].dma +
+				     fw_ver_attr_offset;
 
-	srv_desc_dma = dma_map_single(dev, &drv->srv_desc,
-				      sizeof(drv->srv_desc), DMA_TO_DEVICE);
-	if (unlikely(dma_mapping_error(dev, srv_desc_dma)))
-		goto err_unmap_fw_ver;
-
-	err = hse_srv_req_sync(dev, HSE_CHANNEL_ADM, srv_desc_dma);
+	err = hse_srv_req_sync(dev, HSE_CHANNEL_ADM, &srv_desc);
 	if (unlikely(err)) {
 		dev_dbg(dev, "%s: request failed: %d\n", __func__, err);
-		goto err_unmap_srv_desc;
+		return;
 	}
 
-	dma_unmap_single(dev, srv_desc_dma, sizeof(drv->srv_desc),
-			 DMA_TO_DEVICE);
-	dma_unmap_single(dev, fw_ver_dma, sizeof(drv->fw_ver), DMA_FROM_DEVICE);
-
-	dev_info(dev, "firmware version %d.%d.%d.%d\n", drv->fw_ver.fw_type,
-		 drv->fw_ver.major, drv->fw_ver.minor, drv->fw_ver.patch);
-
-	return;
-err_unmap_srv_desc:
-	dma_unmap_single(dev, srv_desc_dma, sizeof(drv->srv_desc),
-			 DMA_TO_DEVICE);
-err_unmap_fw_ver:
-	dma_unmap_single(dev, fw_ver_dma, sizeof(drv->fw_ver), DMA_FROM_DEVICE);
+	dev_info(dev, "firmware version %d.%d.%d.%d\n", fw_ver->fw_type,
+		 fw_ver->major, fw_ver->minor, fw_ver->patch);
 }
 
-#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
 /**
  * hse_key_ring_init - initialize all keys in a specific key group
  * @dev: HSE device
@@ -128,6 +129,10 @@ static int hse_key_ring_init(struct device *dev, struct list_head *key_ring,
 {
 	struct hse_key *ring;
 	unsigned int i;
+
+	/* skip init for zero size */
+	if (unlikely(!group_size))
+		return 0;
 
 	ring = devm_kmalloc_array(dev, group_size, sizeof(*ring), GFP_KERNEL);
 	if (IS_ERR_OR_NULL(ring))
@@ -152,10 +157,12 @@ static void hse_key_ring_free(struct list_head *key_ring)
 {
 	struct hse_key *key, *tmp;
 
+	if (unlikely(!key_ring))
+		return;
+
 	list_for_each_entry_safe(key, tmp, key_ring, entry)
 		list_del(&key->entry);
 }
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 /**
  * hse_key_slot_acquire - acquire a HSE key slot
@@ -189,6 +196,7 @@ struct hse_key *hse_key_slot_acquire(struct device *dev, enum hse_key_type type)
 	slot = list_first_entry_or_null(key_ring, struct hse_key, entry);
 	if (IS_ERR_OR_NULL(slot)) {
 		spin_unlock(&drv->key_ring_lock);
+		dev_dbg(dev, "failed to acquire key slot, type %d\n", type);
 		return ERR_PTR(-ENOKEY);
 	}
 	list_del(&slot->entry);
@@ -283,7 +291,7 @@ static u8 hse_next_free_channel(struct device *dev, enum hse_ch_type type)
 			if (channel >= HSE_STREAM_COUNT ||
 			    atomic_read(&drv->refcnt[channel]))
 				continue;
-			/* fall through */
+			fallthrough;
 		case HSE_CH_TYPE_SHARED:
 			if (!drv->channel_busy[channel])
 				return channel;
@@ -385,7 +393,7 @@ int hse_channel_release(struct device *dev, u8 channel)
  * hse_srv_req_async - send an asynchronous service request (non-blocking)
  * @dev: HSE device
  * @channel: service channel index
- * @srv_desc: service descriptor DMA address
+ * @srv_desc: service descriptor
  * @ctx: context passed to RX callback
  * @rx_cbk: upper layer RX callback
  *
@@ -397,7 +405,7 @@ int hse_channel_release(struct device *dev, u8 channel)
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
  *         index out of range, -EBUSY for channel busy or none available
  */
-int hse_srv_req_async(struct device *dev, u8 channel, dma_addr_t srv_desc,
+int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 		      void *ctx, void (*rx_cbk)(int err, void *ctx))
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
@@ -408,11 +416,6 @@ int hse_srv_req_async(struct device *dev, u8 channel, dma_addr_t srv_desc,
 
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
-
-	if (unlikely(upper_32_bits(srv_desc))) {
-		dev_err(dev, "descriptor address %pad invalid\n", &srv_desc);
-		return -EINVAL;
-	}
 
 	spin_lock(&drv->tx_lock);
 
@@ -432,7 +435,10 @@ int hse_srv_req_async(struct device *dev, u8 channel, dma_addr_t srv_desc,
 	drv->rx_cbk[channel].fn = rx_cbk;
 	drv->rx_cbk[channel].ctx = ctx;
 
-	err = hse_mu_msg_send(drv->mu, channel, lower_32_bits(srv_desc));
+	memcpy(drv->srv_desc[channel].ptr, srv_desc,
+	       sizeof(struct hse_srv_desc));
+
+	err = hse_mu_msg_send(drv->mu, channel, drv->srv_desc[channel].dma);
 	if (unlikely(err)) {
 		spin_unlock(&drv->tx_lock);
 		return err;
@@ -449,7 +455,7 @@ int hse_srv_req_async(struct device *dev, u8 channel, dma_addr_t srv_desc,
  * hse_srv_req_sync - issue a synchronous service request (blocking)
  * @dev: HSE device
  * @channel: service channel index
- * @srv_desc: service descriptor DMA address
+ * @srv_desc: service descriptor
  *
  * Send a HSE service descriptor on the selected channel and block until the
  * HSE response becomes available, then read the reply. The channel index
@@ -459,7 +465,7 @@ int hse_srv_req_async(struct device *dev, u8 channel, dma_addr_t srv_desc,
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
  *         index out of range, -EBUSY for channel busy or none available
  */
-int hse_srv_req_sync(struct device *dev, u8 channel, dma_addr_t srv_desc)
+int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	DECLARE_COMPLETION_ONSTACK(done);
@@ -470,12 +476,6 @@ int hse_srv_req_sync(struct device *dev, u8 channel, dma_addr_t srv_desc)
 
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
-
-	if (unlikely(upper_32_bits(srv_desc))) {
-		dev_err(dev, "%s: service descriptor address %pad invalid\n",
-			__func__, &srv_desc);
-		return -EINVAL;
-	}
 
 	spin_lock(&drv->tx_lock);
 
@@ -495,7 +495,10 @@ int hse_srv_req_sync(struct device *dev, u8 channel, dma_addr_t srv_desc)
 	drv->sync[channel].done = &done;
 	drv->sync[channel].reply = &reply;
 
-	err = hse_mu_msg_send(drv->mu, channel, lower_32_bits(srv_desc));
+	memcpy(drv->srv_desc[channel].ptr, srv_desc,
+	       sizeof(struct hse_srv_desc));
+
+	err = hse_mu_msg_send(drv->mu, channel, drv->srv_desc[channel].dma);
 	if (unlikely(err)) {
 		spin_unlock(&drv->tx_lock);
 		return err;
@@ -541,13 +544,11 @@ static void hse_srv_rsp_dispatch(struct device *dev, u8 channel)
 		dev_dbg(dev, "%s: service response 0x%08X on channel %d\n",
 			__func__, srv_rsp, channel);
 
-#ifdef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
 	/* when UIO support is enabled, let upper layer handle the reply */
-	if (likely(drv->uio)) {
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO) && likely(drv->uio)) {
 		hse_uio_notify(drv->uio, channel, srv_rsp);
 		return;
 	}
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 	if (drv->rx_cbk[channel].fn) {
 		drv->rx_cbk[channel].fn(err, drv->rx_cbk[channel].ctx);
@@ -632,10 +633,9 @@ static int hse_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct hse_drvdata *drv;
-	u16 status, init_ok_mask;
-#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
+	u16 status;
+	u8 channel;
 	int err;
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 	dev_dbg(dev, "probing driver\n");
 
@@ -645,49 +645,32 @@ static int hse_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, drv);
 
 	/* MU interface setup */
-	drv->mu = hse_mu_init(dev, hse_rx_dispatcher, hse_event_dispatcher);
+	drv->mu = hse_mu_init(dev, &drv->srv_desc[0].ptr, &drv->srv_desc[0].dma,
+			      hse_rx_dispatcher, hse_event_dispatcher);
 	if (IS_ERR(drv->mu)) {
-		dev_dbg(dev, "failed to initialize HSE communication\n");
+		dev_dbg(dev, "failed to initialize MU communication\n");
 		return PTR_ERR(drv->mu);
 	}
 
-	/* check HSE global status */
+	/* check firmware status */
 	status = hse_mu_check_status(drv->mu);
 	if (!likely(status & HSE_STATUS_INIT_OK)) {
-		dev_err(dev, "HSE firmware not loaded or not initialized\n");
-		return -ENODEV;
-	}
-	if (!likely(status & HSE_STATUS_INSTALL_OK))
-		dev_err(dev, "config not found, key stores not formatted\n");
-	if (unlikely(status & HSE_STATUS_PUBLISH_SYS_IMAGE))
-		dev_warn(dev, "configuration is volatile, publish SYS_IMAGE\n");
-
-	init_ok_mask = HSE_STATUS_INIT_OK | HSE_STATUS_INSTALL_OK;
-	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
-		init_ok_mask |= HSE_STATUS_RNG_INIT_OK;
-	if (unlikely((status & init_ok_mask) != init_ok_mask)) {
-		dev_err(dev, "probe failed with status 0x%04X\n", status);
+		dev_err(dev, "firmware not found\n");
 		return -ENODEV;
 	}
 
+	/* manage descriptor space */
+	for (channel = 0; channel < HSE_NUM_CHANNELS; channel++) {
+		drv->srv_desc[channel].ptr = drv->srv_desc[0].ptr +
+					     channel * HSE_SRV_DESC_MAX_SIZE;
+		drv->srv_desc[channel].dma = drv->srv_desc[0].dma +
+					     channel * HSE_SRV_DESC_MAX_SIZE;
+	}
+
+	/* initialize locks */
 	spin_lock_init(&drv->stream_lock);
 	spin_lock_init(&drv->tx_lock);
 	spin_lock_init(&drv->key_ring_lock);
-
-#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
-	/* initialize key rings */
-	err = hse_key_ring_init(dev, &drv->hmac_key_ring, HSE_KEY_TYPE_HMAC,
-				CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GID,
-				CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GSIZE);
-	if (unlikely(err))
-		return err;
-
-	err = hse_key_ring_init(dev, &drv->aes_key_ring, HSE_KEY_TYPE_AES,
-				CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GID,
-				CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GSIZE);
-	if (unlikely(err))
-		return err;
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 	/* enable RX and error notifications */
 	hse_mu_irq_enable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
@@ -696,26 +679,57 @@ static int hse_probe(struct platform_device *pdev)
 	/* check firmware version */
 	hse_print_fw_version(dev);
 
-#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
-	/* register algorithms */
+	/* check HSE global status */
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG) &&
+	    !likely(status & HSE_STATUS_RNG_INIT_OK)) {
+		dev_err(dev, "RNG not initialized\n");
+		err = -ENODEV;
+		goto err_probe_failed;
+	}
+	if (!IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO) &&
+	    !likely(status & HSE_STATUS_INSTALL_OK)) {
+		dev_err(dev, "key catalogs not formatted\n");
+		err = -ENODEV;
+		goto err_probe_failed;
+	}
+	if (unlikely(status & HSE_STATUS_PUBLISH_SYS_IMAGE))
+		dev_warn(dev, "volatile configuration, publish SYS_IMAGE\n");
+
+	/* register UIO device */
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO)) {
+		drv->uio = hse_uio_register(dev, drv->mu);
+		if (IS_ERR_OR_NULL(drv->uio)) {
+			dev_err(dev, "failed to register UIO device\n");
+			return PTR_ERR(drv->uio);
+		}
+		return 0;
+	}
+
+	/* initialize key rings */
+	err = hse_key_ring_init(dev, &drv->hmac_key_ring, HSE_KEY_TYPE_HMAC,
+				HSE_KS_RAM_HMAC_GID, HSE_KS_RAM_HMAC_GSIZE);
+	if (unlikely(err))
+		goto err_probe_failed;
+
+	err = hse_key_ring_init(dev, &drv->aes_key_ring, HSE_KEY_TYPE_AES,
+				HSE_KS_RAM_AES_GID, HSE_KS_RAM_AES_GSIZE);
+	if (unlikely(err))
+		goto err_probe_failed;
+
+	/* register kernel crypto algorithms */
 	hse_ahash_register(dev, &drv->ahash_algs);
 	hse_skcipher_register(dev, &drv->skcipher_algs);
 	hse_aead_register(dev, &drv->aead_algs);
 
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
 		hse_hwrng_register(dev);
-#else
-
-	drv->uio = hse_uio_register(dev, drv->mu);
-	if (IS_ERR_OR_NULL(drv->uio)) {
-		dev_err(dev, "failed to register UIO device\n");
-		return PTR_ERR(drv->uio);
-	}
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
 	dev_info(dev, "device ready, status 0x%04X\n", status);
 
 	return 0;
+err_probe_failed:
+	dev_err(dev, "probe failed with status 0x%04X\n", status);
+	return err;
 }
 
 static int hse_remove(struct platform_device *pdev)
@@ -727,7 +741,9 @@ static int hse_remove(struct platform_device *pdev)
 	hse_mu_irq_disable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
 	hse_mu_irq_disable(drv->mu, HSE_INT_SYS_EVENT, HSE_CH_MASK_ALL);
 
-#ifndef CONFIG_CRYPTO_DEV_NXP_HSE_UIO
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO))
+		return 0;
+
 	/* unregister algorithms */
 	hse_ahash_unregister(&drv->ahash_algs);
 	hse_skcipher_unregister(&drv->skcipher_algs);
@@ -736,9 +752,8 @@ static int hse_remove(struct platform_device *pdev)
 	/* empty used key rings */
 	hse_key_ring_free(&drv->aes_key_ring);
 	hse_key_ring_free(&drv->hmac_key_ring);
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
 
-	dev_info(dev, "device removed\n");
+	dev_dbg(dev, "device removed\n");
 
 	return 0;
 }

@@ -22,6 +22,8 @@
 #include <linux/sizes.h>
 #include <linux/of_platform.h>
 #include <linux/irqchip/chained_irq.h>
+#include <linux/phy.h>
+#include <linux/processor.h>
 
 #ifdef CONFIG_PCI_S32GEN1_ACCESS_FROM_USER
 #include <linux/debugfs.h>
@@ -76,6 +78,9 @@
 
 /* Default timeout (ms) */
 #define PCIE_CX_CPL_BASE_TIMER_VALUE	100
+
+/* PHY link timeout */
+#define PCIE_LINK_TIMEOUT_MS	1000
 
 /* SOC revision */
 
@@ -171,6 +176,10 @@ int s32gen1_ep_bars_en[] = {
 		PCIE_EP_BAR5_EN_DIS
 };
 
+struct s32gen1_pcie_data {
+	enum dw_pcie_device_mode mode;
+};
+
 #endif /* CONFIG_PCI_S32GEN1_INIT_EP_BARS */
 /* End EP BARs defines */
 
@@ -185,6 +194,13 @@ int s32gen1_ep_bars_en[] = {
 
 #define clrsetbits(type, addr, clear, set) \
 	write ## type((read ## type(addr) & ~(clear)) | (set), (addr))
+
+#define W32(pci, base, reg, write_data) \
+do { \
+	pr_debug_w("%s: W32(0x%llx, 0x%x)\n", __func__, (uint64_t)(reg), \
+		(uint32_t)(write_data)); \
+	setbits(l, (pci)->base ## _base + reg, (write_data)); \
+} while (0)
 
 #define BCLR16(pci, base, reg, mask) \
 do { \
@@ -335,6 +351,14 @@ static const struct file_operations s32v_pcie_ep_dbgfs_fops = {
 	.unlocked_ioctl = s32gen1_ioctl,
 };
 #endif /* CONFIG_PCI_S32GEN1_ACCESS_FROM_USER */
+
+static bool s32gen1_has_msi_parent(struct pcie_port *pp)
+{
+	struct dw_pcie *pcie = to_dw_pcie_from_pp(pp);
+	struct s32gen1_pcie *s32_pci = to_s32gen1_from_dw_pcie(pcie);
+
+	return s32_pci->has_msi_parent;
+}
 
 static u8 dw_pcie_iatu_unroll_enabled(struct dw_pcie *pci)
 {
@@ -559,20 +583,12 @@ int s32_pcie_setup_inbound(struct s32_inbound_region *inbStr)
 }
 EXPORT_SYMBOL(s32_pcie_setup_inbound);
 
-static bool s32gen1_pcie_is_hw_mode_ep(struct dw_pcie *pci)
-{
-	u8 header_type;
-
-	header_type = dw_pcie_readb_dbi(pci, PCI_HEADER_TYPE);
-	return ((header_type & 0x7f) == PCI_HEADER_TYPE_NORMAL);
-}
-
 static void s32gen1_pcie_disable_ltssm(struct s32gen1_pcie *pci)
 {
 	DEBUG_FUNC;
 
 	dw_pcie_dbi_ro_wr_en(&pci->pcie);
-	BCLR32(pci, ctrl, PE0_GEN_CTRL_3, LTSSM_EN);
+	BCLR32(pci, ctrl, PE0_GEN_CTRL_3, LTSSM_EN_MASK);
 	dw_pcie_dbi_ro_wr_dis(&pci->pcie);
 }
 
@@ -581,13 +597,20 @@ static void s32gen1_pcie_enable_ltssm(struct s32gen1_pcie *pci)
 	DEBUG_FUNC;
 
 	dw_pcie_dbi_ro_wr_en(&pci->pcie);
-	BSET32(pci, ctrl, PE0_GEN_CTRL_3, LTSSM_EN);
+	BSET32(pci, ctrl, PE0_GEN_CTRL_3, LTSSM_EN_MASK);
 	dw_pcie_dbi_ro_wr_dis(&pci->pcie);
 }
 
 static bool is_s32gen1_pcie_ltssm_enabled(struct s32gen1_pcie *pci)
 {
-	return (dw_pcie_readl_ctrl(pci, PE0_GEN_CTRL_3) & LTSSM_EN);
+	return (dw_pcie_readl_ctrl(pci, PE0_GEN_CTRL_3) & LTSSM_EN_MASK);
+}
+
+static bool has_data_phy_link(struct s32gen1_pcie *s32_pp)
+{
+	u32 val = dw_pcie_readl_ctrl(s32_pp, PCIE_SS_PE0_LINK_DBG_2);
+
+	return (val & PCIE_LINKUP_MASK) == PCIE_LINKUP_EXPECT;
 }
 
 static int s32gen1_pcie_link_is_up(struct dw_pcie *pcie)
@@ -597,8 +620,7 @@ static int s32gen1_pcie_link_is_up(struct dw_pcie *pcie)
 	if (!is_s32gen1_pcie_ltssm_enabled(s32_pp))
 		return 0;
 
-	return ((dw_pcie_readl_ctrl(s32_pp, PCIE_SS_PE0_LINK_DBG_2) &
-			(PCIE_LINKUP_MASK)) ==  ((u32)(PCIE_LINKUP_EXPECT)));
+	return has_data_phy_link(s32_pp);
 }
 
 static int s32gen1_pcie_get_link_speed(struct s32gen1_pcie *s32_pp)
@@ -725,7 +747,8 @@ static int s32gen1_pcie_host_init(struct pcie_port *pp)
 	dw_pcie_wait_for_link(pcie);
 
 #ifdef CONFIG_PCI_MSI
-	dw_pcie_msi_init(pp);
+	if (!s32gen1_has_msi_parent(pp))
+		dw_pcie_msi_init(pp);
 #endif
 
 	return 0;
@@ -747,11 +770,21 @@ static struct dw_pcie_ops s32_pcie_ops = {
 	.write_dbi = s32gen1_pcie_write,
 };
 
+static int s32gen1_pcie_msi_host_init(struct pcie_port *pp)
+{
+	return 0;
+}
+
 static struct dw_pcie_host_ops s32gen1_pcie_host_ops = {
 	.host_init = s32gen1_pcie_host_init,
 #ifdef CONFIG_PCI_MSI
 	.set_num_vectors = s32gen1_pcie_set_num_vectors
 #endif
+};
+
+static struct dw_pcie_host_ops s32gen1_pcie_host_ops2 = {
+        .host_init = s32gen1_pcie_host_init,
+        .msi_host_init = s32gen1_pcie_msi_host_init,
 };
 
 #if defined(CONFIG_PCI_S32GEN1_EP_MSI) || defined(CONFIG_PCI_DW_DMA)
@@ -792,10 +825,12 @@ static int s32gen1_add_pcie_port(struct pcie_port *pp,
 	DEBUG_FUNC;
 
 #ifdef CONFIG_PCI_MSI
-	pp->msi_irq = platform_get_irq_byname(pdev, "msi");
-	if (pp->msi_irq <= 0) {
-		dev_err(&pdev->dev, "failed to request msi irq\n");
-		return ret;
+        if (!s32gen1_has_msi_parent(pp)) {
+		pp->msi_irq = platform_get_irq_byname(pdev, "msi");
+		if (pp->msi_irq <= 0) {
+                        dev_err(&pdev->dev, "failed to request msi irq\n");
+                        return ret;
+                }
 	}
 #endif
 
@@ -901,31 +936,36 @@ struct s32gen1_pcie *s32_get_dw_pcie(void)
 }
 EXPORT_SYMBOL(s32_get_dw_pcie);
 
-static int s32gen1_pcie_probe(struct platform_device *pdev)
+static const struct of_device_id s32gen1_pcie_of_match[];
+
+static int s32gen1_pcie_dt_init(struct platform_device *pdev,
+				struct s32gen1_pcie *s32_pp)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct s32gen1_pcie *s32_pp;
+	struct dw_pcie *pcie = &s32_pp->pcie;
 	struct resource *res;
-	struct dw_pcie *pcie;
-	struct pcie_port *pp;
+	const struct of_device_id *match;
+	const struct s32gen1_pcie_data *data;
+	enum dw_pcie_device_mode mode;
+	int ret;
 
-	int ret = 0;
-	unsigned int ltssm_en;
+	match = of_match_device(s32gen1_pcie_of_match, dev);
+	if (!match)
+		return -EINVAL;
 
-	DEBUG_FUNC;
+	data = match->data;
+	mode = data->mode;
 
-	s32_pp = devm_kzalloc(dev, sizeof(*s32_pp), GFP_KERNEL);
-	if (!s32_pp)
-		return -ENOMEM;
+	s32_pp->is_endpoint = (mode == DW_PCIE_EP_TYPE);
+	dev_info(dev, "Configured as %s\n",
+		 PCIE_EP_RC_MODE(s32_pp->is_endpoint));
 
-	pcie = &(s32_pp->pcie);
-	pp = &(pcie->pp);
-
-	pcie->dev = dev;
-	pcie->ops = &s32_pcie_ops;
-
-	of_property_read_u32(np, "id", &s32_pp->id);
+	ret = of_property_read_u32(np, "device_id", &s32_pp->id);
+	if (ret) {
+		dev_err(dev, "Missing 'device_id' property\n");
+		return ret;
+	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dbi");
 	pcie->dbi_base = devm_ioremap_resource(dev, res);
@@ -955,27 +995,256 @@ static int s32gen1_pcie_probe(struct platform_device *pdev)
 	dev_dbg(dev, "ctrl: %pR\n", res);
 	dev_dbg(dev, "ctrl virt: 0x%llx\n", (u64)s32_pp->ctrl_base);
 
-	s32_pp->is_endpoint = s32gen1_pcie_is_hw_mode_ep(pcie);
-	dev_dbg(dev, "Configured as %s\n",
-			PCIE_EP_RC_MODE(s32_pp->is_endpoint));
-
-	/* Attempt to figure out whether u-boot has preconfigured PCIE; if it
-	 * did not, we will not be able to tell whether we should run as EP
-	 * (whose configuration value is the same as the reset value) or RC.
-	 * Failing to do so might result in a hardware freeze, if u-boot was
-	 * compiled without PCIE support at all.
-	 *
-	 * Test the LTSSM_ENABLE bit, whose reset value
-	 * is different from the value set by u-boot.
+	/* If "msi-parent" property is present in device tree and the PCIe
+	 * is RC, MSIs will not be handled by iMSI-RX (default mechanism
+	 * implemented in DesignWare core).
+	 * The MSIs will be forwarded through AXI bus to the msi parent,
+	 * which should be the GIC, which will generate MSIs as SPIs.
 	 */
-	ltssm_en = is_s32gen1_pcie_ltssm_enabled(s32_pp);
-	if (!ltssm_en) {
-		dev_err(dev,
-			"u-boot did not initialize PCIE PHY; "
-			"is u-boot compiled with PCIE support?\n");
-		ret = -ENODEV;
-		goto err_cfg;
+	if (!s32_pp->is_endpoint && of_parse_phandle(np, "msi-parent", 0))
+		s32_pp->has_msi_parent = true;
+
+	return 0;
+}
+
+static void disable_equalization(struct dw_pcie *pcie)
+{
+	u32 val;
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_GEN3_EQ_CONTROL);
+	val &= ~(PCIE_GEN3_EQ_FB_MODE | PCIE_GEN3_EQ_PSET_REQ_VEC);
+	val |= BUILD_MASK_VALUE(PCIE_GEN3_EQ_FB_MODE, 1) |
+		 BUILD_MASK_VALUE(PCIE_GEN3_EQ_PSET_REQ_VEC, 0x84);
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_GEN3_EQ_CONTROL, val);
+
+	/* Test value */
+	dev_dbg(pcie->dev, "PCIE_PORT_LOGIC_GEN3_EQ_CONTROL: 0x%08x\n",
+		dw_pcie_readl_dbi(pcie, PORT_LOGIC_GEN3_EQ_CONTROL));
+}
+
+static void s32_pcie_change_mstr_ace_cache(struct dw_pcie *pcie, u32 arcache,
+					   u32 awcache)
+{
+	u32 val;
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3);
+	val &= ~(PCIE_CFG_MSTR_ARCACHE_MODE | PCIE_CFG_MSTR_AWCACHE_MODE);
+	val |= BUILD_MASK_VALUE(PCIE_CFG_MSTR_ARCACHE_MODE, 0xF) |
+		BUILD_MASK_VALUE(PCIE_CFG_MSTR_AWCACHE_MODE, 0xF);
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3, val);
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3);
+	val &= ~(PCIE_CFG_MSTR_ARCACHE_VALUE | PCIE_CFG_MSTR_AWCACHE_VALUE);
+	val |= BUILD_MASK_VALUE(PCIE_CFG_MSTR_ARCACHE_VALUE, arcache) |
+		BUILD_MASK_VALUE(PCIE_CFG_MSTR_AWCACHE_VALUE, awcache);
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3, val);
+}
+
+static void s32_pcie_change_mstr_ace_domain(struct dw_pcie *pcie, u32 ardomain,
+					    u32 awdomain)
+{
+	u32 val;
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3);
+	val &= ~(PCIE_CFG_MSTR_ARDOMAIN_MODE | PCIE_CFG_MSTR_AWDOMAIN_MODE);
+	val |= BUILD_MASK_VALUE(PCIE_CFG_MSTR_ARDOMAIN_MODE, 3) |
+		BUILD_MASK_VALUE(PCIE_CFG_MSTR_AWDOMAIN_MODE, 3);
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3, val);
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3);
+	val &= ~(PCIE_CFG_MSTR_ARDOMAIN_VALUE | PCIE_CFG_MSTR_AWDOMAIN_VALUE);
+	val |= BUILD_MASK_VALUE(PCIE_CFG_MSTR_ARDOMAIN_VALUE, ardomain) |
+		BUILD_MASK_VALUE(PCIE_CFG_MSTR_AWDOMAIN_VALUE, awdomain);
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3, val);
+}
+
+static int init_pcie(struct s32gen1_pcie *pci)
+{
+	struct dw_pcie *pcie = &pci->pcie;
+	struct device *dev = pcie->dev;
+	u32 val;
+
+	if (pci->is_endpoint)
+		W32(pci, ctrl, PE0_GEN_CTRL_1,
+		    BUILD_MASK_VALUE(DEVICE_TYPE, PCIE_EP));
+	else
+		W32(pci, ctrl, PE0_GEN_CTRL_1,
+		    BUILD_MASK_VALUE(DEVICE_TYPE, PCIE_RC));
+
+	/* Enable writing dbi registers */
+	dw_pcie_dbi_ro_wr_en(pcie);
+
+	/* Enable direct speed change */
+	val = dw_pcie_readl_dbi(pcie, PCIE_LINK_WIDTH_SPEED_CONTROL);
+	val |= PORT_LOGIC_SPEED_CHANGE;
+	dw_pcie_writel_dbi(pcie, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
+
+	/* Disable phase 2,3 equalization */
+	disable_equalization(pcie);
+
+	dw_pcie_setup(pcie);
+
+	/* If the device has been marked as dma-coherent, then configure
+	 * transactions as Cacheable, Outer Shareable; else, configure them
+	 * as Non-shareable.
+	 */
+	s32_pcie_change_mstr_ace_cache(pcie, 3, 3);
+	if (device_get_dma_attr(dev) == DEV_DMA_COHERENT)
+		s32_pcie_change_mstr_ace_domain(pcie, 2, 2);
+	else
+		s32_pcie_change_mstr_ace_domain(pcie, 0, 0);
+
+	/* Test value for coherency control reg */
+	dev_dbg(dev, "COHERENCY_CONTROL_3_OFF: 0x%08x\n",
+		dw_pcie_readl_dbi(pcie, PORT_LOGIC_COHERENCY_CONTROL_3));
+
+	val = dw_pcie_readl_dbi(pcie, PORT_LOGIC_PORT_FORCE_OFF);
+	val |= PCIE_DO_DESKEW_FOR_SRIS;
+	dw_pcie_writel_dbi(pcie, PORT_LOGIC_PORT_FORCE_OFF, val);
+
+	if (!pci->is_endpoint) {
+		/* Set max payload supported, 256 bytes and
+		 * relaxed ordering.
+		 */
+		val = dw_pcie_readl_dbi(pcie, CAP_DEVICE_CONTROL_DEVICE_STATUS);
+		val &= ~(CAP_EN_REL_ORDER | CAP_MAX_PAYLOAD_SIZE_CS |
+			 CAP_MAX_READ_REQ_SIZE);
+		val |= CAP_EN_REL_ORDER |
+			BUILD_MASK_VALUE(CAP_MAX_PAYLOAD_SIZE_CS, 1) |
+			BUILD_MASK_VALUE(CAP_MAX_READ_REQ_SIZE, 1),
+		dw_pcie_writel_dbi(pcie, CAP_DEVICE_CONTROL_DEVICE_STATUS, val);
+
+		/* Enable the IO space, Memory space, Bus master,
+		 * Parity error, Serr and disable INTx generation
+		 */
+		dw_pcie_writel_dbi(pcie, PCIE_CTRL_TYPE1_STATUS_COMMAND_REG,
+				   PCIE_SERREN | PCIE_PERREN | PCIE_INT_EN |
+				   PCIE_IO_EN | PCIE_MSE | PCIE_BME);
+		/* Test value */
+		dev_dbg(dev, "PCIE_CTRL_TYPE1_STATUS_COMMAND_REG reg: 0x%08x\n",
+			dw_pcie_readl_dbi(pcie,
+					  PCIE_CTRL_TYPE1_STATUS_COMMAND_REG));
+
+		/* Enable errors */
+		val = dw_pcie_readl_dbi(pcie, CAP_DEVICE_CONTROL_DEVICE_STATUS);
+		val |=  CAP_CORR_ERR_REPORT_EN |
+			CAP_NON_FATAL_ERR_REPORT_EN |
+			CAP_FATAL_ERR_REPORT_EN |
+			CAP_UNSUPPORT_REQ_REP_EN;
+		dw_pcie_writel_dbi(pcie, CAP_DEVICE_CONTROL_DEVICE_STATUS, val);
 	}
+
+	val = dw_pcie_readl_dbi(pcie, PORT_GEN3_RELATED_OFF);
+	val |= PCIE_EQ_PHASE_2_3;
+	dw_pcie_writel_dbi(pcie, PORT_GEN3_RELATED_OFF, val);
+
+	/* Disable writing dbi registers */
+	dw_pcie_dbi_ro_wr_dis(pcie);
+
+	s32gen1_pcie_enable_ltssm(pci);
+
+	return 0;
+}
+
+static int init_pcie_phy(struct s32gen1_pcie *s32_pp, struct device *dev)
+{
+	int ret;
+
+	s32_pp->phy0 = devm_phy_get(dev, "serdes_lane0");
+	if (IS_ERR(s32_pp->phy0)) {
+		if (PTR_ERR(s32_pp->phy0) != -EPROBE_DEFER)
+			dev_err(dev, "Failed to get 'serdes_lane0' PHY\n");
+		return PTR_ERR(s32_pp->phy0);
+	}
+
+	ret = phy_init(s32_pp->phy0);
+	if (ret) {
+		dev_err(dev, "Failed to init 'serdes_lane0' PHY\n");
+		return ret;
+	}
+
+	ret = phy_power_on(s32_pp->phy0);
+	if (ret) {
+		dev_err(dev, "Failed to power on 'serdes_lane0' PHY\n");
+		return ret;
+	}
+
+	s32_pp->phy1 = devm_phy_optional_get(dev, "serdes_lane1");
+
+	ret = phy_init(s32_pp->phy1);
+	if (ret) {
+		dev_err(dev, "Failed to init 'serdes_lane1' PHY\n");
+		return ret;
+	}
+
+	ret = phy_power_on(s32_pp->phy1);
+	if (ret) {
+		dev_err(dev, "Failed to power on 'serdes_lane1' PHY\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static bool pcie_link_or_timeout(struct s32gen1_pcie *s32_pp, ktime_t timeout)
+{
+	ktime_t cur = ktime_get();
+
+	return has_data_phy_link(s32_pp) || ktime_after(cur, timeout);
+}
+
+static int wait_phy_data_link(struct s32gen1_pcie *s32_pp)
+{
+	ktime_t timeout = ktime_add_ms(ktime_get(), PCIE_LINK_TIMEOUT_MS);
+
+	spin_until_cond(pcie_link_or_timeout(s32_pp, timeout));
+	if (!has_data_phy_link(s32_pp)) {
+		dev_err(s32_pp->pcie.dev, "Failed to stabilize PHY link\n");
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+static int s32gen1_pcie_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct device_node *np = dev->of_node;
+	struct s32gen1_pcie *s32_pp;
+	struct dw_pcie *pcie;
+	struct pcie_port *pp;
+
+	int ret = 0;
+
+	DEBUG_FUNC;
+
+	s32_pp = devm_kzalloc(dev, sizeof(*s32_pp), GFP_KERNEL);
+	if (!s32_pp)
+		return -ENOMEM;
+
+	pcie = &(s32_pp->pcie);
+	pp = &(pcie->pp);
+
+	pcie->dev = dev;
+	pcie->ops = &s32_pcie_ops;
+
+	ret = s32gen1_pcie_dt_init(pdev, s32_pp);
+	if (ret)
+		return ret;
+
+	s32gen1_pcie_disable_ltssm(s32_pp);
+
+	ret = init_pcie_phy(s32_pp, dev);
+	if (ret)
+		return ret;
+
+	ret = init_pcie(s32_pp);
+	if (ret)
+		return ret;
+
+	ret = wait_phy_data_link(s32_pp);
+	if (ret)
+		return ret;
 
 	platform_set_drvdata(pdev, s32_pp);
 	pm_runtime_enable(dev);
@@ -994,7 +1263,10 @@ static int s32gen1_pcie_probe(struct platform_device *pdev)
 	dev_info(dev, "Configuring as %s\n",
 			PCIE_EP_RC_MODE(s32_pp->is_endpoint));
 
-	pp->ops = &s32gen1_pcie_host_ops;
+	if (s32_pp->has_msi_parent)
+		pp->ops = &s32gen1_pcie_host_ops2;
+	else
+		pp->ops = &s32gen1_pcie_host_ops;
 
 	if (!s32_pp->is_endpoint) {
 		ret = s32gen1_add_pcie_port(pp, pdev);
@@ -1043,13 +1315,21 @@ err:
 	if (ret)
 		pm_runtime_disable(dev);
 
-err_cfg:
 	dw_pcie_dbi_ro_wr_dis(pcie);
 	return ret;
 }
 
+static const struct s32gen1_pcie_data rc_of_data = {
+	.mode = DW_PCIE_RC_TYPE,
+};
+
+static const struct s32gen1_pcie_data ep_of_data = {
+	.mode = DW_PCIE_EP_TYPE,
+};
+
 static const struct of_device_id s32gen1_pcie_of_match[] = {
-	{ .compatible = "fsl,s32gen1-pcie", },
+	{ .compatible = "fsl,s32gen1-pcie", .data = &rc_of_data },
+	{ .compatible = "fsl,s32gen1-pcie-ep", .data = &ep_of_data },
 	{},
 };
 MODULE_DEVICE_TABLE(of, s32gen1_pcie_of_match);
@@ -1064,13 +1344,7 @@ static struct platform_driver s32gen1_pcie_driver = {
 	.shutdown = s32gen1_pcie_shutdown,
 };
 
-/* S32Gen1 PCIe driver does not allow module unload */
-
-static int __init s32gen1_pcie_init(void)
-{
-	return platform_driver_probe(&s32gen1_pcie_driver, s32gen1_pcie_probe);
-}
-module_init(s32gen1_pcie_init);
+module_platform_driver(s32gen1_pcie_driver);
 
 MODULE_AUTHOR("Ionut Vicovan <Ionut.Vicovan@nxp.com>");
 MODULE_DESCRIPTION("NXP S32Gen1 PCIe host controller driver");

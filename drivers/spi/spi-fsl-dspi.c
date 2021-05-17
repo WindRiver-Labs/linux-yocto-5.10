@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 //
 // Copyright 2013 Freescale Semiconductor, Inc.
-// Copyright 2020 NXP
+// Copyright 2018, 2020-2021 NXP
 //
 // Freescale DSPI driver
 // This file contains a driver for the Freescale DSPI
@@ -1115,6 +1115,39 @@ static const struct of_device_id fsl_dspi_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, fsl_dspi_dt_ids);
 
+static int dspi_init(struct fsl_dspi *dspi)
+{
+        unsigned int mcr;
+
+        /* Set idle states for all chip select signals to high */
+        mcr = SPI_MCR_PCSIS(GENMASK(dspi->ctlr->max_native_cs - 1, 0));
+
+        if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE)
+                mcr |= SPI_MCR_XSPI;
+        if (!spi_controller_is_slave(dspi->ctlr))
+                mcr |= SPI_MCR_MASTER;
+
+        regmap_write(dspi->regmap, SPI_MCR, mcr);
+        regmap_write(dspi->regmap, SPI_SR, SPI_SR_CLEAR);
+
+        switch (dspi->devtype_data->trans_mode) {
+        case DSPI_XSPI_MODE:
+                regmap_write(dspi->regmap, SPI_RSER, SPI_RSER_CMDTCFE);
+                break;
+        case DSPI_DMA_MODE:
+                regmap_write(dspi->regmap, SPI_RSER,
+                             SPI_RSER_TFFFE | SPI_RSER_TFFFD |
+                             SPI_RSER_RFDFE | SPI_RSER_RFDFD);
+                break;
+        default:
+                dev_err(&dspi->pdev->dev, "unsupported trans_mode %u\n",
+                        dspi->devtype_data->trans_mode);
+                return -EINVAL;
+        }
+
+        return 0;
+}
+
 #ifdef CONFIG_PM_SLEEP
 static int dspi_suspend(struct device *dev)
 {
@@ -1141,6 +1174,16 @@ static int dspi_resume(struct device *dev)
 	if (ret)
 		return ret;
 	spi_controller_resume(dspi->ctlr);
+
+	if (dspi->devtype_data == &devtype_data[NXPS32] ||
+		dspi->devtype_data == &devtype_data[NXPS32SLAVE]) {
+		ret = dspi_init(dspi);
+		if (ret) {
+			dev_err(dev, "failed to initialize dspi\n");
+			return ret;
+		}
+	}
+
 	if (dspi->irq)
 		enable_irq(dspi->irq);
 
@@ -1254,39 +1297,6 @@ static const struct regmap_config dspi_regmap_config[] = {
 		.max_register	= 0x2,
 	},
 };
-
-static int dspi_init(struct fsl_dspi *dspi)
-{
-	unsigned int mcr;
-
-	/* Set idle states for all chip select signals to high */
-	mcr = SPI_MCR_PCSIS(GENMASK(dspi->ctlr->max_native_cs - 1, 0));
-
-	if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE)
-		mcr |= SPI_MCR_XSPI;
-	if (!spi_controller_is_slave(dspi->ctlr))
-		mcr |= SPI_MCR_MASTER;
-
-	regmap_write(dspi->regmap, SPI_MCR, mcr);
-	regmap_write(dspi->regmap, SPI_SR, SPI_SR_CLEAR);
-
-	switch (dspi->devtype_data->trans_mode) {
-	case DSPI_XSPI_MODE:
-		regmap_write(dspi->regmap, SPI_RSER, SPI_RSER_CMDTCFE);
-		break;
-	case DSPI_DMA_MODE:
-		regmap_write(dspi->regmap, SPI_RSER,
-			     SPI_RSER_TFFFE | SPI_RSER_TFFFD |
-			     SPI_RSER_RFDFE | SPI_RSER_RFDFD);
-		break;
-	default:
-		dev_err(&dspi->pdev->dev, "unsupported trans_mode %u\n",
-			dspi->devtype_data->trans_mode);
-		return -EINVAL;
-	}
-
-	return 0;
-}
 
 static int dspi_slave_abort(struct spi_master *master)
 {

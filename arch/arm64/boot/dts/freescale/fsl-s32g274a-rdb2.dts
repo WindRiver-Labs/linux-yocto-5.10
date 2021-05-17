@@ -14,34 +14,24 @@
 				 "arm,vexpress,v2p-aarch64", "arm,vexpress";
 };
 
-&pfe_reserved_slave {
-	status = "disabled";
-};
-
-&pfe_slave {
-	status = "disabled";
-};
-
 &gmac0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl0_gmac0_rgmii_a>;
+	pinctrl-0 = <&pinctrl0_gmac0_rgmii_a &pinctrl0_gmac0_mdio_a>;
 	phy-mode = "rgmii";
 	status = "okay";
 	/* Connected to KSZ9031 MDIO_A */
 	phy-handle = <&mdio_a_phy1>;
 };
 
-&pfe1_if {
-	/* PFE1 can be used as SGMII(disabled by default) */
-	fsl,pfeng-hif-channel = <1>;
-	phy-mode = "sgmii";
-	status = "disabled";
+&pfe_logif1 {
 	phy-handle = <&mdio_a_phy3>;
 };
 
+&pfe_emac1 {
+       phy-mode = "sgmii";
+};
+
 &gmac0_mdio {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl0_gmac0_mdio_a>;
 	/* KSZ9031 GMAC */
 	mdio_a_phy1: ethernet-phy@1 {
 		compatible = "ethernet-phy-ieee802.3-c22";
@@ -71,9 +61,7 @@
 	};
 };
 
-&pfe2_mdio {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl0_pfe2_mdio_b>;
+&pfe_mdio2 {
 	/* KSZ9031 PFE2*/
 	mdio_b_phy4: ethernet-phy@4 {
 		compatible = "ethernet-phy-ieee802.3-c22";
