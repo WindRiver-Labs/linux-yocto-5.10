@@ -891,7 +891,6 @@ static int serdes_probe(struct platform_device *pdev)
 		if (IS_ERR(serdes->phys[i]))
 			return PTR_ERR(serdes->phys[i]);
 		phy_set_drvdata(serdes->phys[i], serdes);
-		serdes->phys[i]->id = i;
 	}
 
 	ret = ss_dt_init(pdev, serdes);
