@@ -730,6 +730,12 @@ static void wiz_clock_cleanup(struct wiz *wiz, struct device_node *node)
 		of_clk_del_provider(clk_node);
 		of_node_put(clk_node);
 	}
+
+	for (i = 0; i < wiz->clk_div_sel_num; i++) {
+		clk_node = of_get_child_by_name(node, clk_div_sel[i].node_name);
+		of_clk_del_provider(clk_node);
+		of_node_put(clk_node);
+	}
 }
 
 static int wiz_clock_init(struct wiz *wiz, struct device_node *node)
@@ -1114,6 +1120,12 @@ static int wiz_probe(struct platform_device *pdev)
 			dev_err(dev, "WIZ initialization failed\n");
 			goto err_pdev_create;
 		}
+	}
+
+	ret = wiz_init(wiz);
+	if (ret) {
+		dev_err(dev, "WIZ initialization failed\n");
+		goto err_wiz_init;
 	}
 
 	serdes_pdev = of_platform_device_create(child_node, NULL, dev);
