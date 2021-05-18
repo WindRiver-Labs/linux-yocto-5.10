@@ -90,7 +90,6 @@
 	pinctrl-1 = <&pinctrl1_i2c1_gpio>;
 	scl-gpios = <&gpio1 163 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 	sda-gpios = <&gpio1 165 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
-	status = "okay";
 };
 
 &i2c2 {
