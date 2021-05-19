@@ -525,8 +525,6 @@ int mmc_add_host(struct mmc_host *host)
 #endif
 
 	mmc_start_host(host);
-	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
-		mmc_register_pm_notifier(host);
 
 	return 0;
 }
@@ -543,8 +541,6 @@ EXPORT_SYMBOL(mmc_add_host);
  */
 void mmc_remove_host(struct mmc_host *host)
 {
-	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
-		mmc_unregister_pm_notifier(host);
 	mmc_stop_host(host);
 
 #ifdef CONFIG_DEBUG_FS
