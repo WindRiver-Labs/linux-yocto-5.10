@@ -400,11 +400,6 @@ void __init arm64_memblock_init(void)
 
 	early_init_fdt_scan_reserved_mem();
 
-	if (IS_ENABLED(CONFIG_ZONE_DMA32))
-		arm64_dma32_phys_limit = max_zone_phys(32);
-	else
-		arm64_dma32_phys_limit = PHYS_MASK + 1;
-
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
 
