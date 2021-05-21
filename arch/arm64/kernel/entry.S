@@ -515,7 +515,6 @@ alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	mrs	x0, daif
 	orr	x24, x24, x0
 alternative_else_nop_endif
-
 	cbz	x24, 1f					// (need_resched + count) == 0
 	cbnz	w24, 2f					// count != 0
 
