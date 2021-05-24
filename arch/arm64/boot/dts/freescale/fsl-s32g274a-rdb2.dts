@@ -99,6 +99,10 @@
 	};
 };
 
+&i2c1 {
+	status = "disabled";
+};
+
 &spi5 {
 	/* 1 hardware cs and 1 gpio cs*/
 	spi-num-chipselects = <1>;
