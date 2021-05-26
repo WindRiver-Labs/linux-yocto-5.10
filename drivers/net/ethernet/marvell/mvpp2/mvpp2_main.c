@@ -4215,6 +4215,32 @@ struct sk_buff *mvpp2_build_skb(void *data, unsigned int frag_size,
 	return skb;
 }
 
+static void mvpp2_buff_hdr_pool_put(struct mvpp2_port *port, struct mvpp2_rx_desc *rx_desc,
+				    int pool, u32 rx_status)
+{
+	dma_addr_t dma_addr, dma_addr_next;
+	struct mvpp2_buff_hdr *buff_hdr;
+	phys_addr_t phys_addr;
+
+	dma_addr = mvpp2_rxdesc_dma_addr_get(port, rx_desc);
+	phys_addr = dma_to_phys(port->dev->dev.parent, dma_addr);
+
+	do {
+		buff_hdr = (struct mvpp2_buff_hdr *)phys_to_virt(phys_addr);
+
+		dma_addr_next = le32_to_cpu(buff_hdr->next_dma_addr);
+
+		if (port->priv->hw_version >= MVPP22)
+			dma_addr_next |= ((u64)buff_hdr->next_dma_addr_high << 32);
+
+		mvpp2_bm_pool_put(port, pool, dma_addr);
+
+		dma_addr = dma_addr_next;
+		phys_addr = dma_to_phys(port->dev->dev.parent, dma_addr);
+
+	} while (!MVPP2_B_HDR_INFO_IS_LAST(le16_to_cpu(buff_hdr->info)));
+}
+
 void mvpp2_recycle_stats(void)
 {
 	int cpu;
@@ -4812,6 +4838,10 @@ static int mvpp2_rx(struct mvpp2_port *port, struct napi_struct *napi,
 						DMA_FROM_DEVICE);
 		dma_unmap_single(dev->dev.parent, dma_addr,
 				 bm_pool->buf_size, DMA_FROM_DEVICE);
+
+		/* Buffer header not supported */
+		if (rx_status & MVPP2_RXD_BUF_HDR)
+			goto err_drop_frame;
 
 		prefetch(data + NET_SKB_PAD); /* packet header */
 
