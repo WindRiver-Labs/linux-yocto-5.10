@@ -241,14 +241,15 @@ static void nxp_remove(struct phy_device *phydev)
 	/* unregister sysfs files */
 	sysfs_remove_group(&phydev->mdio.dev.kobj, &nxp_attribute_group);
 
+	/* cancel scheduled work */
+	cancel_work_sync(&(((struct nxp_specific_data *)phydev->priv)->phy_queue));
+
 	/* free custom data struct */
 	if (phydev->priv) {
 		kfree_sensitive(phydev->priv);
 		phydev->priv = NULL;
 	}
 
-	/* cancel scheduled work */
-	cancel_work_sync(&(((struct nxp_specific_data *)phydev->priv)->phy_queue));
 }
 
 /* Clears any pending interrupts */
