@@ -1133,7 +1133,7 @@ static int nwl_dsi_bind(struct device *dev,
 	DRM_DEV_DEBUG_DRIVER(dev, "id = %s\n", (dsi->instance)?"DSI1":"DSI0");
 
 	dsi->encoder.possible_crtcs = crtc_mask;
-	dsi->encoder.possible_clones = ~0;
+	dsi->encoder.possible_clones = 0;
 
 	drm_encoder_helper_add(&dsi->encoder,
 			       &nwl_dsi_encoder_helper_funcs);
