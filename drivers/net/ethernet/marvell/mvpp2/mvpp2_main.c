@@ -100,9 +100,11 @@ struct mvpp2_share {
 
 struct mvpp2_share mvpp2_share;
 
+#ifndef MODULE
 static inline void mvpp2_recycle_put(struct mvpp2_port *port,
 				     struct mvpp2_txq_pcpu *txq_pcpu,
 				     struct mvpp2_txq_pcpu_buf *tx_buf);
+#endif
 
 static void mvpp2_tx_done_guard_force_irq(struct mvpp2_port *port,
 					  int sw_thread, u8 to_zero_map);
@@ -2945,14 +2947,15 @@ static void mvpp2_txq_bufs_free(struct mvpp2_port *port,
 			tx_buf->type != MVPP2_TYPE_XDP_TX) {
 			dma_unmap_single(port->dev->dev.parent, tx_buf->dma,
 					 tx_buf->size, DMA_TO_DEVICE);
+#ifndef MODULE
 			if (static_branch_unlikely(&mvpp2_recycle_ena)) {
 				mvpp2_recycle_put(port, txq_pcpu, tx_buf);
 				/* sets tx_buf->skb=NULL if put to recycle */
 				if (tx_buf->skb)
 					dev_kfree_skb_any(tx_buf->skb);
-			} else {
+			} else
+#endif
 				dev_kfree_skb_any(tx_buf->skb);
-			}
 		}
 		else if (tx_buf->type == MVPP2_TYPE_XDP_TX ||
 			 tx_buf->type == MVPP2_TYPE_XDP_NDO)
@@ -4055,166 +4058,6 @@ static void mvpp2_rx_csum(struct mvpp2_port *port, u32 status,
 	skb->ip_summed = CHECKSUM_NONE;
 }
 
-/* Allocate a new skb and add it to BM pool */
-static struct sk_buff *mvpp2_recycle_get(struct mvpp2_port *port,
-					 struct mvpp2_bm_pool *bm_pool)
-{
-	int cpu;
-	struct mvpp2_recycle_pcpu *pcpu;
-	struct mvpp2_recycle_pool *pool;
-	short int idx;
-	void *frag;
-	struct sk_buff *skb;
-	dma_addr_t dma_addr;
-	cpu = smp_processor_id();
-	pcpu = mvpp2_share.recycle + cpu;
-
-	/* GET bm buffer */
-	idx = pcpu->idx[bm_pool->id];
-	pool = &pcpu->pool[bm_pool->id];
-
-	if (idx >= 0) {
-		frag = pool->pbuf[idx];
-		pcpu->idx[bm_pool->id]--; /* post-decrement */
-	} else {
-		/* Allocate 2 buffers, put 1, use another now */
-		pcpu->idx[bm_pool->id] = 0;
-		pool->pbuf[0] = mvpp2_frag_alloc(bm_pool);
-		frag = NULL;
-	}
-	if (!frag)
-		frag = mvpp2_frag_alloc(bm_pool);
-
-	/* refill the buffer into BM */
-	dma_addr = dma_map_single(port->dev->dev.parent, frag,
-				  bm_pool->buf_size, DMA_FROM_DEVICE);
-	if (unlikely(dma_mapping_error(port->dev->dev.parent, dma_addr))) {
-		pcpu->idx[bm_pool->id]++; /* Return back to recycle */
-		netdev_err(port->dev, "failed to refill BM pool-%d (%d:%p)\n",
-			   bm_pool->id, pcpu->idx[bm_pool->id], frag);
-		return NULL;
-	}
-
-	/* GET skb buffer */
-	idx = pcpu->idx[MVPP2_BM_POOLS_NUM];
-	if (idx >= 0) {
-		pool = &pcpu->pool[MVPP2_BM_POOLS_NUM];
-		skb = pool->pbuf[idx];
-		pcpu->idx[MVPP2_BM_POOLS_NUM]--;
-	} else {
-		skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
-	}
-
-	if (unlikely(!skb)) {
-		dma_unmap_single(port->dev->dev.parent, dma_addr,
-				 bm_pool->buf_size, DMA_FROM_DEVICE);
-		mvpp2_frag_free(bm_pool, frag);
-		return NULL;
-	}
-	mvpp2_bm_pool_put(port, bm_pool->id, dma_addr);
-	return skb;
-}
-
-/* SKB and BM-buff alloc/refill like mvpp2_recycle_get but without recycle */
-static inline
-struct sk_buff *mvpp2_bm_refill_skb_get(struct mvpp2_port *port,
-					struct mvpp2_bm_pool *bm_pool)
-{
-	void *frag;
-	struct sk_buff *skb;
-	dma_addr_t dma_addr;
-
-	/* GET bm buffer, refill into BM */
-	frag = mvpp2_frag_alloc(bm_pool);
-	dma_addr = dma_map_single(port->dev->dev.parent, frag,
-				  bm_pool->buf_size, DMA_FROM_DEVICE);
-	if (unlikely(dma_mapping_error(port->dev->dev.parent, dma_addr))) {
-		netdev_err(port->dev, "failed to refill BM pool-%d\n",
-			   bm_pool->id);
-		return NULL;
-	}
-
-	/* GET skb buffer */
-	skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
-	if (unlikely(!skb)) {
-		dma_unmap_single(port->dev->dev.parent, dma_addr,
-				 bm_pool->buf_size, DMA_FROM_DEVICE);
-		mvpp2_frag_free(bm_pool, frag);
-		return NULL;
-	}
-	mvpp2_bm_pool_put(port, bm_pool->id, dma_addr);
-	return skb;
-}
-
-static inline void mvpp2_skb_set_extra(struct sk_buff *skb,
-				       struct napi_struct *napi,
-				       u32 status,
-				       u8 rxq_id,
-				       struct mvpp2_bm_pool *bm_pool)
-{
-	u32 hash;
-	enum pkt_hash_types hash_type;
-
-	/* Improve performance and set identification for RX-TX fast-forward */
-	hash = MVPP2_RXTX_HASH_GENER(skb, bm_pool->id);
-	hash_type = (status & (MVPP2_RXD_L4_UDP | MVPP2_RXD_L4_TCP)) ?
-		PKT_HASH_TYPE_L4 : PKT_HASH_TYPE_L3;
-	skb_set_hash(skb, hash, hash_type);
-	skb_mark_napi_id(skb, napi);
-	skb_record_rx_queue(skb, (u16)rxq_id);
-}
-
-/* This is "fast inline" clone of __build_skb+build_skb,
- * and also with setting mv-extra information
- */
-static inline
-struct sk_buff *mvpp2_build_skb(void *data, unsigned int frag_size,
-				struct napi_struct *napi,
-				struct mvpp2_port *port,
-				u32 rx_status,
-				u8 rxq_id,
-				struct mvpp2_bm_pool *bm_pool)
-{
-	struct skb_shared_info *shinfo;
-	struct sk_buff *skb;
-	unsigned int size = frag_size ? : ksize(data);
-
-	if (static_branch_unlikely(&mvpp2_recycle_ena))
-		skb = mvpp2_recycle_get(port, bm_pool);
-	else
-		skb = mvpp2_bm_refill_skb_get(port, bm_pool);
-	if (unlikely(!skb))
-		return NULL;
-
-	size -= SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-
-	memset(skb, 0, offsetof(struct sk_buff, tail));
-	skb->truesize = SKB_TRUESIZE(size);
-	refcount_set(&skb->users, 1);
-	skb->head = data;
-	skb->data = data;
-	skb_reset_tail_pointer(skb);
-	skb->end = skb->tail + size;
-	skb->mac_header = (typeof(skb->mac_header))~0U;
-	skb->transport_header = (typeof(skb->transport_header))~0U;
-
-	/* make sure we initialize shinfo sequentially */
-	shinfo = skb_shinfo(skb);
-	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
-	atomic_set(&shinfo->dataref, 1);
-
-	/* From build_skb wrapper */
-	if (frag_size) {
-		skb->head_frag = 1;
-		if (page_is_pfmemalloc(virt_to_head_page(data)))
-			skb->pfmemalloc = 1;
-	}
-
-	mvpp2_skb_set_extra(skb, napi, rx_status, rxq_id, bm_pool);
-
-	return skb;
-}
-
 static void mvpp2_buff_hdr_pool_put(struct mvpp2_port *port, struct mvpp2_rx_desc *rx_desc,
 				    int pool, u32 rx_status)
 {
@@ -4241,6 +4084,7 @@ static void mvpp2_buff_hdr_pool_put(struct mvpp2_port *port, struct mvpp2_rx_des
 	} while (!MVPP2_B_HDR_INFO_IS_LAST(le16_to_cpu(buff_hdr->info)));
 }
 
+#ifndef MODULE
 void mvpp2_recycle_stats(void)
 {
 	int cpu;
@@ -4402,6 +4246,167 @@ static inline void mvpp2_recycle_put(struct mvpp2_port *port,
 		tx_buf->skb = NULL;
 	}
 }
+
+/* Allocate a new skb and add it to BM pool */
+static struct sk_buff *mvpp2_recycle_get(struct mvpp2_port *port,
+					 struct mvpp2_bm_pool *bm_pool)
+{
+	int cpu;
+	struct mvpp2_recycle_pcpu *pcpu;
+	struct mvpp2_recycle_pool *pool;
+	short int idx;
+	void *frag;
+	struct sk_buff *skb;
+	dma_addr_t dma_addr;
+	cpu = smp_processor_id();
+	pcpu = mvpp2_share.recycle + cpu;
+
+	/* GET bm buffer */
+	idx = pcpu->idx[bm_pool->id];
+	pool = &pcpu->pool[bm_pool->id];
+
+	if (idx >= 0) {
+		frag = pool->pbuf[idx];
+		pcpu->idx[bm_pool->id]--; /* post-decrement */
+	} else {
+		/* Allocate 2 buffers, put 1, use another now */
+		pcpu->idx[bm_pool->id] = 0;
+		pool->pbuf[0] = mvpp2_frag_alloc(bm_pool);
+		frag = NULL;
+	}
+	if (!frag)
+		frag = mvpp2_frag_alloc(bm_pool);
+
+	/* refill the buffer into BM */
+	dma_addr = dma_map_single(port->dev->dev.parent, frag,
+				  bm_pool->buf_size, DMA_FROM_DEVICE);
+	if (unlikely(dma_mapping_error(port->dev->dev.parent, dma_addr))) {
+		pcpu->idx[bm_pool->id]++; /* Return back to recycle */
+		netdev_err(port->dev, "failed to refill BM pool-%d (%d:%p)\n",
+			   bm_pool->id, pcpu->idx[bm_pool->id], frag);
+		return NULL;
+	}
+
+	/* GET skb buffer */
+	idx = pcpu->idx[MVPP2_BM_POOLS_NUM];
+	if (idx >= 0) {
+		pool = &pcpu->pool[MVPP2_BM_POOLS_NUM];
+		skb = pool->pbuf[idx];
+		pcpu->idx[MVPP2_BM_POOLS_NUM]--;
+	} else {
+		skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
+	}
+
+	if (unlikely(!skb)) {
+		dma_unmap_single(port->dev->dev.parent, dma_addr,
+				 bm_pool->buf_size, DMA_FROM_DEVICE);
+		mvpp2_frag_free(bm_pool, frag);
+		return NULL;
+	}
+	mvpp2_bm_pool_put(port, bm_pool->id, dma_addr);
+	return skb;
+}
+
+/* SKB and BM-buff alloc/refill like mvpp2_recycle_get but without recycle */
+static inline
+struct sk_buff *mvpp2_bm_refill_skb_get(struct mvpp2_port *port,
+					struct mvpp2_bm_pool *bm_pool)
+{
+	void *frag;
+	struct sk_buff *skb;
+	dma_addr_t dma_addr;
+
+	/* GET bm buffer, refill into BM */
+	frag = mvpp2_frag_alloc(bm_pool);
+	dma_addr = dma_map_single(port->dev->dev.parent, frag,
+				  bm_pool->buf_size, DMA_FROM_DEVICE);
+	if (unlikely(dma_mapping_error(port->dev->dev.parent, dma_addr))) {
+		netdev_err(port->dev, "failed to refill BM pool-%d\n",
+			   bm_pool->id);
+		return NULL;
+	}
+
+	/* GET skb buffer */
+	skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
+	if (unlikely(!skb)) {
+		dma_unmap_single(port->dev->dev.parent, dma_addr,
+				 bm_pool->buf_size, DMA_FROM_DEVICE);
+		mvpp2_frag_free(bm_pool, frag);
+		return NULL;
+	}
+	mvpp2_bm_pool_put(port, bm_pool->id, dma_addr);
+	return skb;
+}
+
+static inline void mvpp2_skb_set_extra(struct sk_buff *skb,
+				       struct napi_struct *napi,
+				       u32 status,
+				       u8 rxq_id,
+				       struct mvpp2_bm_pool *bm_pool)
+{
+	u32 hash;
+	enum pkt_hash_types hash_type;
+
+	/* Improve performance and set identification for RX-TX fast-forward */
+	hash = MVPP2_RXTX_HASH_GENER(skb, bm_pool->id);
+	hash_type = (status & (MVPP2_RXD_L4_UDP | MVPP2_RXD_L4_TCP)) ?
+		PKT_HASH_TYPE_L4 : PKT_HASH_TYPE_L3;
+	skb_set_hash(skb, hash, hash_type);
+	skb_mark_napi_id(skb, napi);
+	skb_record_rx_queue(skb, (u16)rxq_id);
+}
+
+/* This is "fast inline" clone of __build_skb+build_skb,
+ * and also with setting mv-extra information
+ */
+static inline
+struct sk_buff *mvpp2_build_skb(void *data, unsigned int frag_size,
+				struct napi_struct *napi,
+				struct mvpp2_port *port,
+				u32 rx_status,
+				u8 rxq_id,
+				struct mvpp2_bm_pool *bm_pool)
+{
+	struct skb_shared_info *shinfo;
+	struct sk_buff *skb;
+	unsigned int size = frag_size ? : ksize(data);
+
+	if (static_branch_unlikely(&mvpp2_recycle_ena))
+		skb = mvpp2_recycle_get(port, bm_pool);
+	else
+		skb = mvpp2_bm_refill_skb_get(port, bm_pool);
+	if (unlikely(!skb))
+		return NULL;
+
+	size -= SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+
+	memset(skb, 0, offsetof(struct sk_buff, tail));
+	skb->truesize = SKB_TRUESIZE(size);
+	refcount_set(&skb->users, 1);
+	skb->head = data;
+	skb->data = data;
+	skb_reset_tail_pointer(skb);
+	skb->end = skb->tail + size;
+	skb->mac_header = (typeof(skb->mac_header))~0U;
+	skb->transport_header = (typeof(skb->transport_header))~0U;
+
+	/* make sure we initialize shinfo sequentially */
+	shinfo = skb_shinfo(skb);
+	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
+	atomic_set(&shinfo->dataref, 1);
+
+	/* From build_skb wrapper */
+	if (frag_size) {
+		skb->head_frag = 1;
+		if (page_is_pfmemalloc(virt_to_head_page(data)))
+			skb->pfmemalloc = 1;
+	}
+
+	mvpp2_skb_set_extra(skb, napi, rx_status, rxq_id, bm_pool);
+
+	return skb;
+}
+#endif
 
 /* Allocate a new skb and add it to BM pool */
 static int mvpp2_rx_refill(struct mvpp2_port *port,
@@ -4845,8 +4850,12 @@ static int mvpp2_rx(struct mvpp2_port *port, struct napi_struct *napi,
 
 		prefetch(data + NET_SKB_PAD); /* packet header */
 
+#ifdef MODULE
+		skb = build_skb(data, frag_size);
+#else
 		skb = mvpp2_build_skb(data, frag_size,
 				      napi, port, rx_status, rxq->id, bm_pool);
+#endif
 		if (!skb) {
 			netdev_warn(port->dev, "skb build failed\n");
 			goto err_drop_frame;
@@ -5666,8 +5675,10 @@ skip_musdk_parser:
 		goto err_cleanup_rxqs;
 	}
 
+#ifndef MODULE
 	/* Recycle buffer pool for performance optimization */
 	mvpp2_recycle_open();
+#endif
 
 	err = mvpp2_irqs_init(port);
 	if (err) {
@@ -5786,8 +5797,9 @@ static int mvpp2_stop(struct net_device *dev)
 	mvpp2_cleanup_txqs(port);
 
 	cancel_delayed_work_sync(&port->stats_work);
-
+#ifndef MODULE
 	mvpp2_recycle_close();
+#endif
 
 	return 0;
 }
