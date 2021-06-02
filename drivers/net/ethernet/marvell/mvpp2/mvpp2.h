@@ -1293,8 +1293,10 @@ struct mvpp2_port {
 	/* Indication, whether port is connected to XLG MAC */
 	bool has_xlg_mac;
 
+#if IS_ENABLED(CONFIG_NET_DSA)
 	/* Notifier required when the port is connected to the switch */
 	struct notifier_block dsa_notifier;
+#endif
 
 	bool hwtstamp;
 	bool rx_hwtstamp;
