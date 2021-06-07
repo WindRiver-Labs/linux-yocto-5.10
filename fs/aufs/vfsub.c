@@ -525,10 +525,10 @@ ssize_t vfsub_read_k(struct file *file, void *kbuf, size_t count,
 	} buf;
 
 	buf.k = kbuf;
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
+	oldfs = force_uaccess_begin();
+	force_uaccess_end(oldfs);
 	err = vfsub_read_u(file, buf.u, count, ppos);
-	set_fs(oldfs);
+	force_uaccess_end(oldfs);
 	return err;
 }
 
@@ -555,10 +555,10 @@ ssize_t vfsub_write_k(struct file *file, void *kbuf, size_t count, loff_t *ppos)
 	} buf;
 
 	buf.k = kbuf;
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
+	oldfs = force_uaccess_begin();
+	force_uaccess_end(oldfs);
 	err = vfsub_write_u(file, buf.u, count, ppos);
-	set_fs(oldfs);
+	force_uaccess_end(oldfs);
 	return err;
 }
 
