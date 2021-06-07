@@ -1285,7 +1285,7 @@ enum d_walk_ret {
  *
  * The @enter() callbacks are called with d_lock held.
  */
-void d_walk(struct dentry *parent, void *data,
+static void d_walk(struct dentry *parent, void *data,
 		   enum d_walk_ret (*enter)(void *, struct dentry *))
 {
 	struct dentry *this_parent;
