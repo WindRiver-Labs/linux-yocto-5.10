@@ -582,11 +582,11 @@ static int au_do_cpup_symlink(struct path *h_path, struct dentry *h_src,
 		goto out;
 
 	/* unnecessary to support mmap_sem since symlink is not mmap-able */
-	old_fs = force_uaccess_begin();
-	force_uaccess_end(old_fs);
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
 	symlen = vfs_readlink(h_src, sym.u, PATH_MAX);
 	err = symlen;
-	force_uaccess_end(old_fs);
+	set_fs(old_fs);
 
 	if (symlen > 0) {
 		sym.k[symlen] = 0;

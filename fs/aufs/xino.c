@@ -890,22 +890,22 @@ ssize_t xino_fread(vfs_readf_t func, struct file *file, void *kbuf, size_t size,
 
 	i = 0;
 	buf.k = kbuf;
-	oldfs = force_uaccess_begin();
-	force_uaccess_end(oldfs);
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
 	do {
 		err = func(file, buf.u, size, pos);
 		if (err == -EINTR
 		    && !au_wkq_test()
 		    && fatal_signal_pending(current)) {
-			force_uaccess_end(oldfs);
+			set_fs(oldfs);
 			err = xino_fread_wkq(func, file, kbuf, size, pos);
 			BUG_ON(err == -EINTR);
-			oldfs = force_uaccess_begin();
-			force_uaccess_end(oldfs);
+			oldfs = get_fs();
+			set_fs(KERNEL_DS);
 		}
 	} while (i++ < prevent_endless
 		 && (err == -EAGAIN || err == -EINTR));
-	force_uaccess_end(oldfs);
+	set_fs(oldfs);
 
 #if 0 /* reserved for future use */
 	if (err > 0)
@@ -968,22 +968,22 @@ static ssize_t do_xino_fwrite(vfs_writef_t func, struct file *file, void *kbuf,
 
 	i = 0;
 	buf.k = kbuf;
-	oldfs = force_uaccess_begin();
-	force_uaccess_end(oldfs);
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
 	do {
 		err = func(file, buf.u, size, pos);
 		if (err == -EINTR
 		    && !au_wkq_test()
 		    && fatal_signal_pending(current)) {
-			force_uaccess_end(oldfs);
+			set_fs(oldfs);
 			err = xino_fwrite_wkq(func, file, kbuf, size, pos);
 			BUG_ON(err == -EINTR);
-			oldfs = force_uaccess_begin();
-			force_uaccess_end(oldfs);
+			oldfs = get_fs();
+			set_fs(KERNEL_DS);
 		}
 	} while (i++ < prevent_endless
 		 && (err == -EAGAIN || err == -EINTR));
-	force_uaccess_end(oldfs);
+	set_fs(oldfs);
 
 #if 0 /* reserved for future use */
 	if (err > 0)
