@@ -152,7 +152,7 @@ static unsigned int xintc_get_irq_local(struct xintc_irq_chip *irqc)
 
 static int xintc_map(struct irq_domain *d, unsigned int irq, irq_hw_number_t hw)
 {
-	struct xintc_irq_chip *irqc = d->host_data;
+	struct xintc_irq_chip *local_intc = d->host_data;
 	u32 edge = local_intc->intr_mask & (1 << hw);
 
 	/*
@@ -228,8 +228,8 @@ static void xil_intc_initial_setup(struct xintc_irq_chip *irqc)
 	/* Enable all SW IRQs */
 	for (i = 0; i < irqc->sw_irq; i++) {
 		mask = 1 << (i + irqc->nr_irq);
-		irqc->write_fn(irqc->base + IAR, mask);
-		irqc->write_fn(irqc->base + SIE, mask);
+		xintc_write(irqc, IAR, mask);
+		xintc_write(irqc, SIE, mask);
 	}
 }
 
@@ -275,7 +275,7 @@ static void xil_intc_handle_irq(struct pt_regs *regs)
 	struct xintc_irq_chip *irqc = per_cpu_ptr(&primary_intc, cpu_id);
 
 	do {
-		hwirq = irqc->read_fn(irqc->base + IVR);
+		hwirq = xintc_read(irqc, IVR);
 		if (hwirq != -1U) {
 			if (hwirq >= irqc->nr_irq) {
 #if defined(CONFIG_SMP) && defined(CONFIG_MICROBLAZE)
@@ -284,7 +284,7 @@ static void xil_intc_handle_irq(struct pt_regs *regs)
 				WARN_ONCE(1, "SW interrupt not handled\n");
 #endif
 				/* ACK is necessary */
-				irqc->write_fn(irqc->base + IAR, 1 << hwirq);
+				xintc_write(irqc, IAR, 1 << hwirq);
 				continue;
 			} else {
 				ret = handle_domain_irq(irqc->domain,
