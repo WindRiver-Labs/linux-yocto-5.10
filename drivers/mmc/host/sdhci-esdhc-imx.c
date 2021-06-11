@@ -1909,9 +1909,11 @@ static int sdhci_esdhc_suspend(struct device *dev)
 
 	ret = mmc_gpio_set_cd_wake(host->mmc, true);
 
-	clk_disable_unprepare(imx_data->clk_per);
-	clk_disable_unprepare(imx_data->clk_ipg);
-	clk_disable_unprepare(imx_data->clk_ahb);
+        if (!pm_runtime_suspended(dev)) {
+                clk_disable_unprepare(imx_data->clk_per);
+                clk_disable_unprepare(imx_data->clk_ipg);
+                clk_disable_unprepare(imx_data->clk_ahb);
+        }
 
 	return ret;
 }
