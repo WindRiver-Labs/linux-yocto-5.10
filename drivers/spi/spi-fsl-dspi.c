@@ -934,7 +934,6 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	struct spi_device *spi = message->spi;
 	struct spi_transfer *transfer;
 	int status = 0;
-	unsigned int val;
 
 	message->actual_length = 0;
 
