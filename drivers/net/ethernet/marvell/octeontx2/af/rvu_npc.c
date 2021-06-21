@@ -26,7 +26,6 @@
 
 #define NPC_HW_TSTAMP_OFFSET		8
 
-#define NPC_KEX_CHAN_MASK	0xFFFULL
 #define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
 #define ALIGN_8B_CEIL(__a)	(((__a) + 7) & (-8))
 
