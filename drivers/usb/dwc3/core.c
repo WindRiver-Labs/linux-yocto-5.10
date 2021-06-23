@@ -1796,8 +1796,8 @@ static int dwc3_remove(struct platform_device *pdev)
 
 	(void)pm_runtime_get_sync(&pdev->dev);
 
-	dwc3_debugfs_exit(dwc);
 	dwc3_core_exit_mode(dwc);
+	dwc3_debugfs_exit(dwc);
 
 	dwc3_event_buffers_cleanup(dwc);
 	dwc3_core_exit(dwc);
