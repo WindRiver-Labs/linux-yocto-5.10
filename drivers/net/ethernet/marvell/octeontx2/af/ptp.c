@@ -19,8 +19,12 @@
 #define PCI_SUBSYS_DEVID_OCTX2_98xx_PTP		0xB100
 #define PCI_SUBSYS_DEVID_OCTX2_96XX_PTP		0xB200
 #define PCI_SUBSYS_DEVID_OCTX2_95XX_PTP		0xB300
-#define PCI_SUBSYS_DEVID_OCTX2_LOKI_PTP		0xB400
+#define PCI_SUBSYS_DEVID_OCTX2_95XXN_PTP	0xB400
 #define PCI_SUBSYS_DEVID_OCTX2_95MM_PTP		0xB500
+#define PCI_SUBSYS_DEVID_OCTX2_95XXO_PTP	0xB600
+#define PCI_SUBSYS_DEVID_CN10K_A_PTP		0xB900
+#define PCI_SUBSYS_DEVID_CNF10K_A_PTP		0xBA00
+#define PCI_SUBSYS_DEVID_CNF10K_B_PTP		0xBC00
 #define PCI_DEVID_OCTEONTX2_RST			0xA085
 
 #define PCI_PTP_BAR_NO				0
@@ -140,10 +144,27 @@ static int ptp_adjfine(struct ptp *ptp, long scaled_ppm)
 	return 0;
 }
 
-static int ptp_get_clock(struct ptp *ptp, u64 *clk)
+static inline u64 get_tsc(bool is_pmu)
 {
-	/* Return the current PTP clock */
-	*clk = readq(ptp->reg_base + PTP_CLOCK_HI);
+#if defined(CONFIG_ARM64)
+	return is_pmu ? read_sysreg(pmccntr_el0) : read_sysreg(cntvct_el0);
+#else
+	return 0;
+#endif
+}
+
+int ptp_get_clock(struct ptp *ptp, bool is_pmu, u64 *clk, u64 *tsc)
+{
+	u64 end, start;
+	u8 retries = 0;
+
+	do {
+		start = get_tsc(0);
+		*tsc = get_tsc(is_pmu);
+		*clk = readq(ptp->reg_base + PTP_CLOCK_HI);
+		end = get_tsc(0);
+		retries++;
+	} while (((end - start) > 50) && retries < 5);
 
 	return 0;
 }
@@ -230,10 +251,22 @@ static const struct pci_device_id ptp_id_table[] = {
 			 PCI_SUBSYS_DEVID_OCTX2_95XX_PTP) },
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
 			 PCI_VENDOR_ID_CAVIUM,
-			 PCI_SUBSYS_DEVID_OCTX2_LOKI_PTP) },
+			 PCI_SUBSYS_DEVID_OCTX2_95XXN_PTP) },
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
 			 PCI_VENDOR_ID_CAVIUM,
 			 PCI_SUBSYS_DEVID_OCTX2_95MM_PTP) },
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
+			 PCI_VENDOR_ID_CAVIUM,
+			 PCI_SUBSYS_DEVID_OCTX2_95XXO_PTP) },
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
+			 PCI_VENDOR_ID_CAVIUM,
+			 PCI_SUBSYS_DEVID_CN10K_A_PTP) },
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
+			 PCI_VENDOR_ID_CAVIUM,
+			 PCI_SUBSYS_DEVID_CNF10K_A_PTP) },
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_PTP,
+			 PCI_VENDOR_ID_CAVIUM,
+			 PCI_SUBSYS_DEVID_CNF10K_B_PTP) },
 	{ 0, }
 };
 
@@ -264,7 +297,8 @@ int rvu_mbox_handler_ptp_op(struct rvu *rvu, struct ptp_req *req,
 		err = ptp_adjfine(rvu->ptp, req->scaled_ppm);
 		break;
 	case PTP_OP_GET_CLOCK:
-		err = ptp_get_clock(rvu->ptp, &rsp->clk);
+		err = ptp_get_clock(rvu->ptp, req->is_pmu, &rsp->clk,
+				    &rsp->tsc);
 		break;
 	default:
 		err = -EINVAL;
