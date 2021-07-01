@@ -1336,6 +1336,16 @@ config MFD_STMPE
 		Touchscreen: stmpe-ts
 		ADC: stmpe-adc
 
+config LLCE_CORE
+	tristate "NXP LLCE Core"
+	select SRAM
+	select FW_LOADER
+	select MFD_CORE
+	depends on m
+	help
+	  Driver for NXP LLCE accelerator. It will load
+	  the firmware and start the accelerator's cores.
+
 menu "STMicroelectronics STMPE Interface Drivers"
 depends on MFD_STMPE
 
@@ -2166,6 +2176,22 @@ config MFD_INTEL_M10_BMC
 	  This driver provides common support for accessing the device,
 	  additional drivers must be enabled in order to use the functionality
 	  of the device.
+
+config S32GEN1_MC_ME
+	bool "MC_ME regmap driver"
+	depends on ARCH_S32
+	default SOC_S32GEN1
+	help
+	  Device driver that handles configuration of MC_ME
+	  regmap ranges.
+
+config S32GEN1_MC_RGM
+	bool "MC_RGM regmap driver"
+	depends on ARCH_S32
+	default SOC_S32GEN1
+	help
+	  Device driver that handles configuration of MC_RGM
+	  regmap ranges
 
 endmenu
 endif

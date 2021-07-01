@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright 2012 Freescale Semiconductor, Inc.
+ * Copyright 2020-2021 NXP
  */
 
 #include <linux/module.h>
@@ -136,6 +137,17 @@
 
 #define MX6_USB_OTG_WAKEUP_BITS (MX6_BM_WAKEUP_ENABLE | MX6_BM_VBUS_WAKEUP | \
 				 MX6_BM_ID_WAKEUP)
+
+#define S32G_WAKEUP_IE	BIT(0)
+#define S32G_CORE_IE	BIT(1)
+#define S32G_PWRFLT		BIT(2)
+#define S32G_WAKEUPIC	BIT(5)
+#define S32G_PWRFLTEN	BIT(7)
+#define S32G_PWRFLTDF	BIT(8)
+#define S32G_WAKEUPIS	BIT(9)
+#define S32G_WAKEUPCTRL	BIT(10)
+#define S32G_WAKEUPEN	BIT(11)
+#define S32G_UCMALLBE	BIT(15)
 
 struct usbmisc_ops {
 	/* It's called once when probe a usb device */
@@ -592,6 +604,46 @@ static int usbmisc_vf610_init(struct imx_usbmisc_data *data)
 	return 0;
 }
 
+static int usbmisc_s32g_set_wakeup
+	(struct imx_usbmisc_data *data, bool enabled)
+{
+	struct imx_usbmisc *usbmisc = dev_get_drvdata(data->dev);
+	unsigned long flags;
+	u32 reg;
+	u32 wake_settings = S32G_WAKEUP_IE | S32G_CORE_IE |
+			S32G_WAKEUPEN | S32G_WAKEUPCTRL;
+
+	spin_lock_irqsave(&usbmisc->lock, flags);
+
+	reg = readl(usbmisc->base);
+	if (enabled)
+		reg |= wake_settings;
+	else
+		reg &= ~wake_settings;
+
+	writel(reg, usbmisc->base);
+	spin_unlock_irqrestore(&usbmisc->lock, flags);
+
+	return 0;
+}
+
+static int usbmisc_s32g_init(struct imx_usbmisc_data *data)
+{
+	struct imx_usbmisc *usbmisc = dev_get_drvdata(data->dev);
+	unsigned long flags;
+	u32 reg;
+
+	spin_lock_irqsave(&usbmisc->lock, flags);
+
+	reg = readl(usbmisc->base);
+	writel(reg | S32G_PWRFLTEN | S32G_UCMALLBE, usbmisc->base);
+
+	spin_unlock_irqrestore(&usbmisc->lock, flags);
+	usbmisc_s32g_set_wakeup(data, false);
+
+	return 0;
+}
+
 static int usbmisc_imx7d_set_wakeup
 	(struct imx_usbmisc_data *data, bool enabled)
 {
@@ -985,6 +1037,11 @@ static const struct usbmisc_ops imx7ulp_usbmisc_ops = {
 	.hsic_set_clk = usbmisc_imx6_hsic_set_clk,
 };
 
+static const struct usbmisc_ops s32g_usbmisc_ops = {
+	.init = usbmisc_s32g_init,
+	.set_wakeup = usbmisc_s32g_set_wakeup,
+};
+
 static inline bool is_imx53_usbmisc(struct imx_usbmisc_data *data)
 {
 	struct imx_usbmisc *usbmisc = dev_get_drvdata(data->dev);
@@ -1139,6 +1196,11 @@ static const struct of_device_id usbmisc_imx_dt_ids[] = {
 		.compatible = "fsl,imx7ulp-usbmisc",
 		.data = &imx7ulp_usbmisc_ops,
 	},
+	{
+		.compatible = "fsl,s32g-usbmisc",
+		.data = &s32g_usbmisc_ops,
+	},
+
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, usbmisc_imx_dt_ids);

@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright 2021 NXP
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
+/dts-v1/;
+#include "fsl-s32g398a.dtsi"
+
+/delete-node/ &gic;
+/delete-node/ &pci_shared_memory;
+/delete-node/ &scmi_shbuf;
+/delete-node/ &scmi;
+/ {
+	model = "Freescale S32G398A";
+	compatible = "fsl,s32g398a-emu", "fsl,s32g398a",
+				 "arm,vexpress,v2p-aarch64", "arm,vexpress";
+
+	chosen {
+		stdout-path = "serial1:115200n8";
+	};
+
+	gic: interrupt-controller@50800000 {
+		compatible = "arm,gic-v3";
+		#interrupt-cells = <3>;
+		#address-cells = <2>;
+		#size-cells = <2>;
+		interrupt-controller;
+		reg = <0 0x50800000 0 0x10000>,
+		      <0 0x50900000 0 0x200000>,
+		      <0 0x50400000 0 0x2000>,
+		      <0 0x50410000 0 0x2000>,
+		      <0 0x50420000 0 0x2000>;
+		interrupts = <1 9 0xf04>;
+
+		msi-controller;
+		/* GIC interrupts between 167 and 182 can be used as MBIs. */
+		mbi-ranges = <167 16>;
+	};
+};
+
+&fxosc {
+	clock-frequency = <40000000>;
+};
+
+&generic_timer {
+	clock-frequency = <5000000>;
+};
+
+&usdhc0 {
+	status = "okay";
+};
+
+&edma0 {
+	status = "okay";
+};
+
+&edma1 {
+	status = "okay";
+};
+
+&pfe_reserved  {
+	status = "disabled";
+};
+
+&pfe_reserved_slave  {
+	status = "disabled";
+};

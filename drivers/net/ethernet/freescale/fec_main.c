@@ -19,7 +19,8 @@
  * Bug fixes and cleanup by Philippe De Muyter (phdm@macqel.be)
  * Copyright (c) 2004-2006 Macq Electronique SA.
  *
- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
+ * Copyright (C) 2010-2015 Freescale Semiconductor, Inc.
+ * Copyright (C) 2018 NXP
  */
 
 #include <linux/module.h>
@@ -131,6 +132,13 @@ static const struct fec_devinfo fec_imx6ul_info = {
 		  FEC_QUIRK_HAS_COALESCE | FEC_QUIRK_CLEAR_SETUP_MII,
 };
 
+static const struct fec_devinfo fec_s32v234_info = {
+	.quirks = FEC_QUIRK_ENET_MAC | FEC_QUIRK_HAS_GBIT |
+		  FEC_QUIRK_HAS_BUFDESC_EX | FEC_QUIRK_HAS_CSUM |
+		  FEC_QUIRK_HAS_VLAN | FEC_QUIRK_HAS_AVB |
+		  FEC_QUIRK_ERR007885 | FEC_QUIRK_BUG_CAPTURE,
+};
+
 static struct platform_device_id fec_devtype[] = {
 	{
 		/* keep it for coldfire */
@@ -158,6 +166,9 @@ static struct platform_device_id fec_devtype[] = {
 		.name = "imx6ul-fec",
 		.driver_data = (kernel_ulong_t)&fec_imx6ul_info,
 	}, {
+		.name = "s32v234-fec",
+		.driver_data = (kernel_ulong_t)&fec_s32v234_info,
+	}, {
 		/* sentinel */
 	}
 };
@@ -171,6 +182,7 @@ enum imx_fec_type {
 	MVF600_FEC,
 	IMX6SX_FEC,
 	IMX6UL_FEC,
+	S32V234_FEC,
 };
 
 static const struct of_device_id fec_dt_ids[] = {
@@ -181,6 +193,7 @@ static const struct of_device_id fec_dt_ids[] = {
 	{ .compatible = "fsl,mvf600-fec", .data = &fec_devtype[MVF600_FEC], },
 	{ .compatible = "fsl,imx6sx-fec", .data = &fec_devtype[IMX6SX_FEC], },
 	{ .compatible = "fsl,imx6ul-fec", .data = &fec_devtype[IMX6UL_FEC], },
+	{ .compatible = "fsl,s32v234-fec", .data = &fec_devtype[S32V234_FEC], },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fec_dt_ids);
@@ -274,6 +287,9 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
 #define IS_TSO_HEADER(txq, addr) \
 	((addr >= txq->tso_hdrs_dma) && \
 	(addr < txq->tso_hdrs_dma + txq->bd.ring_size * TSO_HEADER_SIZE))
+
+void (*fec_cb)(int status_change, int link) = NULL;
+static DEFINE_MUTEX(fec_cb_lock);
 
 static int mii_cnt;
 
@@ -1785,7 +1801,21 @@ static void fec_enet_adjust_link(struct net_device *ndev)
 
 	if (status_change)
 		phy_print_status(phy_dev);
+
+	mutex_lock(&fec_cb_lock);
+	if (fec_cb)
+		fec_cb(status_change, fep->link);
+	mutex_unlock(&fec_cb_lock);
 }
+
+void fec_set_phy_callback(void (*fec_callback)(int status_change,
+					       int link))
+{
+	mutex_lock(&fec_cb_lock);
+	fec_cb = fec_callback;
+	mutex_unlock(&fec_cb_lock);
+}
+EXPORT_SYMBOL(fec_set_phy_callback);
 
 static int fec_enet_mdio_wait(struct fec_enet_private *fep)
 {
@@ -3919,6 +3949,7 @@ static const struct dev_pm_ops fec_pm_ops = {
 static struct platform_driver fec_driver = {
 	.driver	= {
 		.name	= DRIVER_NAME,
+		.owner	= THIS_MODULE,
 		.pm	= &fec_pm_ops,
 		.of_match_table = fec_dt_ids,
 		.suppress_bind_attrs = true,

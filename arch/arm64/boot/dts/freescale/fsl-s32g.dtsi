@@ -1,0 +1,996 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright 2019-2021 NXP
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
+#include "fsl-s32-gen1.dtsi"
+#include <dt-bindings/mailbox/nxp-llce-mb.h>
+#include <dt-bindings/pinctrl/s32g-pinctrl.h>
+#include <dt-bindings/clock/s32g-scmi-clock.h>
+#include <dt-bindings/net/fsl-s32g-pfeng.h>
+
+/ {
+	sysclk: clk10000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <10000000>;
+		clock-output-names = "sysclk";
+	};
+
+	virtio_block@39501000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x39501000 0x0 0x1000>;
+		interrupts = <0 68 4>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		pfe_reserved_bmu2: pfebufs@83000000 {
+			compatible = "fsl,pfe-bmu2-pool";
+			/* 2 MB */
+			reg = <0 0x83000000 0 0x200000>;
+			no-map;
+			status = "okay";
+		};
+
+		pfe_reserved: pfebufs@83200000 {
+			compatible = "shared-dma-pool";
+			/* 4 MB - 128 KB */
+			reg = <0 0x83200000 0 0x3e0000>;
+			no-map;
+			status = "okay";
+		};
+
+		pfe_reserved_bdr: pfebufs@83bf0000 {
+			compatible = "fsl,pfe-bdr-pool";
+			/* 128 KB */
+			reg = <0 0x835e0000 0 0x20000>;
+			status = "okay";
+		};
+
+		pfe_reserved_slave: pfebufs@83600000 {
+			compatible = "shared-dma-pool";
+			/* 2 MB - 128 KB */
+			reg = <0 0x83600000 0 0x1e0000>;
+			no-map;
+			status = "disabled";
+		};
+
+		pfe_reserved_bdr_slave: pfebufs@837e0000 {
+			compatible = "fsl,pfe-bdr-pool";
+			/* 128 KB */
+			reg = <0 0x837e0000 0 0x20000>;
+			status = "disabled";
+		};
+		/* ends 0x83800000 */
+	};
+
+	mc_cgm2: mc_cgm2@44018000 {
+		compatible = "fsl,s32gen1-mc_cgm2";
+		reg = <0x0 0x44018000 0x0 0x3000>;
+	};
+
+	reset: rgm@40078000 {
+		compatible = "fsl,s32gen1-rgm", "fsl,s32g2-reset", "syscon";
+		reg = <0x0 0x40078000 0x0 0x3000>;
+		#reset-cells = <1>;
+	};
+
+	pfe: pfe@46080000 {
+		compatible = "fsl,s32g274a-pfeng",
+			     "fsl,s32g274-pfe";
+		reg = <0x0 0x46000000 0x0 0x1000000>,	/* PFE controller */
+		      <0x0 0x4007ca00 0x0 0x4>;		/* S32G274a syscon */
+		reg-names = "cbus", "gpr";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 194 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 196 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 197 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "bmu", "upegpt", "safety";
+		clocks = <&clks S32G_SCMI_CLK_PFE_AXI>,
+			 <&clks S32G_SCMI_CLK_PFE_PE>,
+			 <&clks S32G_SCMI_CLK_PFE_TS>;
+		clock-names = "pfe_sys", "pfe_pe", "pfe_ts";
+		dma-coherent;
+		memory-region = <&pfe_reserved_bmu2>,
+				<&pfe_reserved>,
+				<&pfe_reserved_bdr>;
+		fsl,fw-class-name = "s32g_pfe_class.fw";
+		fsl,fw-util-name = "s32g_pfe_util.fw";
+		nvmem-cells = <&soc_revision>;
+		nvmem-cell-names = "soc_revision";
+		status = "disabled";
+
+		/* PFE_HIF_0 */
+		pfe_hif0: hif@0 {
+			compatible = "fsl,pfeng-hif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			interrupts = <GIC_SPI 190 IRQ_TYPE_EDGE_RISING>;
+			reg = <0>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_EXCLUSIVE>;
+			fsl,pfeng-ihc;
+		};
+
+		/* PFE_HIF_1 */
+		pfe_hif1: hif@1 {
+			compatible = "fsl,pfeng-hif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			interrupts = <GIC_SPI 191 IRQ_TYPE_EDGE_RISING>;
+			reg = <1>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_EXCLUSIVE>;
+		};
+
+		/* PFE_HIF_2 */
+		pfe_hif2: hif@2 {
+			compatible = "fsl,pfeng-hif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			interrupts = <GIC_SPI 192 IRQ_TYPE_EDGE_RISING>;
+			reg = <2>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_EXCLUSIVE>;
+		};
+
+		/* PFE_HIF_3 */
+		pfe_hif3: hif@3 {
+			compatible = "fsl,pfeng-hif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			interrupts = <GIC_SPI 193 IRQ_TYPE_EDGE_RISING>;
+			reg = <3>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_SHARED>;
+		};
+
+		/* PFE_EMAC_0 */
+		pfe_emac0: emac@0 {
+			compatible = "fsl,pfeng-emac";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			reg = <0>;
+			clocks = <&clks S32G_SCMI_CLK_PFE0_TX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_TX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_TX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_TX_MII>,
+				 <&clks S32G_SCMI_CLK_PFE0_RX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_RX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_RX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE0_RX_MII>;
+			clock-names = "tx_sgmii", "tx_rgmii",
+				      "tx_rmii", "tx_mii",
+				      "rx_sgmii", "rx_rgmii",
+				      "rx_rmii", "rx_mii";
+			phy-mode = "sgmii";
+
+			/* MDIO */
+			pfe_mdio0: mdio@0 {
+				compatible = "fsl,pfeng-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				reg = <0>;
+			};
+		};
+
+		/* PFE_EMAC_1 */
+		pfe_emac1: emac@1 {
+			compatible = "fsl,pfeng-emac";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			reg = <1>;
+			clocks = <&clks S32G_SCMI_CLK_PFE1_TX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_TX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_TX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_TX_MII>,
+				 <&clks S32G_SCMI_CLK_PFE1_RX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_RX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_RX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE1_RX_MII>;
+			clock-names = "tx_sgmii", "tx_rgmii",
+				      "tx_rmii", "tx_mii",
+				      "rx_sgmii", "rx_rgmii",
+				      "rx_rmii", "rx_mii";
+			phy-mode = "rgmii-id";
+
+			/* MDIO */
+			pfe_mdio1: mdio@1 {
+				compatible = "fsl,pfeng-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				reg = <1>;
+			};
+		};
+
+		/* PFE_EMAC_2 */
+		pfe_emac2: emac@2 {
+			compatible = "fsl,pfeng-emac";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			reg = <2>;
+			clocks = <&clks S32G_SCMI_CLK_PFE2_TX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_TX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_TX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_TX_MII>,
+				 <&clks S32G_SCMI_CLK_PFE2_RX_SGMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_RX_RGMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_RX_RMII>,
+				 <&clks S32G_SCMI_CLK_PFE2_RX_MII>;
+			clock-names = "tx_sgmii", "tx_rgmii",
+				      "tx_rmii", "tx_mii",
+				      "rx_sgmii", "rx_rgmii",
+				      "rx_rmii", "rx_mii";
+			phy-mode = "rgmii-id";
+
+			/* MDIO */
+			pfe_mdio2: mdio@2 {
+				compatible = "fsl,pfeng-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				reg = <2>;
+			};
+		};
+
+		/* Logical network interface 'pfe0' */
+		pfe_logif0: ethernet@0 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			local-mac-address = [ 00 04 9F BE EF 00 ];
+			fsl,pfeng-if-name = "pfe0";
+			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-emac-link = <&pfe_emac0>;
+			fsl,pfeng-hif-channels = <&pfe_hif0>;
+		};
+
+		/* Logical network interface 'pfe1' */
+		pfe_logif1: ethernet@1 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			local-mac-address = [ 00 04 9F BE EF 01 ];
+			fsl,pfeng-if-name = "pfe1";
+			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-emac-link = <&pfe_emac1>;
+			fsl,pfeng-hif-channels = <&pfe_hif1>;
+		};
+
+		/* Logical network interface 'pfe2' */
+		pfe_logif2: ethernet@2 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			local-mac-address = [ 00 04 9F BE EF 02 ];
+			fsl,pfeng-if-name = "pfe2";
+			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-emac-link = <&pfe_emac2>;
+			fsl,pfeng-hif-channels = <&pfe_hif2>;
+		};
+	};
+
+	/* Example of PFE slave driver entry. Requires SLAVE mode driver */
+	pfe_slave: pfe_slave@46000000 {
+		compatible = "fsl,s32g274a-pfeng-slave";
+		reg = <0x0 0x46000000 0x0 0x1000000>;	 /* PFE controller */
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		interrupt-parent = <&gic>;
+		dma-coherent;
+		memory-region = <&pfe_reserved_slave>,
+				<&pfe_reserved_bdr_slave>;
+		fsl,pfeng-master-hif-channel = <0>;
+		status = "disabled";
+
+		/* PFE_HIF_3 */
+		pfesl_hif3: hif@3 {
+			compatible = "fsl,pfeng-hif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			interrupts = <GIC_SPI 193 IRQ_TYPE_EDGE_RISING>;
+			reg = <3>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_SHARED>;
+			fsl,pfeng-ihc;
+		};
+
+
+		/* Logical network interface 'pfe0sl' */
+		pfesl_logif0: ethernet@0 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			local-mac-address = [ 00 04 9F BE FF 10 ];
+			fsl,pfeng-if-name = "pfe0sl";
+			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-emac-id = <0>; /* PFE_EMAC_0 */
+			fsl,pfeng-hif-channels = <&pfesl_hif3>;
+		};
+	};
+
+	siul2_0 {
+		compatible = "simple-mfd";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		status = "okay";
+		pinctrl0: siul2-pinctrl0@4009C000 {
+			compatible = "fsl,s32g-siul2_0-pinctrl";
+			#pinctrl-cells = <2>;
+			reg = <0x1 0x0 0x0 0x198>,
+			<0x2 0x0 0x0 0x150>;
+			/* MSCR range */
+			pins = <&pinctrl0 0 101>,
+			/* IMCR range */
+			<&pinctrl0 512 595>;
+			status = "okay";
+		};
+		gpio0: siul2-gpio0 {
+			compatible = "fsl,s32g-siul2-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+				/* GPIO 0-101 */
+			gpio-ranges = <&pinctrl0 0 0 102>;
+				/* Pad Data I/0 Registers */
+			eirq-ranges =
+				/* EIRQ[0] - EIRQ[10] */
+				<&pinctrl0 0 19 11>,
+				/* EIRQ[11] */
+				<&pinctrl0 0 S32GEN1_INVALID_GPIO 1>,
+				/* EIRQ[12] */
+				<&pinctrl0 0 31 1>,
+				/* EIRQ[13] - EIRQ[15] */
+				<&pinctrl0 0 33 3>,
+				/* EIRQ[16] - EIRQ[26] */
+				<&pinctrl0 0 S32GEN1_INVALID_GPIO 11>,
+				/* EIRQ[27] - EIRQ[31] */
+				<&pinctrl0 0 36 5>;
+				/* Pad Data I/0 Registers */
+			regmap0 = <&opad0_regs>;
+			regmap1 = <&ipad0_regs>;
+			regmap2 = <&irq_regs>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			interrupts = <0 210 4>;
+			status = "okay";
+		};
+	};
+
+	siul2_1 {
+		compatible = "simple-mfd";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		status = "okay";
+
+			  /* MSCR 112-190 */
+		ranges = <1 0 0x0 0x44010400 0x0 0x13C>,
+			 /* IMCR range 631-1023 */
+			 <2 0 0x0 0x44010C1C 0x0 0x5E4>;
+
+		pinctrl1: siul2-pinctrl1@44010000 {
+			compatible = "fsl,s32g-siul2_1-pinctrl";
+			#pinctrl-cells = <2>;
+			reg = <0x1 0x0 0x0 0x13C>,
+			<0x2 0x0 0x0 0x5E4>;
+			/* MSCR range */
+			pins = <&pinctrl1 112 190>,
+			/* IMCR range */
+			<&pinctrl1 631 1023>;
+			status = "okay";
+		};
+		/*
+		 * Note gpio controller nodes are split into sections
+		 * of contiguous GPIO numbering at this
+		 * point in time, functions working with gpio chips
+		 * assume this for many things.
+		 */
+		gpio1: siul2-gpio1 {
+			compatible = "fsl,s32g-siul2-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+				/* GPIO 112-190 */
+			gpio-ranges = <&pinctrl1 0 112 79>;
+			eirq-ranges =
+				/* EIRQ[0] - EIRQ[1] */
+				<&pinctrl1 0 151 2>,
+				/* EIRQ[2] - EIRQ[7] */
+				<&pinctrl1 0 177 6>,
+				/* EIRQ[8] */
+				<&pinctrl1 0 154 1>,
+				/* EIRQ[9] */
+				<&pinctrl1 0 160 1>,
+				/* EIRQ[10] */
+				<&pinctrl1 0 165 1>,
+				/* EIRQ[11] */
+				<&pinctrl1 0 168 1>,
+				/* EIRQ[12] - EIRQ[15] */
+				<&pinctrl1 0 S32GEN1_INVALID_GPIO 4>,
+				/* EIRQ[16] - EIRQ[22] */
+				<&pinctrl1 0 184 7>,
+				/* EIRQ[23] - EIRQ[25] */
+				<&pinctrl1 0 113 3>,
+				/* EIRQ[26] */
+				<&pinctrl1 0 117 1>;
+				/* Pad Data I/0 Registers */
+			regmap0 = <&opad1_regs>;
+			regmap1 = <&ipad1_regs>;
+			regmap2 = <&irq_regs>;
+			interrupt-controller;
+			interrupts = <0 210 4>;
+			#interrupt-cells = <2>;
+			status = "okay";
+		};
+	};
+	irq_regs: siul2_reg@0x44010010 {
+		compatible = "fsl,irq_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x44010010 0x0 0x34>;
+		little-endian;
+	};
+	opad0_regs: siul2_reg@0x4009D700 {
+		compatible = "fsl,opad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4009D700 0x0 0x10>;
+		reg-io-width = <2>;
+	};
+	ipad0_regs: siul2_reg@0x4009D740 {
+		compatible = "fsl,ipad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4009D740 0x0 0x10>;
+		reg-io-width = <2>;
+	};
+	opad1_regs: siul2_reg@0x44011700 {
+		compatible = "fsl,opad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x44011700 0x0 0x18>;
+		reg-io-width = <2>;
+	};
+	ipad1_regs: siul2_reg@0x44011740 {
+		compatible = "fsl,ipad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x44011740 0x0 0x18>;
+		reg-io-width = <2>;
+	};
+
+	usbmisc: usbmisc@44064200 {
+		#index-cells = <1>;
+		compatible = "fsl,s32g274a-usbmisc";
+		reg = <0x0 0x44064200 0x0 0x200>;
+	};
+
+	usbotg: usb@44064000 {
+		compatible = "fsl,s32g274a-usb";
+		reg = <0x0 0x44064000 0x0 0x200>;
+		interrupt-parent = <&gic>;
+		interrupts = <0 211 4>, /* OTG Core */
+		             <0 212 4>; /* OTG Wakeup */
+		clocks = <&clks S32G_SCMI_CLK_USB_MEM>,
+			 <&clks S32G_SCMI_CLK_USB_LOW>;
+		fsl,usbmisc = <&usbmisc 0>;
+		ahb-burst-config = <0x3>;
+		tx-burst-size-dword = <0x10>;
+		rx-burst-size-dword = <0x10>;
+		phy_type = "ulpi";
+		dr_mode = "host";
+		maximum-speed = "high-speed";
+		status = "disabled";
+	};
+
+	ddr: ddr@403C0000 {
+		compatible = "fsl,s32gen1-ddr";
+		reg = <0x0 0x403C0000 0x0 0x100>;
+		perf-phandle = <&perf>;
+		/* Will be modified by u-boot */
+		status = "disabled";
+	};
+
+	llce: llcelogger@43000000 {
+		compatible = "fsl,s32g-llcelogger";
+		reg = <0x0 0x43000000 0x0 0x1000000>,
+			<0x0 0x43800000 0x0 0x3D000>,
+			<0x0 0x43A0C40C 0x0 0x4>,
+			<0x0 0x43A0C424 0x0 0x4>,
+			<0x0 0x43A0C014 0x0 0x4>,
+			<0x0 0x43A0C408	0x0 0x4>;
+		reg-names = "llce-range",
+			"llce-shared-mem",
+			"fifo-ier",
+			"fifo-pop0",
+			"fifo-push0",
+			"fifo-status1";
+		interrupts = <0x0 184 0x4>;
+	};
+
+	llce0_sram: llce0_sram@43000000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43000000 0x0 0x2000>;
+	};
+
+	llce1_sram: llce1_sram@43100000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43100000 0x0 0x8000>;
+	};
+
+	llce2_sram: llce2_sram@43200000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43200000 0x0 0x8000>;
+	};
+
+	llce3_sram: llce3_sram@43300000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43300000 0x0 0x10000>;
+	};
+
+	llce_shmem: llce_shmem@43800000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43800000 0x0 0x40000>;
+	};
+
+	llce_boot_status: llce_boot_status@43840000 {
+		compatible = "nxp,s32g-llce-sram";
+		reg = <0x0 0x43840000 0x0 0x10000>;
+	};
+
+	llce {
+		compatible = "nxp,s32g-llce-core";
+
+		/* RX-IN_FIFO */
+		ranges = <0x0 0 0x0 0x43A00000 0x0 0x6000>,
+			/* RX-OUT_FIFO */
+			<0x1 0 0x0 0x43A08000 0x0 0x8000>,
+			/* LLCE interrupt Concentrator */
+			<0x2 0 0x0 0x43A14000 0x0 0x1000>,
+			/* BLR-IN_FIFO */
+			<0x3 0 0x0 0x43B00000 0x0 0x6000>,
+			/* BLR-OUT_FIFO */
+			<0x4 0 0x0 0x43B08000 0x0 0x6000>,
+			/* Tx_Ack_FIFO */
+			<0x5 0 0x0 0x43B10000 0x0 0x8000>;
+
+		clocks = <&clks S32G_SCMI_CLK_LLCE_SYS>;
+		clock-names = "llce_sys";
+		firmware-name = "dte.bin", "ppe_rx.bin",
+			"ppe_tx.bin", "frpe.bin";
+		memory-region = <&llce0_sram>, <&llce1_sram>,
+			<&llce2_sram>, <&llce3_sram>,
+			<&llce_boot_status>;
+		/* LLCE system control registers */
+		reg = <0x0 0x43FF8000 0x0 0x4000>;
+		reg-names = "sysctrl";
+		status = "okay";
+
+		#address-cells = <2>;
+		#size-cells = <2>;
+		#interrupt-cells = <3>;
+
+		llce_mb: llce_mb {
+			compatible = "nxp,s32g-llce-mailbox";
+			#mbox-cells = <2>;
+
+			reg = <0x0 0x0 0x0 0x6000>,
+				<0x1 0x0 0x0 0x8000>,
+				<0x2 0x0 0x0 0x1000>,
+				<0x3 0x0 0x0 0x6000>,
+				<0x4 0x0 0x0 0x6000>,
+				<0x5 0x0 0x0 0x8000>;
+			reg-names = "rxin_fifo",
+				"rxout_fifo",
+				"icsr",
+				"blrin_fifo",
+				"blrout_fifo",
+				"txack_fifo";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_SYS>;
+			clock-names = "llce_sys";
+			memory-region = <&llce_shmem>;
+			interrupts = <0 174 IRQ_TYPE_LEVEL_HIGH>,
+				<0 175 IRQ_TYPE_LEVEL_HIGH>,
+				<0 176 IRQ_TYPE_LEVEL_HIGH>,
+				<0 177 IRQ_TYPE_LEVEL_HIGH>,
+				<0 182 IRQ_TYPE_LEVEL_HIGH>,
+				<0 183 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "rxin_fifo_0_7",
+				"rxin_fifo_8_15",
+				"rxout_fifo_0_7",
+				"rxout_fifo_8_15",
+				"txack_fifo_0_7",
+				"txack_fifo_8_15";
+			status = "okay";
+		};
+
+		llce_can0: llce_can0 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 0>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 0>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 0>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl0_llce_can0>,
+				<&pinctrl1_llce_can0>;
+			status = "disabled";
+		};
+
+		llce_can1: llce_can1 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 1>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 1>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 1>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can1>;
+			status = "disabled";
+		};
+
+		llce_can2: llce_can2 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 2>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 2>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 2>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can2>;
+			status = "disabled";
+		};
+
+		llce_can3: llce_can3 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 3>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 3>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 3>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can3>;
+			status = "disabled";
+		};
+
+		llce_can4: llce_can4 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 4>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 4>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 4>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can4>;
+			status = "disabled";
+		};
+
+		llce_can5: llce_can5 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 5>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 5>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 5>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can5>;
+			status = "disabled";
+		};
+
+		llce_can6: llce_can6 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 6>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 6>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 6>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can6>;
+			status = "disabled";
+		};
+
+		llce_can7: llce_can7 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 7>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 7>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 7>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can7>;
+			status = "disabled";
+		};
+
+		llce_can8: llce_can8 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 8>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 8>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 8>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can8>;
+			status = "disabled";
+		};
+
+		llce_can9: llce_can9 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 9>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 9>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 9>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can9>;
+			status = "disabled";
+		};
+
+		llce_can10: llce_can10 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 10>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 10>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 10>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can10>;
+			status = "disabled";
+		};
+
+		llce_can11: llce_can11 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 11>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 11>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 11>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can11>;
+			status = "disabled";
+		};
+
+		llce_can12: llce_can12 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 12>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 12>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 12>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can12>;
+			status = "disabled";
+		};
+
+		llce_can13: llce_can13 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 13>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 13>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 13>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can13>;
+			status = "disabled";
+		};
+
+		llce_can14: llce_can14 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 14>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 14>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 14>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can14>;
+			status = "disabled";
+		};
+
+		llce_can15: llce_can15 {
+			compatible = "nxp,s32g-llce-can";
+			mboxes = <&llce_mb S32G_LLCE_CAN_CONF_MB 15>,
+				 <&llce_mb S32G_LLCE_CAN_RX_MB 15>,
+				 <&llce_mb S32G_LLCE_CAN_TX_MB 15>;
+			mbox-names = "config", "rx", "tx";
+			clocks = <&clks S32G_SCMI_CLK_LLCE_CAN_PE>;
+			clock-names = "can_pe";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl1_llce_can15>;
+			status = "disabled";
+		};
+	};
+};
+
+&pinctrl0 {
+	s32g274a {
+		pinctrl0_llce_can0: llce_can0 {
+			fsl,pins = <
+				S32_GEN1_PAD_PC_11_LLCE_CAN0_RX_O
+				S32_GEN1_PAD_PC_12_LLCE_CAN0_TX
+			>;
+		};
+
+		pinctrl0_qspi: qspigrp {
+				fsl,pins = <
+					S32_GEN1_PAD_PF13__QSPI_A_DQS_OUT
+					S32_GEN1_PAD_PF13__QSPI_A_DQS_IN
+					S32_GEN1_PAD_PG4__QSPI_A_CS0
+					S32_GEN1_PAD_PG5__QSPI_A_CS1
+					S32_GEN1_PAD_PF5__QSPI_A_DATA0_IN
+					S32_GEN1_PAD_PF5__QSPI_A_DATA0_OUT
+					S32_GEN1_PAD_PF6__QSPI_A_DATA1_IN
+					S32_GEN1_PAD_PF6__QSPI_A_DATA1_OUT
+					S32_GEN1_PAD_PF7__QSPI_A_DATA2_IN
+					S32_GEN1_PAD_PF7__QSPI_A_DATA2_OUT
+					S32_GEN1_PAD_PF8__QSPI_A_DATA3_IN
+					S32_GEN1_PAD_PF8__QSPI_A_DATA3_OUT
+					S32_GEN1_PAD_PF9__QSPI_A_DATA4_IN
+					S32_GEN1_PAD_PF9__QSPI_A_DATA4_OUT
+					S32_GEN1_PAD_PF10__QSPI_A_DATA5_IN
+					S32_GEN1_PAD_PF10__QSPI_A_DATA5_OUT
+					S32_GEN1_PAD_PF11__QSPI_A_DATA6_IN
+					S32_GEN1_PAD_PF11__QSPI_A_DATA6_OUT
+					S32_GEN1_PAD_PF12__QSPI_A_DATA7_IN
+					S32_GEN1_PAD_PF12__QSPI_A_DATA7_OUT
+					S32_GEN1_PAD_PG0__QSPI_A_SCK
+					S32_GEN1_PAD_PG1__QSPI_A_B_SCK
+					S32_GEN1_PAD_PG2__QSPI_A_SCK2
+					S32_GEN1_PAD_PG3__QSPI_A_B_SCK2
+				>;
+		};
+	};
+};
+
+&pinctrl1 {
+	s32g274a {
+		pinctrl1_llce_can0: llce_can0 {
+			fsl,pins = <
+				S32_GEN1_PAD_PC_11_LLCE_CAN0_RX_I
+			>;
+		};
+
+		pinctrl1_llce_can1: llce_can1 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_01_LLCE_CAN1_TX
+				S32_GEN1_PAD_PJ_02_LLCE_CAN1_RX_I
+				S32_GEN1_PAD_PJ_02_LLCE_CAN1_RX_O
+			>;
+		};
+
+		pinctrl1_llce_can2: llce_can2 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_04_LLCE_CAN2_RX_I
+				S32_GEN1_PAD_PJ_04_LLCE_CAN2_RX_O
+				S32_GEN1_PAD_PJ_03_LLCE_CAN2_TX
+			>;
+		};
+
+		pinctrl1_llce_can3: llce_can3 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_06_LLCE_CAN3_RX_I
+				S32_GEN1_PAD_PJ_06_LLCE_CAN3_RX_O
+				S32_GEN1_PAD_PJ_05_LLCE_CAN3_TX
+			>;
+		};
+
+		pinctrl1_llce_can4: llce_can4 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_08_LLCE_CAN4_RX_I
+				S32_GEN1_PAD_PJ_08_LLCE_CAN4_RX_O
+				S32_GEN1_PAD_PJ_07_LLCE_CAN4_TX
+			>;
+		};
+
+		pinctrl1_llce_can5: llce_can5 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_10_LLCE_CAN5_RX_I
+				S32_GEN1_PAD_PJ_10_LLCE_CAN5_RX_O
+				S32_GEN1_PAD_PJ_09_LLCE_CAN5_TX
+			>;
+		};
+
+		pinctrl1_llce_can6: llce_can6 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_12_LLCE_CAN6_RX_I
+				S32_GEN1_PAD_PJ_12_LLCE_CAN6_RX_O
+				S32_GEN1_PAD_PJ_11_LLCE_CAN6_TX
+			>;
+		};
+
+		pinctrl1_llce_can7: llce_can7 {
+			fsl,pins = <
+				S32_GEN1_PAD_PJ_14_LLCE_CAN7_RX_I
+				S32_GEN1_PAD_PJ_14_LLCE_CAN7_RX_O
+				S32_GEN1_PAD_PJ_13_LLCE_CAN7_TX
+			>;
+		};
+
+		pinctrl1_llce_can8: llce_can8 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_00_LLCE_CAN8_RX_I
+				S32_GEN1_PAD_PK_00_LLCE_CAN8_RX_O
+				S32_GEN1_PAD_PJ_15_LLCE_CAN8_TX
+			>;
+		};
+
+		pinctrl1_llce_can9: llce_can9 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_02_LLCE_CAN9_RX_I
+				S32_GEN1_PAD_PK_02_LLCE_CAN9_RX_O
+				S32_GEN1_PAD_PK_01_LLCE_CAN9_TX
+			>;
+		};
+
+		pinctrl1_llce_can10: llce_can10 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_04_LLCE_CAN10_RX_I
+				S32_GEN1_PAD_PK_04_LLCE_CAN10_RX_O
+				S32_GEN1_PAD_PK_03_LLCE_CAN10_TX
+			>;
+		};
+
+		pinctrl1_llce_can11: llce_can11 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_06_LLCE_CAN11_RX_I
+				S32_GEN1_PAD_PK_06_LLCE_CAN11_RX_O
+				S32_GEN1_PAD_PK_05_LLCE_CAN11_TX
+			>;
+		};
+
+		pinctrl1_llce_can12: llce_can12 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_08_LLCE_CAN12_RX_I
+				S32_GEN1_PAD_PK_08_LLCE_CAN12_RX_O
+				S32_GEN1_PAD_PK_07_LLCE_CAN12_TX
+			>;
+		};
+
+		pinctrl1_llce_can13: llce_can13 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_10_LLCE_CAN13_RX_I
+				S32_GEN1_PAD_PK_10_LLCE_CAN13_RX_O
+				S32_GEN1_PAD_PK_09_LLCE_CAN13_TX
+			>;
+		};
+
+		pinctrl1_llce_can14: llce_can14 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_12_LLCE_CAN14_RX_I
+				S32_GEN1_PAD_PK_12_LLCE_CAN14_RX_O
+				S32_GEN1_PAD_PK_11_LLCE_CAN14_TX
+			>;
+		};
+
+		pinctrl1_llce_can15: llce_can15 {
+			fsl,pins = <
+				S32_GEN1_PAD_PK_14_LLCE_CAN15_RX_I
+				S32_GEN1_PAD_PK_14_LLCE_CAN15_RX_O
+				S32_GEN1_PAD_PK_13_LLCE_CAN15_TX
+			>;
+		};
+	};
+};
+
+&qspi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl0_qspi>;
+};

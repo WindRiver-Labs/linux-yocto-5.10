@@ -1,0 +1,272 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright 2017-2021 NXP
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
+#include "fsl-s32-gen1.dtsi"
+#include <dt-bindings/pinctrl/s32r45-pinctrl.h>
+#include <dt-bindings/clock/s32r45-scmi-clock.h>
+
+/ {
+	model = "Freescale S32R45";
+	compatible = "fsl,s32r45-simu", "fsl,s32r45",
+				 "arm,vexpress,v2p-aarch64", "arm,vexpress";
+	aliases {
+		can4 = &can4;
+	};
+
+	sysclk: clk10000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <10000000>;
+		clock-output-names = "sysclk";
+	};
+
+	virtio_block@39501000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x39501000 0x0 0x1000>;
+		interrupts = <0 68 4>;
+	};
+
+	clks: clks@40038000 {
+		compatible = "fsl,s32r45-clocking";
+		reg = <0x0 0x40038000 0x0 0x3000>, /*armpll*/
+		      <0x0 0x4003C000 0x0 0x3000>, /*periphpll*/
+		      <0x0 0x40040000 0x0 0x3000>, /*accelpll*/
+		      <0x0 0x40044000 0x0 0x3000>, /*ddrpll*/
+		      <0x0 0x40054000 0x0 0x3000>, /*armdfs*/
+		      <0x0 0x40058000 0x0 0x3000>; /*periphdfs*/
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+	};
+
+	mc_cgm2: mc_cgm2@440C0000 {
+		compatible = "fsl,s32gen1-mc_cgm2";
+		reg = <0x0 0x440C0000 0x0 0x3000>;
+	};
+
+	reset: rgm@40078000 {
+		compatible = "fsl,s32gen1-rgm", "fsl,s32r45-reset", "syscon";
+		reg = <0x0 0x40078000 0x0 0x3000>;
+		#reset-cells = <1>;
+	};
+
+	can4: flexcan@44000000 {
+		compatible = "fsl,s32gen1-flexcan";
+		reg = <0x0 0x44000000 0x0 0x4000>;
+		interrupts = <0 192 4>,
+			     <0 193 4>,
+			     <0 194 4>,
+			     <0 195 4>;
+		interrupt-names = "state", "berr", "mb_0-7", "mb_8-127";
+		clocks = <&clks S32GEN1_SCMI_CLK_FLEXCAN_CAN>,
+			 <&clks S32GEN1_SCMI_CLK_FLEXCAN_REG>;
+		clock-names = "per", "ipg";
+		status = "disabled";
+	};
+
+	can5: flexcan@44004000 {
+		compatible = "fsl,s32gen1-flexcan";
+		reg = <0x0 0x44004000 0x0 0x4000>;
+		interrupts = <0 196 4>,
+			     <0 197 4>,
+			     <0 198 4>,
+			     <0 199 4>;
+		interrupt-names = "state", "berr", "mb_0-7", "mb_8-127";
+		clocks = <&clks S32GEN1_SCMI_CLK_FLEXCAN_CAN>,
+			 <&clks S32GEN1_SCMI_CLK_FLEXCAN_REG>;
+		clock-names = "per", "ipg";
+		status = "disabled";
+	};
+
+	can6: flexcan@44008000 {
+		compatible = "fsl,s32gen1-flexcan";
+		reg = <0x0 0x44008000 0x0 0x4000>;
+		interrupts = <0 200 4>,
+			     <0 201 4>,
+			     <0 202 4>,
+			     <0 203 4>;
+		interrupt-names = "state", "berr", "mb_0-7", "mb_8-127";
+		clocks = <&clks S32GEN1_SCMI_CLK_FLEXCAN_CAN>,
+			 <&clks S32GEN1_SCMI_CLK_FLEXCAN_REG>;
+		clock-names = "per", "ipg";
+		status = "disabled";
+	};
+
+	can7: flexcan@4400C000 {
+		compatible = "fsl,s32gen1-flexcan";
+		reg = <0x0 0x4400C000 0x0 0x4000>;
+		interrupts = <0 204 4>,
+			     <0 205 4>,
+			     <0 206 4>,
+			     <0 207 4>;
+		interrupt-names = "state", "berr", "mb_0-7", "mb_8-127";
+		clocks = <&clks S32GEN1_SCMI_CLK_FLEXCAN_CAN>,
+			 <&clks S32GEN1_SCMI_CLK_FLEXCAN_REG>;
+		clock-names = "per", "ipg";
+		status = "disabled";
+	};
+
+	siul2_0 {
+		compatible = "simple-mfd";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		status = "okay";
+		pinctrl0: siul2-pinctrl0@4009C000 {
+			compatible = "fsl,s32r45-siul2_0-pinctrl";
+			#pinctrl-cells = <2>;
+			reg = <0x1 0x0 0x0 0x198>,
+			<0x2 0x0 0x0 0x150>;
+			/* MSCR range */
+			pins = <&pinctrl0 0 101>,
+			/* IMCR range */
+			<&pinctrl0 512 573>;
+			status = "okay";
+		};
+		gpio0: siul2-gpio0 {
+			compatible = "fsl,s32gen1-siul2-gpio";
+			#pinctrl-cells = <2>;
+			gpio-controller;
+			#gpio-cells = <2>;
+				/* GPIO 0-101 */
+			gpio-ranges = <&pinctrl0 0 0 102>;
+				/* Pad Data I/0 Registers */
+			eirq-ranges =
+				/* EIRQ[0] */
+				<&pinctrl0 0 0 1>,
+				/* EIRQ[1] - EIRQ[4] */
+				<&pinctrl0 0 3 4>,
+				/* EIRQ[5] - EIRQ[8] */
+				<&pinctrl0 0 8 4>,
+				/* EIRQ[9] */
+				<&pinctrl0 0 13 1>,
+				/* EIRQ[10] - EIRQ[12] */
+				<&pinctrl0 0 16 3>,
+				/* EIRQ[13] */
+				<&pinctrl0 0 20 1>,
+				/* EIRQ[14] - EIRQ[15] */
+				<&pinctrl0 0 22 2>,
+				/* EIRQ[16] - EIRQ[24] */
+				<&pinctrl0 0 25 9>,
+				/* EIRQ[25] - EIRQ[30] */
+				<&pinctrl0 0 35 6>,
+				/* EIRQ[31] */
+				<&pinctrl0 0 44 1>;
+				/* Pad Data I/0 Registers */
+			regmap0 = <&opad0_regs>;
+			regmap1 = <&ipad0_regs>;
+			regmap2 = <&irq_regs>;
+			interrupt-controller;
+			interrupts = <0 237 4>;
+			status = "okay";
+		};
+	};
+
+	siul2_1 {
+		compatible = "simple-mfd";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		status = "okay";
+			  /* PINCTRL */
+		ranges = <1 0 0x0 0x4403C3D8 0x0 0x80>,
+			 /* IMCR range */
+			 <2 0 0x0 0x4403CBAC 0x0 0x2CC>;
+
+		pinctrl1: siul2-pinctrl1@4403C000 {
+			compatible =
+				"fsl,s32r45-siul2_1-pinctrl";
+			#pinctrl-cells = <2>;
+			reg = <0x1 0x0 0x0 0x80>,
+			<0x2 0x0 0x0 0x2CC>;
+			/* MSCR range */
+			pins = <&pinctrl1 102 133>,
+			/* IMCR range */
+			<&pinctrl1 603 785>;
+			status = "okay";
+		};
+		/*
+		 * Note gpio controller nodes are split into sections
+		 * of contiguous GPIO numbering at this
+		 * point in time, functions working with gpio chips
+		 * assume this for many things.
+		 */
+
+		gpio1: siul2-gpio1 {
+			compatible = "fsl,s32gen1-siul2-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			#pinctrl-cells = <2>;
+			gpio-ranges = <&pinctrl1 0 102 32>;
+				/* Pad Data I/0 Registers */
+			regmap0 = <&opad1_regs>;
+			regmap1 = <&ipad1_regs>;
+			status = "okay";
+		};
+	};
+
+	irq_regs: siul2_reg@0x4403C010 {
+		compatible = "fsl,irq_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4403C010 0x0 0x30>;
+		little-endian;
+	};
+	opad0_regs: siul2_reg@0x4009D700 {
+		compatible = "fsl,opad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4009D700 0x0 0x10>;
+		reg-io-width = <2>;
+	};
+	ipad0_regs: siul2_reg@0x4009D740 {
+		compatible = "fsl,ipad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4009D740 0x0 0x10>;
+		reg-io-width = <2>;
+	};
+	opad1_regs: siul2_reg@0x4403D700 {
+		compatible = "fsl,opad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4403D700 0x0 0x14>;
+		reg-io-width = <2>;
+	};
+	ipad1_regs: siul2_reg@0x4403D740 {
+		compatible = "fsl,ipad0_reqs-s32gen1","syscon","simple-mfd";
+		reg = <0x0 0x4403D740 0x0 0x14>;
+		reg-io-width = <2>;
+	};
+
+	gmac1: ethernet@44010000 {
+		compatible = "fsl,s32cc-dwmac";
+		reg = <0x0 0x44010000 0x0 0x2000>, /* gmac IP */
+		      <0x0 0x4007CA00 0x0 0x4>;    /* S32 CTRL_STS reg */
+		interrupt-parent = <&gic>;
+		interrupts = <0 220 4>;
+		interrupt-names = "macirq";
+		tx-fifo-depth = <20480>;
+		rx-fifo-depth = <20480>;
+		clocks = <&clks S32R45_SCMI_CLK_GMAC1_AXI>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_AXI>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_TX_SGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_TX_RGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_TX_RMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_TX_MII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_SGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_RGMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_RMII>,
+			 <&clks S32R45_SCMI_CLK_GMAC1_RX_MII>;
+		clock-names = "stmmaceth", "pclk",
+			      "tx_sgmii", "tx_rgmii",
+			      "tx_rmii", "tx_mii",
+			      "rx_sgmii", "rx_rgmii",
+			      "rx_rmii", "rx_mii";
+		gmac1_mdio: mdio0 {
+			compatible = "snps,dwmac-mdio";
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+	};
+};
+
+&pcie0 {
+	status = "okay";
+};
