@@ -450,6 +450,7 @@
 		gic: interrupt-controller@f9010000 {
 			compatible = "arm,gic-400";
 			#interrupt-cells = <3>;
+			#address-cells = <0>;
 			reg = <0x0 0xf9010000 0x0 0x10000>,
 			      <0x0 0xf9020000 0x0 0x20000>,
 			      <0x0 0xf9040000 0x0 0x20000>,
@@ -726,6 +727,7 @@
 			interrupts = <0 16 4>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
+			#address-cells = <0>;
 			reg = <0x0 0xff0a0000 0x0 0x1000>;
 			power-domains = <&zynqmp_firmware PD_GPIO>;
 		};
