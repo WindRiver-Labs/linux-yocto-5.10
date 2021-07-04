@@ -17,9 +17,11 @@ struct dpaa2_mac {
 	struct dpmac_link_state state;
 	struct net_device *net_dev;
 	struct fsl_mc_io *mc_io;
+	struct dpmac_attr attr;
 
 	struct phylink_config phylink_config;
 	struct phylink *phylink;
+	struct ethtool_link_ksettings kset;
 	phy_interface_t if_mode;
 	enum dpmac_link_type if_link_type;
 	struct lynx_pcs *pcs;
