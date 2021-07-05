@@ -11,4 +11,4 @@ ifeq ($(CONFIG_CRYPTO_DEV_OCTEONTX2_CPT), m)
 	octeontx2-cptvf-objs += ${common-objs}
 endif
 
-ccflags-y += -I$(src)/../../../net/ethernet/marvell/octeontx2/af/
+ccflags-y += -I$(srctree)/drivers/net/ethernet/marvell/octeontx2/af
