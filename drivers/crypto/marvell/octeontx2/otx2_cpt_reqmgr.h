@@ -201,7 +201,7 @@ static inline void do_request_cleanup(struct pci_dev *pdev,
 						 DMA_BIDIRECTIONAL);
 		}
 	}
-	kzfree(info);
+	kfree_sensitive(info);
 }
 
 struct otx2_cptlf_wqe;
