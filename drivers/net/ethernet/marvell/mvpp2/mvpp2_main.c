@@ -7073,6 +7073,18 @@ static struct mvpp2_port *mvpp2_phylink_to_port(struct phylink_config *config)
 	return container_of(config, struct mvpp2_port, phylink_config);
 }
 
+static void mvpp2_get_interface_by_speed(struct phylink_link_state *state)
+{
+	if (state->speed == SPEED_1000)
+		state->interface = PHY_INTERFACE_MODE_1000BASEX;
+	else if (state->speed == SPEED_2500)
+		state->interface = PHY_INTERFACE_MODE_2500BASEX;
+	else if (state->speed == SPEED_5000)
+		state->interface = PHY_INTERFACE_MODE_5GKR;
+	else if (state->speed == SPEED_10000)
+		state->interface = PHY_INTERFACE_MODE_10GKR;
+}
+
 static struct mvpp2_port *mvpp2_pcs_to_port(struct phylink_pcs *pcs)
 {
 	return container_of(pcs, struct mvpp2_port, phylink_pcs);
@@ -7235,6 +7247,9 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 	struct net_device *dev = to_net_dev(config->dev);
 	struct mvpp2_port *port = netdev_priv(dev);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+
+	if (!port->phy_exist)
+		mvpp2_get_interface_by_speed(state);
 
 	/* Invalid combinations */
 	switch (state->interface) {
