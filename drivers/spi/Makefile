@@ -77,6 +77,7 @@ obj-$(CONFIG_SPI_NXP_FLEXSPI)		+= spi-nxp-fspi.o
 obj-$(CONFIG_SPI_OC_TINY)		+= spi-oc-tiny.o
 spi-octeon-objs				:= spi-cavium.o spi-cavium-octeon.o
 obj-$(CONFIG_SPI_OCTEON)		+= spi-octeon.o
+obj-$(CONFIG_SPI_OCTEONTX2)		+= spi-octeontx2.o
 obj-$(CONFIG_SPI_OMAP_UWIRE)		+= spi-omap-uwire.o
 obj-$(CONFIG_SPI_OMAP_100K)		+= spi-omap-100k.o
 obj-$(CONFIG_SPI_OMAP24XX)		+= spi-omap2-mcspi.o
@@ -131,6 +132,10 @@ obj-$(CONFIG_SPI_XTENSA_XTFPGA)		+= spi-xtensa-xtfpga.o
 obj-$(CONFIG_SPI_ZYNQ_QSPI)		+= spi-zynq-qspi.o
 obj-$(CONFIG_SPI_ZYNQMP_GQSPI)		+= spi-zynqmp-gqspi.o
 obj-$(CONFIG_SPI_AMD)			+= spi-amd.o
+spi-cdns-xspi-plat-objs			:= spi-cadence-xspi.o spi-cadence-xspi-platform.o
+obj-$(CONFIG_SPI_CADENCE_XSPI_PLATFORM)	+= spi-cdns-xspi-plat.o
+spi-cdns-xspi-pci-objs			:= spi-cadence-xspi.o spi-cadence-xspi-pci.o
+obj-$(CONFIG_SPI_CADENCE_XSPI_PCI)	+= spi-cdns-xspi-pci.o
 
 # SPI slave protocol handlers
 obj-$(CONFIG_SPI_SLAVE_TIME)		+= spi-slave-time.o
