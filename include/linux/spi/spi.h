@@ -144,6 +144,7 @@ extern int spi_delay_exec(struct spi_delay *_delay, struct spi_transfer *xfer);
  *	not using a GPIO line)
  * @word_delay: delay to be inserted between consecutive
  *	words of a transfer
+ * @multi_die: Flash device with multiple dies.
  *
  * @statistics: statistics for the spi_device
  *
@@ -193,6 +194,7 @@ struct spi_device {
 	int			cs_gpio;	/* LEGACY: chip select gpio */
 	struct gpio_desc	*cs_gpiod;	/* chip select gpio desc */
 	struct spi_delay	word_delay; /* inter-word delay */
+	bool			multi_die;	/* flash with multiple dies*/
 
 	/* the statistics */
 	struct spi_statistics	statistics;
@@ -501,6 +503,7 @@ struct spi_controller {
 	u32			min_speed_hz;
 	u32			max_speed_hz;
 
+#define SPI_MASTER_BOTH_CS	BIT(8)		/* assert both chip selects */
 	/* other constraints relevant to this driver */
 	u16			flags;
 #define SPI_CONTROLLER_HALF_DUPLEX	BIT(0)	/* can't do full duplex */
@@ -514,6 +517,22 @@ struct spi_controller {
 	/* flag indicating this is a non-devres managed controller */
 	bool			devm_allocated;
 
+#define SPI_MASTER_QUAD_MODE	BIT(6) /* support quad mode */
+	/*
+	 * Controller may support data stripe feature when more than one
+	 * chips are present.
+	 * Setting data stripe will send data in following manner:
+	 * -> even bytes i.e. 0, 2, 4,... are transmitted on lower data bus
+	 * -> odd bytes i.e. 1, 3, 5,.. are transmitted on upper data bus
+	 */
+#define SPI_MASTER_DATA_STRIPE BIT(7)		/* support data stripe */
+	/*
+	 * Controller may support asserting more than one chip select at once.
+	 * This flag will enable that feature.
+	 */
+#define SPI_MASTER_BOTH_CS	BIT(8)		/* assert both chip selects */
+#define SPI_MASTER_U_PAGE	BIT(9)		/* select upper flash */
+#define SPI_DUAL_BYTE_OP	BIT(10)		/* select Dual-Byte opcode */
 	/* flag indicating this is an SPI slave controller */
 	bool			slave;
 
@@ -840,6 +859,8 @@ extern void spi_res_release(struct spi_controller *ctlr,
  *	the next transfer or completing this @spi_message.
  * @word_delay: inter word delay to be introduced after each word size
  *	(set by bits_per_word) transmission.
+ * @stripe: true-> enable stripe, false-> disable stripe.
+ * @dummy: number of dummy cycles.
  * @effective_speed_hz: the effective SCK-speed that was used to
  *      transfer this transfer. Set to 0 if the spi bus driver does
  *      not support it.
@@ -953,6 +974,8 @@ struct spi_transfer {
 	struct spi_delay	cs_change_delay;
 	struct spi_delay	word_delay;
 	u32		speed_hz;
+	bool	stripe;
+	u32		dummy;
 
 	u32		effective_speed_hz;
 

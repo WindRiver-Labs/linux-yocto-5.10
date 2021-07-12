@@ -14,47 +14,6 @@
 extern int mem_init_done;
 #endif
 
-#ifndef CONFIG_MMU
-
-#define pgd_present(pgd)	(1) /* pages are always present on non MMU */
-#define pgd_none(pgd)		(0)
-#define pgd_bad(pgd)		(0)
-#define pgd_clear(pgdp)
-#define kern_addr_valid(addr)	(1)
-
-#define PAGE_NONE		__pgprot(0) /* these mean nothing to non MMU */
-#define PAGE_SHARED		__pgprot(0) /* these mean nothing to non MMU */
-#define PAGE_COPY		__pgprot(0) /* these mean nothing to non MMU */
-#define PAGE_READONLY		__pgprot(0) /* these mean nothing to non MMU */
-#define PAGE_KERNEL		__pgprot(0) /* these mean nothing to non MMU */
-
-#define pgprot_noncached(x)	(x)
-#define pgprot_writecombine	pgprot_noncached
-#define pgprot_device		pgprot_noncached
-
-#define __swp_type(x)		(0)
-#define __swp_offset(x)		(0)
-#define __swp_entry(typ, off)	((swp_entry_t) { ((typ) | ((off) << 7)) })
-#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
-#define __swp_entry_to_pte(x)	((pte_t) { (x).val })
-
-#define ZERO_PAGE(vaddr)	({ BUG(); NULL; })
-
-#define swapper_pg_dir ((pgd_t *) NULL)
-
-#define arch_enter_lazy_cpu_mode()	do {} while (0)
-
-#define pgprot_noncached_wc(prot)	prot
-
-/*
- * All 32bit addresses are effectively valid for vmalloc...
- * Sort of meaningless for non-VM targets.
- */
-#define	VMALLOC_START	0
-#define	VMALLOC_END	0xffffffff
-
-#else /* CONFIG_MMU */
-
 #include <asm-generic/pgtable-nopmd.h>
 
 #ifdef __KERNEL__
@@ -367,19 +326,18 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 static inline unsigned long pte_update(pte_t *p, unsigned long clr,
 				unsigned long set)
 {
-	unsigned long flags, old, tmp;
+	unsigned long old, tmp;
 
-	raw_local_irq_save(flags);
-
-	__asm__ __volatile__(	"lw	%0, %2, r0	\n"
-				"andn	%1, %0, %3	\n"
-				"or	%1, %1, %4	\n"
-				"sw	%1, %2, r0	\n"
+	__asm__ __volatile__(
+			"1:	lwx	%0, %2, r0;\n"
+			"	andn	%1, %0, %3;\n"
+			"	or	%1, %1, %4;\n"
+			"	swx	%1, %2, r0;\n"
+			"	addic	%1, r0, 0;\n"
+			"	bnei	%1, 1b;\n"
 			: "=&r" (old), "=&r" (tmp)
 			: "r" ((unsigned long)(p + 1) - 4), "r" (clr), "r" (set)
 			: "cc");
-
-	raw_local_irq_restore(flags);
 
 	return old;
 }
@@ -490,8 +448,6 @@ void __init *early_get_page(void);
 
 #endif /* __ASSEMBLY__ */
 #endif /* __KERNEL__ */
-
-#endif /* CONFIG_MMU */
 
 #ifndef __ASSEMBLY__
 extern unsigned long ioremap_bot, ioremap_base;

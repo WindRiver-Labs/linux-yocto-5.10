@@ -33,17 +33,16 @@ static const struct flash_info sst_parts[] = {
 	{ "sst25wf080",  INFO(0xbf2505, 0, 64 * 1024, 16,
 			      SECT_4K | SST_WRITE) },
 	{ "sst26wf016b", INFO(0xbf2651, 0, 64 * 1024, 32,
-			      SECT_4K | SPI_NOR_DUAL_READ |
-			      SPI_NOR_QUAD_READ) },
+			      SECT_4K | SST_GLOBAL_PROT_UNLK) },
 	{ "sst26vf016b", INFO(0xbf2641, 0, 64 * 1024, 32,
-			      SECT_4K | SPI_NOR_DUAL_READ) },
+			      SECT_4K | SST_GLOBAL_PROT_UNLK) },
 	{ "sst26vf064b", INFO(0xbf2643, 0, 64 * 1024, 128,
 			      SECT_4K | SPI_NOR_DUAL_READ |
 			      SPI_NOR_QUAD_READ) },
 };
 
-static int sst_write(struct mtd_info *mtd, loff_t to, size_t len,
-		     size_t *retlen, const u_char *buf)
+int sst_write(struct mtd_info *mtd, loff_t to, size_t len,
+	      size_t *retlen, const u_char *buf)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
 	size_t actual = 0;
