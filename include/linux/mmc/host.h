@@ -173,10 +173,17 @@ struct mmc_host_ops {
 	 */
 	int	(*multi_io_quirk)(struct mmc_card *card,
 				  unsigned int direction, int blk_size);
-#ifdef CONFIG_MMC_OOPS
+
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
+	/*
+	 * The following two APIs are introduced to support mmcpstore
+	 * functionality. Cleanup API to terminate the ongoing and
+	 * pending requests before a panic write post, and polling API
+	 * to ensure that write succeeds before the Kernel dies.
+	 */
 	void	(*req_cleanup_pending)(struct mmc_host *host);
 	int	(*req_completion_poll)(struct mmc_host *host,
-					unsigned long timeout);
+				       unsigned long timeout);
 #endif
 };
 

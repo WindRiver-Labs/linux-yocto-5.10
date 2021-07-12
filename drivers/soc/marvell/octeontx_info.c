@@ -89,7 +89,7 @@ static int oct_brd_proc_show(struct seq_file *seq, void *v)
 			seq_printf(seq, "mac_addr_count: %s\n",
 				   brd.board_num_of_mac_id);
 
-		if (!kstrtou32(brd.board_num_of_mac_id, 10, &num)) {
+		if (!kstrtou32(brd.board_num_of_mac_id, 16, &num)) {
 			seq_printf(seq, "mac_addr_count: %s\n",
 				   brd.board_num_of_mac_id);
 
@@ -161,7 +161,7 @@ static int octtx_parse_mac_info(struct device_node *node)
 		brd.board_num_of_mac = null_string;
 		num = -1;
 	} else {
-		if (kstrtou32(brd.board_num_of_mac, 10, &num))
+		if (kstrtou32(brd.board_num_of_mac, 16, &num))
 			pr_warn("Board MAC address number is not available\n");
 	}
 
@@ -181,7 +181,7 @@ static int octtx_parse_mac_info(struct device_node *node)
 		brd.board_num_of_mac_id = null_string;
 		id_num = -1;
 	} else {
-		if (kstrtou32(brd.board_num_of_mac_id, 10, &id_num))
+		if (kstrtou32(brd.board_num_of_mac_id, 16, &id_num))
 			pr_warn("Board MAC addressess IDs number is not available\n");
 	}
 
@@ -195,9 +195,6 @@ static int octtx_parse_mac_info(struct device_node *node)
 			ret = of_property_read_string(node, prop_name,
 						      &board_mac);
 			if (ret) {
-				pr_info("%s: %s = %s\n",
-					 module_name(THIS_MODULE),
-					 prop_name, board_mac);
 				brd.mac_addrs[u].num = 0;
 			} else {
 				if (!kstrtou64(board_mac, 16, &mac_addr.num))

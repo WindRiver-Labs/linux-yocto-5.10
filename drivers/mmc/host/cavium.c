@@ -874,7 +874,7 @@ out:
 	return IRQ_RETVAL(emm_int != 0);
 }
 
-#ifdef CONFIG_MMC_OOPS
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
 static int cvm_req_completion_poll(struct mmc_host *host, unsigned long msecs)
 {
 	struct cvm_mmc_slot *slot = mmc_priv(host);
@@ -2078,7 +2078,7 @@ static const struct mmc_host_ops cvm_mmc_ops = {
 	.hw_reset	= cvm_mmc_reset,
 	.execute_tuning = cvm_prepare_tuning,
 	.prepare_hs400_tuning = cvm_prepare_hs400_tuning,
-#ifdef CONFIG_MMC_OOPS
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
 	.req_cleanup_pending = cvm_req_cleanup_pending,
 	.req_completion_poll = cvm_req_completion_poll,
 #endif
@@ -2380,7 +2380,7 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 	slot->bus_id = id;
 	slot->cached_rca = 1;
 
-#ifdef CONFIG_MMC_OOPS
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
 	host->pstore = 0;
 #endif
 	host->acquire_bus(host);

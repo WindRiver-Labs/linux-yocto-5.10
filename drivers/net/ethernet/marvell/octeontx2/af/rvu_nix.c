@@ -318,9 +318,11 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 		pfvf->rx_chan_cnt = 1;
 		pfvf->tx_chan_cnt = 1;
 		rsp->tx_link = hw->cgx_links + lbkid;
+		rvu_npc_set_pkind(rvu, NPC_RX_LBK_PKIND, pfvf);
 		rvu_npc_install_promisc_entry(rvu, pcifunc, nixlf,
 					      pfvf->rx_chan_base,
 					      pfvf->rx_chan_cnt);
+
 		break;
 	case NIX_INTF_TYPE_SDP:
 		from_vf = !!(pcifunc & RVU_PFVF_FUNC_MASK);
@@ -337,7 +339,7 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 			for (vfid = 0; vfid < vf; vfid++)
 				req_chan_base += sdp_info->vf_rings[vfid];
 			req_chan_cnt = sdp_info->vf_rings[vf];
-			req_chan_end = req_chan_base + req_chan_cnt;
+			req_chan_end = req_chan_base + req_chan_cnt - 1;
 			if (req_chan_base < rvu_nix_chan_sdp(rvu, 0) ||
 			    req_chan_end > rvu_nix_chan_sdp(rvu, 255)) {
 				dev_err(rvu->dev,
@@ -2212,6 +2214,11 @@ static void nix_tl1_default_cfg(struct rvu *rvu, struct nix_hw *nix_hw,
 	pfvf_map[schq] = TXSCH_SET_FLAG(pfvf_map[schq], NIX_TXSCHQ_CFG_DONE);
 }
 
+/* Register offset - [15:0]
+ * Scheduler Queue number - [25:16]
+ */
+#define NIX_TX_SCHQ_MASK	GENMASK_ULL(25, 0)
+
 static int nix_txschq_cfg_read(struct rvu *rvu, struct nix_hw *nix_hw,
 			       int blkaddr, struct nix_txschq_config *req,
 			       struct nix_txschq_config *rsp)
@@ -2223,8 +2230,9 @@ static int nix_txschq_cfg_read(struct rvu *rvu, struct nix_hw *nix_hw,
 	rvu_nix_txsch_lock(nix_hw);
 	for (idx = 0; idx < req->num_regs; idx++) {
 		reg = req->reg[idx];
+		reg &= NIX_TX_SCHQ_MASK;
 		schq = TXSCHQ_IDX(reg, TXSCHQ_IDX_SHIFT);
-		if (!rvu_check_valid_reg(TXSCHQ_HWREGMAP, req->lvl, reg) &&
+		if (!rvu_check_valid_reg(TXSCHQ_HWREGMAP, req->lvl, reg) ||
 		    !is_valid_txschq(rvu, blkaddr, req->lvl, pcifunc, schq)) {
 			rvu_nix_txsch_unlock(nix_hw);
 			return NIX_AF_INVAL_TXSCHQ_CFG;
@@ -2249,7 +2257,6 @@ static void rvu_nix_tx_tl2_cfg(struct rvu *rvu, int blkaddr,
 		return;
 
 	lbk_link_start = hw->cgx_links;
-	lbk_links = hw->lbk_links;
 
 	for (schq = 0; schq < txsch->schq.max; schq++) {
 		if (TXSCH_MAP_FUNC(txsch->pfvf_map[schq]) != pcifunc)
@@ -2257,6 +2264,7 @@ static void rvu_nix_tx_tl2_cfg(struct rvu *rvu, int blkaddr,
 		/* Enable all LBK links with channel 63 by default so that
 		 * packets can be sent to LBK with a NPC TX MCAM rule
 		 */
+		lbk_links = hw->lbk_links;
 		while (lbk_links--)
 			rvu_write64(rvu, blkaddr,
 				    NIX_AF_TL3_TL2X_LINKX_CFG(schq,
@@ -2309,6 +2317,7 @@ int rvu_mbox_handler_nix_txschq_cfg(struct rvu *rvu,
 	rvu_nix_txsch_lock(nix_hw);
 	for (idx = 0; idx < req->num_regs; idx++) {
 		reg = req->reg[idx];
+		reg &= NIX_TX_SCHQ_MASK;
 		regval = req->regval[idx];
 		schq_regbase = reg & 0xFFFF;
 		val_mask = req->regval_mask[idx];
@@ -4612,46 +4621,71 @@ int rvu_mbox_handler_nix_set_vlan_tpid(struct rvu *rvu,
 	return 0;
 }
 
-int rvu_mbox_handler_nix_inline_ipsec_cfg(struct rvu *rvu,
-					  struct nix_inline_ipsec_cfg *req,
-					  struct msg_rsp *rsp)
+#define IPSEC_GEN_CFG_EGRP    GENMASK_ULL(50, 48)
+#define IPSEC_GEN_CFG_OPCODE  GENMASK_ULL(47, 32)
+#define IPSEC_GEN_CFG_PARAM1  GENMASK_ULL(31, 16)
+#define IPSEC_GEN_CFG_PARAM2  GENMASK_ULL(15, 0)
+
+#define CPT_INST_QSEL_BLOCK   GENMASK_ULL(28, 24)
+#define CPT_INST_QSEL_PF_FUNC GENMASK_ULL(23, 8)
+#define CPT_INST_QSEL_SLOT    GENMASK_ULL(7, 0)
+
+static void nix_inline_ipsec_cfg(struct rvu *rvu, struct nix_inline_ipsec_cfg *req,
+				 int blkaddr)
 {
-	int blkaddr;
+	u8 cpt_idx, cpt_blkaddr;
 	u64 val;
 
-	if (!is_block_implemented(rvu->hw, BLKADDR_CPT0))
-		return 0;
-
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, 0);
-	if (blkaddr < 0)
-		return NIX_AF_ERR_AF_LF_INVALID;
-
+	cpt_idx = (blkaddr == BLKADDR_NIX0) ? 0 : 1;
 	if (req->enable) {
 		/* Enable context prefetching */
 		if (!is_rvu_otx2(rvu))
 			val = BIT_ULL(51);
 
 		/* Set OPCODE and EGRP */
-		val |= (u64)req->gen_cfg.egrp << 48 |
-		      (u64)req->gen_cfg.opcode << 32;
+		val |= FIELD_PREP(IPSEC_GEN_CFG_EGRP, req->gen_cfg.egrp);
+		val |= FIELD_PREP(IPSEC_GEN_CFG_OPCODE, req->gen_cfg.opcode);
+		val |= FIELD_PREP(IPSEC_GEN_CFG_PARAM1, req->gen_cfg.param1);
+		val |= FIELD_PREP(IPSEC_GEN_CFG_PARAM2, req->gen_cfg.param2);
+
 		rvu_write64(rvu, blkaddr, NIX_AF_RX_IPSEC_GEN_CFG, val);
 
 		/* Set CPT queue for inline IPSec */
-		val = (u64)req->inst_qsel.cpt_pf_func << 8 |
-		      req->inst_qsel.cpt_slot;
+		val = FIELD_PREP(CPT_INST_QSEL_SLOT, req->inst_qsel.cpt_slot);
+		val |= FIELD_PREP(CPT_INST_QSEL_PF_FUNC,
+				  req->inst_qsel.cpt_pf_func);
 
-		if (!is_rvu_otx2(rvu))
-			val |= BLKADDR_CPT0 << 24;
-		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_INST_QSEL(0), val);
+		if (!is_rvu_otx2(rvu)) {
+			cpt_blkaddr = (cpt_idx == 0) ? BLKADDR_CPT0 :
+						       BLKADDR_CPT1;
+			val |= FIELD_PREP(CPT_INST_QSEL_BLOCK, cpt_blkaddr);
+		}
+
+		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_INST_QSEL(cpt_idx),
+			    val);
 
 		/* Set CPT credit */
-		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_CREDIT(0),
+		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_CREDIT(cpt_idx),
 			    req->cpt_credit);
 	} else {
 		rvu_write64(rvu, blkaddr, NIX_AF_RX_IPSEC_GEN_CFG, 0x0);
-		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_INST_QSEL(0), 0x0);
-		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_CREDIT(0), 0x3FFFFF);
+		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_INST_QSEL(cpt_idx),
+			    0x0);
+		rvu_write64(rvu, blkaddr, NIX_AF_RX_CPTX_CREDIT(cpt_idx),
+			    0x3FFFFF);
 	}
+}
+
+int rvu_mbox_handler_nix_inline_ipsec_cfg(struct rvu *rvu,
+					  struct nix_inline_ipsec_cfg *req,
+					  struct msg_rsp *rsp)
+{
+	if (!is_block_implemented(rvu->hw, BLKADDR_CPT0))
+		return 0;
+
+	nix_inline_ipsec_cfg(rvu, req, BLKADDR_NIX0);
+	if (is_block_implemented(rvu->hw, BLKADDR_CPT1))
+		nix_inline_ipsec_cfg(rvu, req, BLKADDR_NIX1);
 
 	return 0;
 }
@@ -4675,6 +4709,10 @@ struct rvu *rvu, struct nix_inline_ipsec_lf_cfg *req, struct msg_rsp *rsp)
 		      (u64)req->ipsec_cfg0.tag_const << 20 |
 		      (u64)req->ipsec_cfg0.sa_pow2_size << 16 |
 		      req->ipsec_cfg0.lenm1_max;
+
+		if (blkaddr == BLKADDR_NIX1)
+			val |= BIT_ULL(46);
+
 		rvu_write64(rvu, blkaddr, NIX_AF_LFX_RX_IPSEC_CFG0(lf), val);
 
 		/* Set SA_IDX_W and SA_IDX_MAX */
@@ -4863,8 +4901,8 @@ static int nix_setup_ipolicers(struct rvu *rvu,
 						   sizeof(u16), GFP_KERNEL);
 	}
 
-	/* Set policer timeunit to 1us ie  (9 + 1) * 100 nsec = 1us */
-	rvu_write64(rvu, blkaddr, NIX_AF_PL_TS, 0x09);
+	/* Set policer timeunit to 2us ie  (19 + 1) * 100 nsec = 2us */
+	rvu_write64(rvu, blkaddr, NIX_AF_PL_TS, 19);
 
 	nix_config_rx_pkt_policer_precolor(rvu, blkaddr);
 

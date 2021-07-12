@@ -246,10 +246,7 @@ static void cn10k_get_ingress_burst_cfg(u32 burst, u32 *burst_exp,
 	/* Burst is calculated as
 	 * (1+[BURST_MANTISSA]/256)*2^[BURST_EXPONENT]
 	 * This is the upper limit on number tokens (bytes) that
-	 * can be accumilated in the bucket.
-	 *
-	 * Max burst exponent is 31, so need to check for the max
-	 * burst size since size of 'police.burst' is also 32bit.
+	 * can be accumulated in the bucket.
 	 */
 	*burst_exp = ilog2(burst);
 	if (burst < 256) {
@@ -257,6 +254,9 @@ static void cn10k_get_ingress_burst_cfg(u32 burst, u32 *burst_exp,
 		*burst_mantissa = 0;
 		return;
 	}
+
+	if (*burst_exp > MAX_RATE_EXP)
+		*burst_exp = MAX_RATE_EXP;
 
 	/* Calculate mantissa
 	 * Find remaining bytes 'burst - 2^burst_exp'
@@ -269,51 +269,35 @@ static void cn10k_get_ingress_burst_cfg(u32 burst, u32 *burst_exp,
 static void cn10k_get_ingress_rate_cfg(u64 rate, u32 *rate_exp,
 				       u32 *rate_mantissa, u32 *rdiv)
 {
-	int tmp, comp, mul = 1000;
-	int div = 0, exp;
-
-	/* Policer timeunit is configured as 1usec
-	 *
-	 * tmp = rate * T * 32;
-	 * For rate in bps, T is timeunit in seconds
-	 * For rate in Kbps, T is timeunit in msecs
-	 * For rate in Mbps, T is timeunit in usecs
-	 * For rate in Gbps, T is timeunit in nsecs
-	 *
-	 * Since the rate passed to this fn() is in bps, T would be 0.000001
-	 * (1usec in secs). Since float cannot be used, convert rate to kbps
-	 * and hike the comparator by 1000, so that T becomes 1.
-	 */
-	rate = (rate < 1000) ? 1000 : rate;
-	rate = rate / mul;
-	tmp = rate * POLICER_TIMESTAMP * 32;
-	comp = 256 * mul;
+	u32 div = 0;
+	u32 exp = 0;
+	u64 tmp;
 
 	/* Figure out mantissa, exponent and divider from given max pkt rate
 	 *
 	 * To achieve desired rate HW adds
 	 * (1+[RATE_MANTISSA]/256)*2^[RATE_EXPONENT] tokens (bytes) at every
-	 * policer timeunit * 2^rdiv ie 2^rdiv usecs, to the token bucket.
+	 * policer timeunit * 2^rdiv ie 2 * 2^rdiv usecs, to the token bucket.
+	 * Here policer timeunit is 2 usecs and rate is in bits per sec.
+	 * Since floating point cannot be used below algorithm uses 1000000
+	 * scale factor to support rates upto 100Gbps.
 	 */
-	if (tmp < comp) {
-		while (tmp < comp) {
+	tmp = rate * 32 * 2;
+	if (tmp < 256000000) {
+		while (tmp < 256000000) {
+			tmp = tmp * 2;
 			div++;
-			tmp *= 2;
 		}
-		*rate_exp = 0;
-		goto done;
+	} else {
+		for (exp = 0; tmp >= 512000000 && exp <= MAX_RATE_EXP; exp++)
+			tmp = tmp / 2;
+
+		if (exp > MAX_RATE_EXP)
+			exp = MAX_RATE_EXP;
 	}
 
-	comp = 512 * mul;
-	for (exp = 0; exp <= MAX_RATE_EXP && tmp >= comp; exp++)
-		tmp = tmp / 2;
-
-	if (exp > MAX_RATE_EXP)
-		exp = MAX_RATE_EXP;
+	*rate_mantissa = (tmp - 256000000) / 1000000;
 	*rate_exp = exp;
-done:
-	tmp = tmp / mul;
-	*rate_mantissa = tmp - 256;
 	*rdiv = div;
 }
 
@@ -377,7 +361,7 @@ int cn10k_free_matchall_ipolicer(struct otx2_nic *pfvf)
 }
 
 int cn10k_set_ipolicer_rate(struct otx2_nic *pfvf, u16 profile,
-			    u32 burst, u64 rate)
+			    u32 burst, u64 rate, bool pps)
 {
 	struct nix_cn10k_aq_enq_req *aq;
 	u32 burst_exp, burst_mantissa;
@@ -413,6 +397,30 @@ int cn10k_set_ipolicer_rate(struct otx2_nic *pfvf, u16 profile,
 	aq->prof.rdiv = rdiv;
 	aq->prof_mask.rdiv = 0xF;
 
+	if (pps) {
+		/* The amount of decremented tokens is calculated according to
+		 * the following equation:
+		 * max([ LMODE ? 0 : (packet_length - LXPTR)] +
+		 *	     ([ADJUST_MANTISSA]/256 - 1) * 2^[ADJUST_EXPONENT],
+		 *	1/256)
+		 * if LMODE is 1 then rate limiting will be based on
+		 * PPS otherwise bps.
+		 * The aim of the ADJUST value is to specify a token cost per
+		 * packet in contrary to the packet length that specifies a
+		 * cost per byte. To rate limit based on PPS adjust mantissa
+		 * is set as 384 and exponent as 1 so that number of tokens
+		 * decremented becomes 1 i.e, 1 token per packeet.
+		 */
+		aq->prof.adjust_exponent = 1;
+		aq->prof_mask.adjust_exponent = 0x1F;
+
+		aq->prof.adjust_mantissa = 384;
+		aq->prof_mask.adjust_mantissa = 0x1FF;
+
+		aq->prof.lmode = 0x1;
+		aq->prof_mask.lmode = 0x1;
+	}
+
 	/* Two rate three color marker
 	 * With PEIR/EIR set to zero, color will be either green or red
 	 */
@@ -427,6 +435,23 @@ int cn10k_set_ipolicer_rate(struct otx2_nic *pfvf, u16 profile,
 
 	aq->prof.gc_action = NIX_RX_BAND_PROF_ACTIONRESULT_PASS;
 	aq->prof_mask.gc_action = 0x3;
+
+	/* Setting exponent value as 24 and mantissa as 0 configures
+	 * the bucket with zero values making bucket unused. Peak
+	 * information rate and Excess information rate buckets are
+	 * unused here.
+	 */
+	aq->prof.peir_exponent = 24;
+	aq->prof_mask.peir_exponent = 0x1F;
+
+	aq->prof.peir_mantissa = 0;
+	aq->prof_mask.peir_mantissa = 0xFF;
+
+	aq->prof.pebs_exponent = 24;
+	aq->prof_mask.pebs_exponent = 0x1F;
+
+	aq->prof.pebs_mantissa = 0;
+	aq->prof_mask.pebs_mantissa = 0xFF;
 
 	/* Fill AQ info */
 	aq->qidx = profile;
@@ -444,7 +469,8 @@ int cn10k_set_matchall_ipolicer_rate(struct otx2_nic *pfvf,
 
 	mutex_lock(&pfvf->mbox.lock);
 
-	rc = cn10k_set_ipolicer_rate(pfvf, hw->matchall_ipolicer, burst, rate);
+	rc = cn10k_set_ipolicer_rate(pfvf, hw->matchall_ipolicer, burst,
+				     rate, false);
 	if (rc)
 		goto out;
 

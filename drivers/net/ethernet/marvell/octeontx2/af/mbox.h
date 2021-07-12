@@ -1210,6 +1210,8 @@ struct nix_inline_ipsec_cfg {
 	struct {
 		u8 egrp;
 		u8 opcode;
+		u16 param1;
+		u16 param2;
 	} gen_cfg;
 	struct {
 		u16 cpt_pf_func;
@@ -1402,6 +1404,13 @@ enum npc_af_status {
 	NPC_MCAM_PERM_DENIED	= -704,
 	NPC_AF_ERR_HIGIG_CONFIG_FAIL	= -705,
 	NPC_AF_ERR_HIGIG_NOT_SUPPORTED	= -706,
+	NPC_FLOW_INTF_INVALID	= -707,
+	NPC_FLOW_CHAN_INVALID	= -708,
+	NPC_FLOW_NO_NIXLF	= -709,
+	NPC_FLOW_NOT_SUPPORTED	= -710,
+	NPC_FLOW_VF_PERM_DENIED	= -711,
+	NPC_FLOW_VF_NOT_INIT	= -712,
+	NPC_FLOW_VF_OVERLAP	= -713,
 };
 
 struct npc_mcam_alloc_entry_req {

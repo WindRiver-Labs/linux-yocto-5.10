@@ -569,16 +569,16 @@ int mmc_cqe_recovery(struct mmc_host *host)
 }
 EXPORT_SYMBOL(mmc_cqe_recovery);
 
-#ifdef CONFIG_MMC_OOPS
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
 /**
- *      mmc_wait_for_oops_req - initiate a blocking mmc request
- *      @host: MMC host to start command
- *      @mrq: MMC request to start
+ *	mmc_wait_for_pstore_req - initiate a blocking mmc request
+ *	@host: MMC host to start command
+ *	@mrq: MMC request to start
  *
- *      Start a new MMC custom command request for a host, and
- *      wait for the command to complete based on request data timeout.
+ *	Start a blocking MMC request for a host and wait for the request
+ *	to complete that is based on polling and timeout.
  */
-void mmc_wait_for_oops_req(struct mmc_host *host, struct mmc_request *mrq)
+void mmc_wait_for_pstore_req(struct mmc_host *host, struct mmc_request *mrq)
 {
 	unsigned int timeout;
 
@@ -590,6 +590,7 @@ void mmc_wait_for_oops_req(struct mmc_host *host, struct mmc_request *mrq)
 		host->ops->req_completion_poll(host, timeout);
 	}
 }
+EXPORT_SYMBOL(mmc_wait_for_pstore_req);
 #endif
 
 /**
@@ -839,6 +840,26 @@ int __mmc_claim_host(struct mmc_host *host, struct mmc_ctx *ctx,
 	return stop;
 }
 EXPORT_SYMBOL(__mmc_claim_host);
+
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
+/**
+ *	mmc_claim_host_async - claim host in atomic context
+ *	@host: mmc host to claim
+ *
+ *	This routine may be called in panic/oops scenarios.
+ *	Return zero with host claim success, else busy status.
+ */
+int mmc_claim_host_async(struct mmc_host *host)
+{
+	if (!host->claimed && pm_runtime_active(mmc_dev(host))) {
+		host->claimed = 1;
+		return 0;
+	}
+
+	return -EBUSY;
+}
+EXPORT_SYMBOL(mmc_claim_host_async);
+#endif
 
 /**
  *	mmc_release_host - release a host

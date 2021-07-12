@@ -166,9 +166,10 @@ struct mmc_request {
 
 struct mmc_card;
 
-#ifdef CONFIG_MMC_OOPS
-extern void mmc_wait_for_oops_req(struct mmc_host *, struct mmc_request *);
-#endif /* CONFIG_MMC_OOPS */
+#if IS_ENABLED(CONFIG_MMC_PSTORE)
+void mmc_wait_for_pstore_req(struct mmc_host *host, struct mmc_request *mrq);
+int mmc_claim_host_async(struct mmc_host *host);
+#endif
 
 void mmc_wait_for_req(struct mmc_host *host, struct mmc_request *mrq);
 int mmc_wait_for_cmd(struct mmc_host *host, struct mmc_command *cmd,

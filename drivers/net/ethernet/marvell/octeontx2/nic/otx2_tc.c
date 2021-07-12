@@ -222,15 +222,17 @@ static int otx2_tc_egress_matchall_delete(struct otx2_nic *nic,
 
 static int otx2_tc_act_set_police(struct otx2_nic *nic,
 				  struct otx2_tc_flow *node,
+				  struct flow_cls_offload *f,
 				  u64 rate, u32 burst, u32 mark,
-				  struct npc_install_flow_req *req)
+				  struct npc_install_flow_req *req, bool pps)
 {
+	struct netlink_ext_ack *extack = f->common.extack;
 	struct otx2_hw *hw = &nic->hw;
 	int rq_idx, rc;
 
 	rq_idx = find_first_zero_bit(&nic->rq_bmap, hw->rx_queues);
 	if (rq_idx >= hw->rx_queues) {
-		netdev_err(nic->netdev, "Police action rules exceeded\n");
+		NL_SET_ERR_MSG_MOD(extack, "Police action rules exceeded");
 		return -EINVAL;
 	}
 
@@ -242,7 +244,7 @@ static int otx2_tc_act_set_police(struct otx2_nic *nic,
 		return rc;
 	}
 
-	rc = cn10k_set_ipolicer_rate(nic, node->leaf_profile, burst, rate);
+	rc = cn10k_set_ipolicer_rate(nic, node->leaf_profile, burst, rate, pps);
 	if (rc)
 		goto free_leaf;
 
@@ -272,19 +274,22 @@ free_leaf:
 
 static int otx2_tc_parse_actions(struct otx2_nic *nic,
 				 struct otx2_tc_flow *node,
+				 struct flow_cls_offload *f,
 				 struct flow_action *flow_action,
 				 struct npc_install_flow_req *req)
 {
+	struct netlink_ext_ack *extack = f->common.extack;
 	struct flow_action_entry *act;
 	struct net_device *target;
 	struct otx2_nic *priv;
 	u32 burst, mark = 0;
-	bool act_police;
+	u8 nr_police = 0;
+	bool pps;
 	u64 rate;
 	int i;
 
 	if (!flow_action_has_entries(flow_action)) {
-		netdev_info(nic->netdev, "no tc actions specified");
+		NL_SET_ERR_MSG_MOD(extack, "no tc actions specified");
 		return -EINVAL;
 	}
 
@@ -301,8 +306,8 @@ static int otx2_tc_parse_actions(struct otx2_nic *nic,
 			priv = netdev_priv(target);
 			/* npc_install_flow_req doesn't support passing a target pcifunc */
 			if (rvu_get_pf(nic->pcifunc) != rvu_get_pf(priv->pcifunc)) {
-				netdev_info(nic->netdev,
-					    "can't redirect to other pf/vf\n");
+				NL_SET_ERR_MSG_MOD(extack,
+						   "can't redirect to other pf/vf");
 				return -EOPNOTSUPP;
 			}
 			req->vf = priv->pcifunc & RVU_PFVF_FUNC_MASK;
@@ -316,14 +321,25 @@ static int otx2_tc_parse_actions(struct otx2_nic *nic,
 		case FLOW_ACTION_POLICE:
 			/* Ingress ratelimiting is not supported on OcteonTx2 */
 			if (is_dev_otx2(nic->pdev)) {
-				netdev_err(nic->netdev,
-					   "Ingress policing not supported on this platform\n");
+				NL_SET_ERR_MSG_MOD(extack,
+					"Ingress policing not supported on this platform");
 				return -EOPNOTSUPP;
 			}
 
-			act_police = true;
-			rate = act->police.rate_bytes_ps * 8;
-			burst = act->police.burst;
+			if (act->police.rate_bytes_ps > 0) {
+				rate = act->police.rate_bytes_ps * 8;
+				burst = act->police.burst;
+			} else if (act->police.rate_pkt_ps > 0) {
+				/* The algorithm used to calculate rate
+				 * mantissa, exponent values for a given token
+				 * rate (token can be byte or packet) requires
+				 * token rate to be mutiplied by 8.
+				 */
+				rate = act->police.rate_pkt_ps * 8;
+				burst = act->police.burst_pkt;
+				pps = true;
+			}
+			nr_police++;
 			break;
 		case FLOW_ACTION_MARK:
 			mark = act->mark;
@@ -333,10 +349,15 @@ static int otx2_tc_parse_actions(struct otx2_nic *nic,
 		}
 	}
 
-	if (act_police)
-		return otx2_tc_act_set_police(nic, node, rate, burst,
-					      mark, req);
+	if (nr_police > 1) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "rate limit police offload requires a single action");
+		return -EOPNOTSUPP;
+	}
 
+	if (nr_police)
+		return otx2_tc_act_set_police(nic, node, f, rate, burst,
+					      mark, req, pps);
 	return 0;
 }
 
@@ -344,6 +365,7 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 				struct flow_cls_offload *f,
 				struct npc_install_flow_req *req)
 {
+	struct netlink_ext_ack *extack = f->common.extack;
 	struct flow_msg *flow_spec = &req->packet;
 	struct flow_msg *flow_mask = &req->mask;
 	struct flow_dissector *dissector;
@@ -408,7 +430,7 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 
 		flow_rule_match_eth_addrs(rule, &match);
 		if (!is_zero_ether_addr(match.mask->src)) {
-			netdev_err(nic->netdev, "src mac match not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "src mac match not supported");
 			return -EOPNOTSUPP;
 		}
 
@@ -426,11 +448,11 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 		flow_rule_match_ip(rule, &match);
 		if ((ntohs(flow_spec->etype) != ETH_P_IP) &&
 		    match.mask->tos) {
-			netdev_err(nic->netdev, "tos not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "tos not supported");
 			return -EOPNOTSUPP;
 		}
 		if (match.mask->ttl) {
-			netdev_err(nic->netdev, "ttl not supported\n");
+			NL_SET_ERR_MSG_MOD(extack, "ttl not supported");
 			return -EOPNOTSUPP;
 		}
 		flow_spec->tos = match.key->tos;
@@ -458,8 +480,8 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 				   match.key->vlan_priority << 13;
 
 			vlan_tci_mask = match.mask->vlan_id |
-					match.key->vlan_dei << 12 |
-					match.key->vlan_priority << 13;
+					match.mask->vlan_dei << 12 |
+					match.mask->vlan_priority << 13;
 
 			flow_spec->vlan_tci = htons(vlan_tci);
 			flow_mask->vlan_tci = htons(vlan_tci_mask);
@@ -486,8 +508,8 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 
 		if (ipv6_addr_loopback(&match.key->dst) ||
 		    ipv6_addr_loopback(&match.key->src)) {
-			netdev_err(nic->netdev,
-				   "Flow matching on IPv6 loopback addr is not supported\n");
+			NL_SET_ERR_MSG_MOD(extack,
+					   "Flow matching IPv6 loopback addr not supported");
 			return -EOPNOTSUPP;
 		}
 
@@ -536,7 +558,7 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 			req->features |= BIT_ULL(NPC_SPORT_SCTP);
 	}
 
-	return otx2_tc_parse_actions(nic, node, &rule->action, req);
+	return otx2_tc_parse_actions(nic, node, f, &rule->action, req);
 }
 
 static int otx2_del_mcam_flow_entry(struct otx2_nic *nic, u16 entry)
@@ -619,6 +641,7 @@ static int otx2_tc_del_flow(struct otx2_nic *nic,
 static int otx2_tc_add_flow(struct otx2_nic *nic,
 			    struct flow_cls_offload *tc_flow_cmd)
 {
+	struct netlink_ext_ack *extack = tc_flow_cmd->common.extack;
 	struct otx2_tc_info *tc_info = &nic->tc_info;
 	struct otx2_tc_flow *new_node, *old_node;
 	struct npc_install_flow_req *req, dummy;
@@ -628,7 +651,8 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 		return -ENOMEM;
 
 	if (bitmap_full(tc_info->tc_entries_bitmap, nic->flow_cfg->tc_max_flows)) {
-		netdev_err(nic->netdev, "Not enough MCAM space to add the flow\n");
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Not enough MCAM space to add the flow");
 		return -ENOMEM;
 	}
 
@@ -677,7 +701,7 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	/* Send message to AF */
 	rc = otx2_sync_mbox_msg(&nic->mbox);
 	if (rc) {
-		netdev_err(nic->netdev, "Failed to install MCAM flow entry\n");
+		NL_SET_ERR_MSG_MOD(extack, "Failed to install MCAM flow entry");
 		mutex_unlock(&nic->mbox.lock);
 		kfree_rcu(new_node, rcu);
 		goto free_leaf;
