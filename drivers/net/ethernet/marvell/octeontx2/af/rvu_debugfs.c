@@ -205,6 +205,8 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 			}
 
 			for (index = 0; index < BLK_COUNT; index++) {
+				int lfs_off;
+
 				block = rvu->hw->block[index];
 				if (!strlen(block.name))
 					continue;
@@ -214,7 +216,16 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 					if (block.fn_map[lf] != pcifunc)
 						continue;
 					flag = 1;
-					len += sprintf(&lfs[len], "%d,", lf);
+					lfs_off = scnprintf(&lfs[len],
+							    lf_str_size - len,
+							    "%d,", lf);
+					if (lfs_off <= 0) {
+						len = len > 1 ? len : 1;
+						lfs[len - 1] = '!';
+						len++;
+						break;
+					}
+					len += lfs_off;
 				}
 
 				if (flag && len)
@@ -1555,10 +1566,9 @@ static int cgx_print_stats(struct seq_file *s, int lmac_id)
 	return err;
 }
 
-static int rvu_dbg_cgx_stat_display(struct seq_file *filp, void *unused)
+static int rvu_dbg_derive_lmacid(struct seq_file *filp, int *lmac_id)
 {
 	struct dentry *current_dir;
-	int err, lmac_id;
 	char *buf;
 
 	current_dir = filp->file->f_path.dentry->d_parent;
@@ -1566,16 +1576,86 @@ static int rvu_dbg_cgx_stat_display(struct seq_file *filp, void *unused)
 	if (!buf)
 		return -EINVAL;
 
-	err = kstrtoint(buf + 1, 10, &lmac_id);
-	if (!err) {
-		err = cgx_print_stats(filp, lmac_id);
-		if (err)
-			return err;
-	}
+	return kstrtoint(buf + 1, 10, lmac_id);
+}
+
+static int rvu_dbg_cgx_stat_display(struct seq_file *filp, void *unused)
+{
+	int lmac_id, err;
+
+	err = rvu_dbg_derive_lmacid(filp, &lmac_id);
+	if (!err)
+		return cgx_print_stats(filp, lmac_id);
+
 	return err;
 }
 
 RVU_DEBUG_SEQ_FOPS(cgx_stat, cgx_stat_display, NULL);
+
+static int cgx_print_dmac_flt(struct seq_file *s, int lmac_id)
+{
+	struct pci_dev *pdev = NULL;
+	void *cgxd = s->private;
+	char *bcast, *mcast;
+	u16 index, domain;
+	u8 dmac[ETH_ALEN];
+	struct rvu *rvu;
+	u64 cfg, mac;
+	int pf;
+
+	rvu = pci_get_drvdata(pci_get_device(PCI_VENDOR_ID_CAVIUM,
+					     PCI_DEVID_OCTEONTX2_RVU_AF, NULL));
+	if (!rvu)
+		return -ENODEV;
+
+	pf = cgxlmac_to_pf(rvu, cgx_get_cgxid(cgxd), lmac_id);
+	domain  = 2;
+
+	pdev =  pci_get_domain_bus_and_slot(domain, pf + 1, 0);
+	if (!pdev)
+		return 0;
+
+	cfg = cgx_read_dmac_ctrl(cgxd, lmac_id);
+	bcast = cfg & CGX_DMAC_BCAST_MODE ? "ACCEPT" : "REJECT";
+	mcast = cfg & CGX_DMAC_MCAST_MODE ? "ACCEPT" : "REJECT";
+
+	seq_puts(s,
+		 "PCI dev       RVUPF   BROADCAST  MULTICAST  FILTER-MODE\n");
+	seq_printf(s, "%s  PF%d  %9s  %9s",
+		   dev_name(&pdev->dev), pf, bcast, mcast);
+	if (cfg & CGX_DMAC_CAM_ACCEPT)
+		seq_printf(s, "%12s\n\n", "UNICAST");
+	else
+		seq_printf(s, "%16s\n\n", "PROMISCUOUS");
+
+	seq_puts(s, "\nDMAC-INDEX  ADDRESS\n");
+
+	for (index = 0 ; index < 32 ; index++) {
+		cfg = cgx_read_dmac_entry(cgxd, index);
+		/* Display enabled dmac entries associated with current lmac */
+		if (lmac_id == FIELD_GET(CGX_DMAC_CAM_ENTRY_LMACID, cfg) &&
+		    FIELD_GET(CGX_DMAC_CAM_ADDR_ENABLE, cfg)) {
+			mac = FIELD_GET(CGX_RX_DMAC_ADR_MASK, cfg);
+			u64_to_ether_addr(mac, dmac);
+			seq_printf(s, "%7d     %pM\n", index, dmac);
+		}
+	}
+
+	return 0;
+}
+
+static int rvu_dbg_cgx_dmac_flt_display(struct seq_file *filp, void *unused)
+{
+	int err, lmac_id;
+
+	err = rvu_dbg_derive_lmacid(filp, &lmac_id);
+	if (!err)
+		return cgx_print_dmac_flt(filp, lmac_id);
+
+	return err;
+}
+
+RVU_DEBUG_SEQ_FOPS(cgx_dmac_flt, cgx_dmac_flt_display, NULL);
 
 static void rvu_dbg_cgx_init(struct rvu *rvu)
 {
@@ -1603,6 +1683,8 @@ static void rvu_dbg_cgx_init(struct rvu *rvu)
 
 			debugfs_create_file("stats", 0600, rvu->rvu_dbg.lmac,
 					    cgx, &rvu_dbg_cgx_stat_fops);
+			debugfs_create_file("mac_filter", 0600, rvu->rvu_dbg.lmac,
+					    cgx, &rvu_dbg_cgx_dmac_flt_fops);
 		}
 	}
 }
@@ -1870,6 +1952,7 @@ static int rvu_dbg_npc_mcam_show_rules(struct seq_file *s, void *unused)
 	struct rvu *rvu = s->private;
 	struct npc_mcam *mcam;
 	int pf, vf = -1;
+	bool enabled;
 	int blkaddr;
 	u16 target;
 	u64 hits;
@@ -1911,7 +1994,9 @@ static int rvu_dbg_npc_mcam_show_rules(struct seq_file *s, void *unused)
 		}
 
 		rvu_dbg_npc_mcam_show_action(s, iter);
-		seq_printf(s, "\tenabled: %s\n", iter->enable ? "yes" : "no");
+
+		enabled = is_mcam_entry_enabled(rvu, mcam, blkaddr, iter->entry);
+		seq_printf(s, "\tenabled: %s\n", enabled ? "yes" : "no");
 
 		if (!iter->has_cntr)
 			continue;

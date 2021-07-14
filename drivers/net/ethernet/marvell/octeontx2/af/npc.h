@@ -45,7 +45,7 @@ enum npc_kpu_lb_ltype {
 	NPC_LT_LB_CTAG,
 	NPC_LT_LB_STAG_QINQ,
 	NPC_LT_LB_BTAG,
-	NPC_LT_LB_ITAG,
+	NPC_LT_LB_PPPOE,
 	NPC_LT_LB_DSA,
 	NPC_LT_LB_DSA_VLAN,
 	NPC_LT_LB_EDSA,
@@ -150,7 +150,10 @@ enum npc_kpu_lh_ltype {
  * Software assigns pkind for each incoming port such as CGX
  * Ethernet interfaces, LBK interfaces, etc.
  */
+#define NPC_UNRESERVED_PKIND_COUNT NPC_RX_VLAN_EXDSA_PKIND
+
 enum npc_pkind_type {
+	NPC_RX_LBK_PKIND = 0ULL,
 	NPC_RX_VLAN_EXDSA_PKIND = 56ULL,
 	NPC_RX_CHLEN24B_PKIND = 57ULL,
 	NPC_RX_CPT_HDR_PKIND,
@@ -445,7 +448,8 @@ struct nix_tx_action {
 /* NPC MCAM reserved entry index per nixlf */
 #define NIXLF_UCAST_ENTRY	0
 #define NIXLF_BCAST_ENTRY	1
-#define NIXLF_PROMISC_ENTRY	2
+#define NIXLF_ALLMULTI_ENTRY	2
+#define NIXLF_PROMISC_ENTRY	3
 
 struct npc_coalesced_kpu_prfl {
 #define NPC_SIGN	0x00666f727063706e
