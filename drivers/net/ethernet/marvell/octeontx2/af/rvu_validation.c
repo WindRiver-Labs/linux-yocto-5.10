@@ -200,7 +200,8 @@ static int rvu_blk_count_rsrc(struct rvu_block *block, u16 pcifunc, u8 rshift)
 	int count = 0, lf;
 
 	for (lf = 0; lf < block->lf.max; lf++)
-		if ((block->fn_map[lf] >> rshift) == (pcifunc >> rshift))
+		if ((block->fn_map[lf] >> rshift) == (pcifunc >> rshift) &&
+		    block->fn_map[lf] != 0)
 			count++;
 
 	return count;
@@ -816,7 +817,7 @@ int rvu_policy_init(struct rvu *rvu)
 		goto error;
 	}
 
-	max = hw->block[BLKADDR_NIX0].lf.max;
+	max = hw->block[BLKADDR_NIX0].lf.max + hw->block[BLKADDR_NIX1].lf.max;
 	rvu->pf_limits.nix = quotas_alloc(rvu->hw->total_pfs, max, max,
 					  0, &rvu->rsrc_lock, &pf_limit_ops);
 	if (!rvu->pf_limits.nix) {

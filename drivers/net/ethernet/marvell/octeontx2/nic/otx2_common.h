@@ -211,6 +211,11 @@ struct vfvlan {
 	u8 qos;
 };
 
+enum vfperm {
+	OTX2_RESET_VF_PERM,
+	OTX2_TRUSTED_VF,
+};
+
 struct otx2_vf_config {
 	struct otx2_nic *pf;
 	struct delayed_work link_event_work;
@@ -220,6 +225,7 @@ struct otx2_vf_config {
 	u16 vlan;
 	int tx_vtag_idx;
 	struct vfvlan rule;
+	bool trusted;
 };
 
 struct flr_work {
@@ -265,6 +271,9 @@ struct otx2_flow_config {
 #define OTX2_VF_VLAN_RX_INDEX	0
 #define OTX2_VF_VLAN_TX_INDEX	1
 	u32                     ntuple_max_flows;
+	u8			dmacflt_max_flows;
+	u8			*bmap_to_dmacindex;
+	unsigned long		dmacflt_bmap;
 	struct list_head	flow_list;
 };
 
@@ -290,6 +299,7 @@ struct otx2_nic {
 #define OTX2_FLAG_PF_SHUTDOWN			BIT_ULL(8)
 #define OTX2_FLAG_RX_PAUSE_ENABLED		BIT_ULL(9)
 #define OTX2_FLAG_TX_PAUSE_ENABLED		BIT_ULL(10)
+#define OTX2_FLAG_DMACFLTR_SUPPORT		BIT_ULL(14)
 	u64			flags;
 
 	struct otx2_qset	qset;
@@ -763,4 +773,11 @@ int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);
 int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 			u16 proto);
 
+/* CGX/RPM DMAC filters support */
+int otx2_dmacflt_get_max_cnt(struct otx2_nic *pf);
+int otx2_dmacflt_add(struct otx2_nic *pf, const u8 *mac, u8 bit_pos);
+int otx2_dmacflt_remove(struct otx2_nic *pf, const u8 *mac, u8 bit_pos);
+int otx2_dmacflt_update(struct otx2_nic *pf, u8 *mac, u8 bit_pos);
+void otx2_dmacflt_reinstall_flows(struct otx2_nic *pf);
+void otx2_dmacflt_update_pfmac_flow(struct otx2_nic *pfvf);
 #endif /* OTX2_COMMON_H */
