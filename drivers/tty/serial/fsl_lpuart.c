@@ -1616,6 +1616,9 @@ static void lpuart_tx_dma_startup(struct lpuart_port *sport)
 	u32 uartbaud;
 	int ret;
 
+	if (uart_console(&sport->port))
+		goto err;
+
 	if (!sport->dma_tx_chan)
 		goto err;
 
@@ -1644,6 +1647,9 @@ static void lpuart_rx_dma_startup(struct lpuart_port *sport)
 {
 	int ret;
 	unsigned char cr3;
+
+	if (uart_console(&sport->port))
+		goto err;
 
 	if (!sport->dma_rx_chan)
 		goto err;
@@ -2456,6 +2462,9 @@ lpuart32_console_get_options(struct lpuart_port *sport, int *baud,
 
 	bd = lpuart32_read(&sport->port, UARTBAUD);
 	bd &= UARTBAUD_SBR_MASK;
+	if (!bd)
+		return;
+
 	sbr = bd;
 	uartclk = lpuart_get_baud_clk_rate(sport);
 	/*
