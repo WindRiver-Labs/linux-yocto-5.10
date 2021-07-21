@@ -5,6 +5,8 @@
 #include <linux/clk-provider.h>
 #include <linux/pci.h>
 #include <linux/dmi.h>
+#include <linux/phy.h>
+#include <linux/dwxpcs.h>
 #include "dwmac-intel.h"
 #include "dwmac4.h"
 #include "stmmac.h"
@@ -298,6 +300,11 @@ static void get_arttime(struct mii_bus *mii, int intel_adhoc_addr,
 	*art_time = ns;
 }
 
+static int stmmac_cross_ts_isr(struct stmmac_priv *priv)
+{
+	return (readl(priv->ioaddr + GMAC_INT_STATUS) & GMAC_INT_TSIE);
+}
+
 static int intel_crosststamp(ktime_t *device,
 			     struct system_counterval_t *system,
 			     void *ctx)
@@ -368,14 +375,14 @@ static int intel_crosststamp(ktime_t *device,
 	gpio_value |= GMAC_GPO1;
 	writel(gpio_value, ioaddr + GMAC_GPIO_STATUS);
 
-	/* Poll for time sync operation done */
-	ret = readl_poll_timeout(priv->ioaddr + GMAC_INT_STATUS, v,
-				 (v & GMAC_INT_TSIE), 100, 10000);
-
-	if (ret == -ETIMEDOUT) {
-		pr_err("%s: Wait for time sync operation timeout\n", __func__);
-		return ret;
-	}
+	/* Time sync done Indication - Interrupt method */
+	if (priv->hw->mdio_intr_en) {
+		if (!wait_event_timeout(priv->hw->mdio_busy_wait,
+					stmmac_cross_ts_isr(priv), HZ / 100))
+			return -ETIMEDOUT;
+	} else if (readl_poll_timeout(priv->ioaddr + GMAC_INT_STATUS, v,
+				     (v & GMAC_INT_TSIE), 100, 10000))
+		return -ETIMEDOUT;
 
 	num_snapshot = (readl(ioaddr + GMAC_TIMESTAMP_STATUS) &
 			GMAC_TIMESTAMP_ATSNS_MASK) >>
@@ -440,6 +447,28 @@ static void common_default_data(struct plat_stmmacenet_data *plat)
 	plat->rx_queues_cfg[0].pkt_route = 0x0;
 }
 
+static int setup_intel_mgbe_phy_conv(struct mii_bus *bus,
+				     struct mdio_board_info *bi)
+{
+	return mdiobus_create_device(bus, bi);
+}
+
+static int remove_intel_mgbe_phy_conv(struct mii_bus *bus,
+				      struct mdio_board_info *bi)
+{
+	struct mdio_device *mdiodev;
+
+	mdiodev = mdiobus_get_mdio_device(bus, bi->mdio_addr);
+
+	if (!mdiodev)
+		return -1;
+
+	mdio_device_remove(mdiodev);
+	mdio_device_free(mdiodev);
+
+	return 0;
+}
+
 static int intel_mgbe_common_data(struct pci_dev *pdev,
 				  struct plat_stmmacenet_data *plat)
 {
@@ -450,11 +479,27 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->pdev = pdev;
 	plat->phy_addr = -1;
 	plat->clk_csr = 5;
+	plat->clk_trail_n = 2;
 	plat->has_gmac = 0;
 	plat->has_gmac4 = 1;
+	plat->has_tbs = 1;
 	plat->force_sf_dma_mode = 0;
 	plat->tso_en = 1;
 	plat->sph_en = 0;
+	plat->tsn_est_en = 1;
+	plat->tsn_fpe_en = 1;
+	plat->tsn_tbs_en = 1;
+	/* FPE HW Tunable */
+	plat->fprq = 1;
+	plat->afsz = 0;  /* Adjustable Fragment Size */
+	plat->hadv = 0;  /* Hold Advance */
+	plat->radv = 0;  /* Release Advance*/
+	/* TBS HW Tunable */
+	plat->estm = 0;  /* Absolute Mode */
+	plat->leos = 0;  /* Launch Expiry Offset */
+	plat->legos = 0; /* Launch Expiry GSN Offset */
+	plat->ftos = 0;  /* Fetch Time Offset */
+	plat->fgos = 0;  /* Fetch GSN Offset */
 
 	/* Multiplying factor to the clk_eee_i clock time
 	 * period to make it closer to 100 ns. This value
@@ -485,8 +530,12 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 
 		/* Disable Priority config by default */
 		plat->tx_queues_cfg[i].use_prio = false;
-		/* Default TX Q0 to use TSO and rest TXQ for TBS */
-		if (i > 0)
+
+		/* Enable per queue TBS support on half of the Tx Queues.
+		 * For examples, if tx_queue_to_use = 8, then Tx Queue 4, 5, 6,
+		 * and 7 will have TBS support.
+		 */
+		if (plat->tsn_tbs_en && i >= (plat->tx_queues_to_use / 2))
 			plat->tx_queues_cfg[i].tbs_en = 1;
 	}
 
@@ -561,16 +610,31 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	/* Use the last Rx queue */
 	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
 
-	/* Intel mgbe SGMII interface uses pcs-xcps */
 	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
-		plat->mdio_bus_data->has_xpcs = true;
-		plat->mdio_bus_data->xpcs_an_inband = true;
+		plat->xpcs_pdata = devm_kzalloc(&pdev->dev,
+						sizeof(*plat->xpcs_pdata),
+						GFP_KERNEL);
+		plat->xpcs_pdata->mode = DWXPCS_MODE_SGMII_AN;
+
+		plat->intel_bi = devm_kzalloc(&pdev->dev,
+					      sizeof(*plat->intel_bi),
+					      GFP_KERNEL);
+		plat->intel_bi->bus_id = "stmmac-1";
+		strncpy(plat->intel_bi->modalias, "dwxpcs", MDIO_NAME_SIZE);
+		plat->intel_bi->mdio_addr = 0x16;
+		plat->intel_bi->platform_data = plat->xpcs_pdata;
 	}
+
 	plat->int_snapshot_num = AUX_SNAPSHOT1;
 	plat->ext_snapshot_num = AUX_SNAPSHOT0;
 
 	plat->has_crossts = true;
 	plat->crosststamp = intel_crosststamp;
+
+	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
+		plat->setup_phy_conv = setup_intel_mgbe_phy_conv;
+		plat->remove_phy_conv = remove_intel_mgbe_phy_conv;
+	}
 
 	/* Setup MSI vector offset specific to Intel mGbE controller */
 	plat->msi_mac_vec = 29;
@@ -580,6 +644,13 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->msi_rx_base_vec = 0;
 	plat->msi_tx_base_vec = 1;
 
+	/* TSN HW tunable data */
+	plat->ctov = 0;
+	plat->ptov = 0;
+	plat->tils = 0;
+
+	plat->phy_wol_thru_pmc = 1;
+
 	return 0;
 }
 
@@ -588,7 +659,7 @@ static int ehl_common_data(struct pci_dev *pdev,
 {
 	plat->rx_queues_to_use = 8;
 	plat->tx_queues_to_use = 8;
-	plat->clk_ptp_rate = 200000000;
+	plat->has_safety_feat = 1;
 	plat->use_phy_wol = 1;
 
 	plat->safety_feat_cfg->tsoee = 1;
@@ -609,6 +680,12 @@ static int ehl_sgmii_data(struct pci_dev *pdev,
 {
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
+
+	/* Set PTP clock rate for EHL as 200MHz */
+	plat->clk_ptp_rate = 204860000;
+
+	plat->dma_cfg->pch_intr_wa = 1;
+
 	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
@@ -626,6 +703,11 @@ static int ehl_rgmii_data(struct pci_dev *pdev,
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_RGMII;
 
+	/* Set PTP clock rate for EHL as 200MHz */
+	plat->clk_ptp_rate = 200000000;
+
+	plat->dma_cfg->pch_intr_wa = 1;
+
 	return ehl_common_data(pdev, plat);
 }
 
@@ -641,6 +723,17 @@ static int ehl_pse0_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 2;
 	plat->addr64 = 32;
+	plat->dma_bit_mask = 32;
+	plat->is_pse = 1;
+
+	plat->clk_ptp_rate = 200000000;
+
+	/* store A2H packets in L2 SRAM, access through BAR0 + 128KB */
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+#if (CONFIG_STMMAC_NETWORK_PROXY_PORT == 0)
+	plat->has_netproxy = 1;
+#endif /* CONFIG_STMMAC_NETWORK_PROXY_PORT */
+#endif /* CONFIG_STMMAC_NETWORK_PROXY */
 
 	intel_mgbe_pse_crossts_adj(intel_priv, EHL_PSE_ART_MHZ);
 
@@ -680,6 +773,17 @@ static int ehl_pse1_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 3;
 	plat->addr64 = 32;
+	plat->dma_bit_mask = 32;
+	plat->is_pse = 1;
+
+	plat->clk_ptp_rate = 200000000;
+
+	/* store A2H packets in L2 SRAM, access through BAR0 + 128KB */
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+#if (CONFIG_STMMAC_NETWORK_PROXY_PORT == 1)
+	plat->has_netproxy = 1;
+#endif /* CONFIG_STMMAC_NETWORK_PROXY_PORT */
+#endif /* CONFIG_STMMAC_NETWORK_PROXY */
 
 	intel_mgbe_pse_crossts_adj(intel_priv, EHL_PSE_ART_MHZ);
 
@@ -717,6 +821,8 @@ static int tgl_common_data(struct pci_dev *pdev,
 	plat->rx_queues_to_use = 6;
 	plat->tx_queues_to_use = 4;
 	plat->clk_ptp_rate = 200000000;
+
+	plat->dma_cfg->pch_intr_wa = 1;
 
 	plat->safety_feat_cfg->tsoee = 1;
 	plat->safety_feat_cfg->mrxpee = 0;
@@ -908,6 +1014,7 @@ static int stmmac_config_single_msi(struct pci_dev *pdev,
 
 	res->irq = pci_irq_vector(pdev, 0);
 	res->wol_irq = res->irq;
+	res->phy_conv_irq = res->irq;
 	plat->multi_msi_en = 0;
 	dev_info(&pdev->dev, "%s: Single IRQ enablement successful\n",
 		 __func__);

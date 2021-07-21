@@ -29,6 +29,7 @@ struct stmmac_resources {
 	const char *mac;
 	int wol_irq;
 	int lpi_irq;
+	int phy_conv_irq;
 	int irq;
 	int sfty_ce_irq;
 	int sfty_ue_irq;
@@ -63,7 +64,7 @@ struct stmmac_tx_queue {
 	u32 queue_index;
 	struct stmmac_priv *priv_data;
 	struct dma_extended_desc *dma_etx ____cacheline_aligned_in_smp;
-	struct dma_edesc *dma_entx;
+	struct dma_edesc *dma_entx ____cacheline_aligned_in_smp;
 	struct dma_desc *dma_tx;
 	union {
 		struct sk_buff **tx_skbuff;
@@ -256,6 +257,7 @@ struct stmmac_priv {
 	void __iomem *mmcaddr;
 	void __iomem *ptpaddr;
 	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
+	int phy_conv_irq;
 	int sfty_ce_irq;
 	int sfty_ue_irq;
 	int rx_irq[MTL_MAX_RX_QUEUES];
@@ -283,6 +285,13 @@ struct stmmac_priv {
 	struct work_struct fpe_task;
 	char wq_name[IFNAMSIZ + 4];
 
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	/* Network Proxy A2H Worker */
+	struct workqueue_struct *netprox_wq;
+	struct work_struct netprox_task;
+	bool networkproxy_exit;
+#endif
+
 	/* TC Handling */
 	unsigned int tc_entries_max;
 	unsigned int tc_off_max;
@@ -295,6 +304,9 @@ struct stmmac_priv {
 
 	/* Receive Side Scaling */
 	struct stmmac_rss rss;
+
+	/* WA for EST */
+	int est_hw_del;
 
 	/* XDP BPF Program */
 	unsigned long *af_xdp_zc_qps;
@@ -313,6 +325,7 @@ int stmmac_mdio_register(struct net_device *ndev);
 int stmmac_mdio_reset(struct mii_bus *mii);
 int stmmac_xpcs_setup(struct mii_bus *mii);
 void stmmac_set_ethtool_ops(struct net_device *netdev);
+void stmmac_update_wol_status(struct net_device *ndev);
 
 void stmmac_ptp_register(struct stmmac_priv *priv);
 void stmmac_ptp_unregister(struct stmmac_priv *priv);
@@ -350,6 +363,16 @@ void stmmac_disable_tx_queue(struct stmmac_priv *priv, u32 queue);
 void stmmac_enable_tx_queue(struct stmmac_priv *priv, u32 queue);
 int stmmac_xsk_wakeup(struct net_device *dev, u32 queue, u32 flags);
 
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+int stmmac_config_dma_channel(struct stmmac_priv *priv);
+int stmmac_suspend_common(struct stmmac_priv *priv, struct net_device *ndev);
+int stmmac_resume_common(struct stmmac_priv *priv, struct net_device *ndev);
+int stmmac_suspend_main(struct stmmac_priv *priv, struct net_device *ndev);
+int stmmac_resume_main(struct stmmac_priv *priv, struct net_device *ndev);
+#endif
+
+void stmmac_set_tbs_launchtime(struct stmmac_priv *priv, struct dma_desc *desc,
+			       u64 tx_time);
 #if IS_ENABLED(CONFIG_STMMAC_SELFTESTS)
 void stmmac_selftest_run(struct net_device *dev,
 			 struct ethtool_test *etest, u64 *buf);

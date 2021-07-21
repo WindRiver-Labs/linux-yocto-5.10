@@ -97,6 +97,7 @@ struct stmmac_dma_cfg {
 	bool aal;
 	bool eame;
 	bool multi_msi_en;
+	bool pch_intr_wa;
 	bool dche;
 };
 
@@ -199,6 +200,7 @@ struct plat_stmmacenet_data {
 	struct stmmac_safety_feature_cfg *safety_feat_cfg;
 	int clk_csr;
 	int has_gmac;
+	int clk_trail_n;
 	int enh_desc;
 	int tx_coe;
 	int rx_coe;
@@ -228,6 +230,10 @@ struct plat_stmmacenet_data {
 	int (*init)(struct platform_device *pdev, void *priv);
 	void (*exit)(struct platform_device *pdev, void *priv);
 	struct mac_device_info *(*setup)(void *priv);
+	int (*setup_phy_conv)(struct mii_bus *bus,
+			      struct mdio_board_info *bi);
+	int (*remove_phy_conv)(struct mii_bus *bus,
+			       struct mdio_board_info *bi);
 	int (*clks_config)(void *priv, bool enabled);
 	int (*crosststamp)(ktime_t *device, struct system_counterval_t *system,
 			   void *ctx);
@@ -243,21 +249,30 @@ struct plat_stmmacenet_data {
 	struct reset_control *stmmac_ahb_rst;
 	struct stmmac_axi *axi;
 	int has_gmac4;
+	int has_tbs;
 	bool has_sun8i;
 	bool tso_en;
 	int rss_en;
+	bool tsn_est_en;
+	bool tsn_fpe_en;
+	bool tsn_tbs_en;
 	bool sph_en;
 	int mac_port_sel_speed;
 	bool en_tx_lpi_clockgating;
 	int has_xgmac;
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	int has_netproxy;
+#endif
 	bool vlan_fail_q_en;
 	u8 vlan_fail_q;
 	unsigned int eee_usecs_rate;
+	u32 dma_bit_mask;
 	struct pci_dev *pdev;
 	bool has_crossts;
 	int int_snapshot_num;
 	int ext_snapshot_num;
 	bool ext_snapshot_en;
+	bool has_safety_feat;
 	bool multi_msi_en;
 	int msi_mac_vec;
 	int msi_wol_vec;
@@ -267,5 +282,23 @@ struct plat_stmmacenet_data {
 	int msi_rx_base_vec;
 	int msi_tx_base_vec;
 	bool use_phy_wol;
+	u32 ptov;
+	u32 ctov;
+	u32 tils;
+	/*FPE */
+	u32 fprq;
+	u32 afsz;
+	u32 hadv;
+	u32 radv;
+	/* TBS */
+	u32 estm;
+	u32 leos;
+	u32 legos;
+	u32 ftos;
+	u32 fgos;
+	bool is_pse;
+	struct mdio_board_info *intel_bi;
+	struct dwxpcs_platform_data *xpcs_pdata;
+	bool phy_wol_thru_pmc;
 };
 #endif

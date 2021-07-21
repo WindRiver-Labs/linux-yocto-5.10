@@ -15,6 +15,7 @@
 #include <linux/ethtool.h>
 #include <linux/io.h>
 #include <net/dsa.h>
+#include <linux/if_vlan.h>
 #include "stmmac.h"
 #include "stmmac_pcs.h"
 #include "dwmac4.h"
@@ -25,27 +26,40 @@ static void dwmac4_core_init(struct mac_device_info *hw,
 {
 	void __iomem *ioaddr = hw->pcsr;
 	u32 value = readl(ioaddr + GMAC_CONFIG);
+	int mtu = dev->mtu;
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	struct stmmac_priv *priv = netdev_priv(dev);
 
-	value |= GMAC_CORE_INIT;
+	if (!priv->networkproxy_exit) {
+#endif
+		value |= GMAC_CORE_INIT;
 
-	if (hw->ps) {
-		value |= GMAC_CONFIG_TE;
+		if (mtu > 1500)
+			value |= GMAC_CONFIG_2K;
+		if (mtu > 2000)
+			value |= GMAC_CONFIG_JE;
 
-		value &= hw->link.speed_mask;
-		switch (hw->ps) {
-		case SPEED_1000:
-			value |= hw->link.speed1000;
-			break;
-		case SPEED_100:
-			value |= hw->link.speed100;
-			break;
-		case SPEED_10:
-			value |= hw->link.speed10;
-			break;
+		if (hw->ps) {
+			value |= GMAC_CONFIG_TE;
+
+			value &= hw->link.speed_mask;
+			switch (hw->ps) {
+			case SPEED_1000:
+				value |= hw->link.speed1000;
+				break;
+			case SPEED_100:
+				value |= hw->link.speed100;
+				break;
+			case SPEED_10:
+				value |= hw->link.speed10;
+				break;
+			}
 		}
-	}
 
-	writel(value, ioaddr + GMAC_CONFIG);
+		writel(value, ioaddr + GMAC_CONFIG);
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	}
+#endif
 
 	/* Enable GMAC interrupts */
 	value = GMAC_INT_DEFAULT_ENABLE;
@@ -53,11 +67,50 @@ static void dwmac4_core_init(struct mac_device_info *hw,
 	if (hw->pcs)
 		value |= GMAC_PCS_IRQ_DEFAULT;
 
+	if (hw->mdio_intr_en)
+		value |= GMAC_INT_MDIO_EN;
+
 	/* Enable FPE interrupt */
 	if ((GMAC_HW_FEAT_FPESEL & readl(ioaddr + GMAC_HW_FEATURE3)) >> 26)
 		value |= GMAC_INT_FPE_EN;
 
 	writel(value, ioaddr + GMAC_INT_EN);
+}
+
+void dwmac4_mac_start_tx(void __iomem *ioaddr)
+{
+	u32 value;
+
+	value = readl(ioaddr + GMAC_CONFIG);
+	value |= GMAC_CONFIG_TE;
+	writel(value, ioaddr + GMAC_CONFIG);
+}
+
+void dwmac4_mac_stop_tx(void __iomem *ioaddr)
+{
+	u32 value;
+
+	value = readl(ioaddr + GMAC_CONFIG);
+	value &= ~GMAC_CONFIG_TE;
+	writel(value, ioaddr + GMAC_CONFIG);
+}
+
+void dwmac4_mac_start_rx(void __iomem *ioaddr)
+{
+	u32 value;
+
+	value = readl(ioaddr + GMAC_CONFIG);
+	value |= GMAC_CONFIG_RE;
+	writel(value, ioaddr + GMAC_CONFIG);
+}
+
+void dwmac4_mac_stop_rx(void __iomem *ioaddr)
+{
+	u32 value;
+
+	value = readl(ioaddr + GMAC_CONFIG);
+	value &= ~GMAC_CONFIG_RE;
+	writel(value, ioaddr + GMAC_CONFIG);
 }
 
 static void dwmac4_rx_queue_enable(struct mac_device_info *hw,
@@ -882,6 +935,9 @@ static int dwmac4_irq_status(struct mac_device_info *hw,
 			x->irq_rx_path_exit_lpi_mode_n++;
 	}
 
+	if (intr_status & mdio_irq)
+		wake_up(&hw->mdio_busy_wait);
+
 	dwmac_pcs_isr(ioaddr, GMAC_PCS_BASE, intr_status, x);
 	if (intr_status & PCS_RGSMIIIS_IRQ)
 		dwmac4_phystatus(ioaddr, x);
@@ -1068,6 +1124,62 @@ static void dwmac4_set_arp_offload(struct mac_device_info *hw, bool en,
 	writel(value, ioaddr + GMAC_CONFIG);
 }
 
+static void dwmac4_rx_hw_vlan(struct net_device *dev,
+			      struct mac_device_info *hw,
+			      struct dma_desc *rx_desc, struct sk_buff *skb)
+{
+	if ((dev->features & NETIF_F_HW_VLAN_CTAG_RX) &&
+	    hw->desc->get_rx_vlan_valid(rx_desc)) {
+		u16 vid = (u16)hw->desc->get_rx_vlan_tci(rx_desc);
+
+		__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q), vid);
+	}
+}
+
+static void dwmac4_set_hw_vlan_mode(void __iomem *ioaddr,
+				    netdev_features_t features)
+{
+	u32 val;
+
+	val = readl(ioaddr + GMAC_VLAN_TAG);
+	val &= ~GMAC_VLAN_TAG_CTRL_EVLS_MASK;
+
+	if (features & NETIF_F_HW_VLAN_CTAG_RX)
+		/* Always strip VLAN on Receive */
+		val |= GMAC_VLAN_TAG_STRIP_ALL;
+	else
+		/* Do not strip VLAN on Receive */
+		val |= GMAC_VLAN_TAG_STRIP_NONE;
+
+	/* Enable outer VLAN Tag in Rx DMA descriptor */
+	val |= GMAC_VLAN_TAG_CTRL_EVLRXS;
+
+	writel(val, ioaddr + GMAC_VLAN_TAG);
+}
+
+static int dwmac4_mtl_tx_completed(void __iomem *ioaddr, u32 tx_queues)
+{
+	u32 value;
+	u32 queue;
+
+	for (queue = 0; queue < tx_queues; queue++) {
+		value = readl(ioaddr + MTL_CHAN_TX_DEBUG(queue));
+
+		/* if Tx Queue not empty */
+		if (value & MTL_DEBUG_TXFSTS)
+			return 1;
+
+		/* check frame transmissions is complete */
+		if (value & MTL_DEBUG_TRCSTS_MASK) {
+			u32 trcsts = (value & MTL_DEBUG_TRCSTS_MASK)
+				     >> MTL_DEBUG_TRCSTS_SHIFT;
+			if (trcsts != MTL_DEBUG_TRCSTS_IDLE)
+				return 1;
+		}
+	}
+	return 0;
+}
+
 static int dwmac4_config_l3_filter(struct mac_device_info *hw, u32 filter_no,
 				   bool en, bool ipv6, bool sa, bool inv,
 				   u32 match)
@@ -1171,6 +1283,10 @@ static int dwmac4_config_l4_filter(struct mac_device_info *hw, u32 filter_no,
 const struct stmmac_ops dwmac4_ops = {
 	.core_init = dwmac4_core_init,
 	.set_mac = stmmac_set_mac,
+	.start_tx = dwmac4_mac_start_tx,
+	.stop_tx = dwmac4_mac_stop_tx,
+	.start_rx = dwmac4_mac_start_rx,
+	.stop_rx = dwmac4_mac_stop_rx,
 	.rx_ipc = dwmac4_rx_ipc_enable,
 	.rx_queue_enable = dwmac4_rx_queue_enable,
 	.rx_queue_prio = dwmac4_rx_queue_priority,
@@ -1203,16 +1319,23 @@ const struct stmmac_ops dwmac4_ops = {
 	.sarc_configure = dwmac4_sarc_configure,
 	.enable_vlan = dwmac4_enable_vlan,
 	.set_arp_offload = dwmac4_set_arp_offload,
+	.rx_hw_vlan = dwmac4_rx_hw_vlan,
+	.set_hw_vlan_mode = dwmac4_set_hw_vlan_mode,
 	.config_l3_filter = dwmac4_config_l3_filter,
 	.config_l4_filter = dwmac4_config_l4_filter,
 	.add_hw_vlan_rx_fltr = dwmac4_add_hw_vlan_rx_fltr,
 	.del_hw_vlan_rx_fltr = dwmac4_del_hw_vlan_rx_fltr,
 	.restore_hw_vlan_rx_fltr = dwmac4_restore_hw_vlan_rx_fltr,
+	.mtl_tx_completed = dwmac4_mtl_tx_completed,
 };
 
 const struct stmmac_ops dwmac410_ops = {
 	.core_init = dwmac4_core_init,
 	.set_mac = stmmac_dwmac4_set_mac,
+	.start_tx = dwmac4_mac_start_tx,
+	.stop_tx = dwmac4_mac_stop_tx,
+	.start_rx = dwmac4_mac_start_rx,
+	.stop_rx = dwmac4_mac_stop_rx,
 	.rx_ipc = dwmac4_rx_ipc_enable,
 	.rx_queue_enable = dwmac4_rx_queue_enable,
 	.rx_queue_prio = dwmac4_rx_queue_priority,
@@ -1246,6 +1369,8 @@ const struct stmmac_ops dwmac410_ops = {
 	.sarc_configure = dwmac4_sarc_configure,
 	.enable_vlan = dwmac4_enable_vlan,
 	.set_arp_offload = dwmac4_set_arp_offload,
+	.rx_hw_vlan = dwmac4_rx_hw_vlan,
+	.set_hw_vlan_mode = dwmac4_set_hw_vlan_mode,
 	.config_l3_filter = dwmac4_config_l3_filter,
 	.config_l4_filter = dwmac4_config_l4_filter,
 	.est_configure = dwmac5_est_configure,
@@ -1255,11 +1380,16 @@ const struct stmmac_ops dwmac410_ops = {
 	.add_hw_vlan_rx_fltr = dwmac4_add_hw_vlan_rx_fltr,
 	.del_hw_vlan_rx_fltr = dwmac4_del_hw_vlan_rx_fltr,
 	.restore_hw_vlan_rx_fltr = dwmac4_restore_hw_vlan_rx_fltr,
+	.mtl_tx_completed = dwmac4_mtl_tx_completed,
 };
 
 const struct stmmac_ops dwmac510_ops = {
 	.core_init = dwmac4_core_init,
 	.set_mac = stmmac_dwmac4_set_mac,
+	.start_tx = dwmac4_mac_start_tx,
+	.stop_tx = dwmac4_mac_stop_tx,
+	.start_rx = dwmac4_mac_start_rx,
+	.stop_rx = dwmac4_mac_stop_rx,
 	.rx_ipc = dwmac4_rx_ipc_enable,
 	.rx_queue_enable = dwmac4_rx_queue_enable,
 	.rx_queue_prio = dwmac4_rx_queue_priority,
@@ -1297,6 +1427,8 @@ const struct stmmac_ops dwmac510_ops = {
 	.sarc_configure = dwmac4_sarc_configure,
 	.enable_vlan = dwmac4_enable_vlan,
 	.set_arp_offload = dwmac4_set_arp_offload,
+	.rx_hw_vlan = dwmac4_rx_hw_vlan,
+	.set_hw_vlan_mode = dwmac4_set_hw_vlan_mode,
 	.config_l3_filter = dwmac4_config_l3_filter,
 	.config_l4_filter = dwmac4_config_l4_filter,
 	.est_configure = dwmac5_est_configure,
@@ -1306,6 +1438,28 @@ const struct stmmac_ops dwmac510_ops = {
 	.add_hw_vlan_rx_fltr = dwmac4_add_hw_vlan_rx_fltr,
 	.del_hw_vlan_rx_fltr = dwmac4_del_hw_vlan_rx_fltr,
 	.restore_hw_vlan_rx_fltr = dwmac4_restore_hw_vlan_rx_fltr,
+	.mtl_tx_completed = dwmac4_mtl_tx_completed,
+	.tsnif_setup = dwmac510_tsnif_setup,
+	.init_tsn = tsn_init,
+	.setup_tsn_hw = tsn_hw_setup,
+	.set_tsn_feat = tsn_feat_set,
+	.has_tsn_feat = tsn_has_feat,
+	.set_tsn_hwtunable = tsn_hwtunable_set,
+	.get_tsn_hwtunable = tsn_hwtunable_get,
+	.set_est_enable = tsn_est_enable_set,
+	.get_est_bank = tsn_est_bank_get,
+	.set_est_gce = tsn_est_gce_set,
+	.get_est_gcl_len = tsn_est_gcl_len_get,
+	.set_est_gcl_len = tsn_est_gcl_len_set,
+	.set_est_gcrr_times = tsn_est_gcrr_times_set,
+	.get_est_gcc = tsn_est_gcc_get,
+	.est_tsn_irq_status = tsn_est_irq_status,
+	.dump_tsn_mmc = tsn_mmc_dump,
+	.cbs_recal_idleslope = tsn_cbs_recal_idleslope,
+	.fpe_set_txqpec = tsn_fpe_set_txqpec,
+	.fpe_set_enable = tsn_fpe_set_enable,
+	.fpe_get_config = tsn_fpe_get_config,
+	.fpe_show_pmac_sts = tsn_fpe_show_pmac_sts,
 };
 
 static u32 dwmac4_get_num_vlan(void __iomem *ioaddr)

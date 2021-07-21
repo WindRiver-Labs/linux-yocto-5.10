@@ -22,6 +22,7 @@
 #include <linux/if_vlan.h>
 #endif
 
+#include "stmmac_tsn.h"
 #include "descs.h"
 #include "hwif.h"
 #include "mmc.h"
@@ -104,7 +105,23 @@ struct stmmac_extra_stats {
 	unsigned long rx_early_irq;
 	unsigned long threshold;
 	unsigned long tx_pkt_n;
+	unsigned long q0_tx_pkt_n;
+	unsigned long q1_tx_pkt_n;
+	unsigned long q2_tx_pkt_n;
+	unsigned long q3_tx_pkt_n;
+	unsigned long q4_tx_pkt_n;
+	unsigned long q5_tx_pkt_n;
+	unsigned long q6_tx_pkt_n;
+	unsigned long q7_tx_pkt_n;
 	unsigned long rx_pkt_n;
+	unsigned long q0_rx_pkt_n;
+	unsigned long q1_rx_pkt_n;
+	unsigned long q2_rx_pkt_n;
+	unsigned long q3_rx_pkt_n;
+	unsigned long q4_rx_pkt_n;
+	unsigned long q5_rx_pkt_n;
+	unsigned long q6_rx_pkt_n;
+	unsigned long q7_rx_pkt_n;
 	unsigned long normal_irq_n;
 	unsigned long rx_normal_irq_n;
 	unsigned long napi_poll;
@@ -112,6 +129,22 @@ struct stmmac_extra_stats {
 	unsigned long tx_clean;
 	unsigned long tx_set_ic_bit;
 	unsigned long irq_receive_pmt_irq_n;
+	unsigned long q0_rx_irq_n;
+	unsigned long q1_rx_irq_n;
+	unsigned long q2_rx_irq_n;
+	unsigned long q3_rx_irq_n;
+	unsigned long q4_rx_irq_n;
+	unsigned long q5_rx_irq_n;
+	unsigned long q6_rx_irq_n;
+	unsigned long q7_rx_irq_n;
+	unsigned long q0_tx_irq_n;
+	unsigned long q1_tx_irq_n;
+	unsigned long q2_tx_irq_n;
+	unsigned long q3_tx_irq_n;
+	unsigned long q4_tx_irq_n;
+	unsigned long q5_tx_irq_n;
+	unsigned long q6_tx_irq_n;
+	unsigned long q7_tx_irq_n;
 	/* MMC info */
 	unsigned long mmc_tx_irq_n;
 	unsigned long mmc_rx_irq_n;
@@ -270,7 +303,7 @@ struct stmmac_safety_stats {
 
 /* Max/Min RI Watchdog Timer count value */
 #define MAX_DMA_RIWT		0xff
-#define MIN_DMA_RIWT		0x10
+#define MIN_DMA_RIWT		0x0
 #define DEF_DMA_RIWT		0xa0
 /* Tx coalesce parameters */
 #define STMMAC_COAL_TX_TIMER	1000
@@ -443,6 +476,7 @@ struct dma_features {
 
 #define STMMAC_CHAIN_MODE	0x1
 #define STMMAC_RING_MODE	0x2
+#define STMMAC_ENHANCED_TX_MODE	0x3
 
 #define JUMBO_LEN		9000
 
@@ -502,6 +536,9 @@ struct mac_device_info {
 	const struct stmmac_mode_ops *mode;
 	const struct stmmac_hwtimestamp *ptp;
 	const struct stmmac_tc_ops *tc;
+#ifdef CONFIG_STMMAC_NETWORK_PROXY
+	const struct stmmac_pm_ops *pm;
+#endif
 	const struct stmmac_mmc_ops *mmc;
 	struct dw_xpcs *xpcs;
 	struct mii_regs mii;	/* MII register Addresses */
@@ -514,12 +551,17 @@ struct mac_device_info {
 	unsigned int pcs;
 	unsigned int pmt;
 	unsigned int ps;
+	bool mdio_intr_en;
+	wait_queue_head_t mdio_busy_wait;
 	unsigned int xlgmac;
 	unsigned int num_vlan;
 	u32 vlan_filter[32];
 	unsigned int promisc;
 	bool vlan_fail_q_en;
 	u8 vlan_fail_q;
+	const struct tsnif_ops *tsnif;
+	struct tsnif_info tsn_info;
+	bool cached_fpe_en;
 };
 
 struct stmmac_rx_routing {
@@ -550,5 +592,6 @@ void dwmac_dma_flush_tx_fifo(void __iomem *ioaddr);
 extern const struct stmmac_mode_ops ring_mode_ops;
 extern const struct stmmac_mode_ops chain_mode_ops;
 extern const struct stmmac_desc_ops dwmac4_desc_ops;
+extern const struct stmmac_desc_ops dwmac5_desc_ops;
 
 #endif /* __COMMON_H__ */

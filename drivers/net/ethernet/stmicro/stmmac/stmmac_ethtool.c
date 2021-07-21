@@ -82,7 +82,23 @@ static const struct stmmac_stats stmmac_gstrings_stats[] = {
 	STMMAC_STAT(rx_early_irq),
 	STMMAC_STAT(threshold),
 	STMMAC_STAT(tx_pkt_n),
+	STMMAC_STAT(q0_tx_pkt_n),
+	STMMAC_STAT(q1_tx_pkt_n),
+	STMMAC_STAT(q2_tx_pkt_n),
+	STMMAC_STAT(q3_tx_pkt_n),
+	STMMAC_STAT(q4_tx_pkt_n),
+	STMMAC_STAT(q5_tx_pkt_n),
+	STMMAC_STAT(q6_tx_pkt_n),
+	STMMAC_STAT(q7_tx_pkt_n),
 	STMMAC_STAT(rx_pkt_n),
+	STMMAC_STAT(q0_rx_pkt_n),
+	STMMAC_STAT(q1_rx_pkt_n),
+	STMMAC_STAT(q2_rx_pkt_n),
+	STMMAC_STAT(q3_rx_pkt_n),
+	STMMAC_STAT(q4_rx_pkt_n),
+	STMMAC_STAT(q5_rx_pkt_n),
+	STMMAC_STAT(q6_rx_pkt_n),
+	STMMAC_STAT(q7_rx_pkt_n),
 	STMMAC_STAT(normal_irq_n),
 	STMMAC_STAT(rx_normal_irq_n),
 	STMMAC_STAT(napi_poll),
@@ -90,6 +106,22 @@ static const struct stmmac_stats stmmac_gstrings_stats[] = {
 	STMMAC_STAT(tx_clean),
 	STMMAC_STAT(tx_set_ic_bit),
 	STMMAC_STAT(irq_receive_pmt_irq_n),
+	STMMAC_STAT(q0_rx_irq_n),
+	STMMAC_STAT(q1_rx_irq_n),
+	STMMAC_STAT(q2_rx_irq_n),
+	STMMAC_STAT(q3_rx_irq_n),
+	STMMAC_STAT(q4_rx_irq_n),
+	STMMAC_STAT(q5_rx_irq_n),
+	STMMAC_STAT(q6_rx_irq_n),
+	STMMAC_STAT(q7_rx_irq_n),
+	STMMAC_STAT(q0_tx_irq_n),
+	STMMAC_STAT(q1_tx_irq_n),
+	STMMAC_STAT(q2_tx_irq_n),
+	STMMAC_STAT(q3_tx_irq_n),
+	STMMAC_STAT(q4_tx_irq_n),
+	STMMAC_STAT(q5_tx_irq_n),
+	STMMAC_STAT(q6_tx_irq_n),
+	STMMAC_STAT(q7_tx_irq_n),
 	/* MMC info */
 	STMMAC_STAT(mmc_tx_irq_n),
 	STMMAC_STAT(mmc_rx_irq_n),
@@ -526,7 +558,14 @@ static void stmmac_get_ethtool_stats(struct net_device *dev,
 				data[j++] = count;
 		}
 	}
-
+	if (priv->hw->tsn_info.cap.est_support) {
+		for (i = 0; i < STMMAC_TSN_STAT_SIZE; i++) {
+			if (!stmmac_dump_tsn_mmc(priv,
+						 priv->hw, i,
+						 &count, NULL))
+				data[j++] = count;
+		}
+	}
 	/* Update the DMA HW counters for dwmac10/100 */
 	ret = stmmac_dma_diagnostic_fr(priv, &dev->stats, (void *) &priv->xstats,
 			priv->ioaddr);
@@ -565,7 +604,7 @@ static void stmmac_get_ethtool_stats(struct net_device *dev,
 static int stmmac_get_sset_count(struct net_device *netdev, int sset)
 {
 	struct stmmac_priv *priv = netdev_priv(netdev);
-	int i, len, safety_len = 0;
+	int i, len, safety_len = 0, tsn_len = 0;
 
 	switch (sset) {
 	case ETH_SS_STATS:
@@ -582,6 +621,16 @@ static int stmmac_get_sset_count(struct net_device *netdev, int sset)
 			}
 
 			len += safety_len;
+		}
+		if (priv->hw->tsn_info.cap.est_support) {
+			for (i = 0; i < STMMAC_TSN_STAT_SIZE; i++) {
+				if (!stmmac_dump_tsn_mmc(priv,
+							 priv->hw, i,
+							 NULL, NULL))
+					tsn_len++;
+			}
+
+			len += tsn_len;
 		}
 
 		return len;
@@ -606,6 +655,18 @@ static void stmmac_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 				if (!stmmac_safety_feat_dump(priv,
 							&priv->sstats, i,
 							NULL, &desc)) {
+					memcpy(p, desc, ETH_GSTRING_LEN);
+					p += ETH_GSTRING_LEN;
+				}
+			}
+		}
+		if (priv->hw->tsn_info.cap.est_support) {
+			for (i = 0; i < STMMAC_TSN_STAT_SIZE; i++) {
+				const char *desc;
+
+				if (!stmmac_dump_tsn_mmc(priv,
+							 priv->hw, i,
+							 NULL, &desc)) {
 					memcpy(p, desc, ETH_GSTRING_LEN);
 					p += ETH_GSTRING_LEN;
 				}
@@ -689,6 +750,18 @@ static int stmmac_set_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 	mutex_unlock(&priv->lock);
 
 	return 0;
+}
+
+void stmmac_update_wol_status(struct net_device *ndev)
+{
+	struct stmmac_priv *priv = netdev_priv(ndev);
+	struct ethtool_wolinfo wol;
+
+	memset(&wol, 0, sizeof(struct ethtool_wolinfo));
+
+	wol.wolopts = (u32)priv->wolopts;
+
+	stmmac_set_wol(ndev, &wol);
 }
 
 static int stmmac_ethtool_op_get_eee(struct net_device *dev,

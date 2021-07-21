@@ -13,6 +13,7 @@
 #include <linux/io.h>
 #include "dwmac4.h"
 #include "dwmac4_dma.h"
+#include "dwmac5.h"
 
 static void dwmac4_dma_axi(void __iomem *ioaddr, struct stmmac_axi *axi)
 {
@@ -166,7 +167,12 @@ static void dwmac4_dma_init(void __iomem *ioaddr,
 
 	if (dma_cfg->multi_msi_en) {
 		value &= ~DMA_BUS_MODE_INTM_MASK;
-		value |= (DMA_BUS_MODE_INTM_MODE1 << DMA_BUS_MODE_INTM_SHIFT);
+		if (dma_cfg->pch_intr_wa)
+			value |= (DMA_BUS_MODE_INTM_MODE0 <<
+				  DMA_BUS_MODE_INTM_SHIFT);
+		else
+			value |= (DMA_BUS_MODE_INTM_MODE1 <<
+				  DMA_BUS_MODE_INTM_SHIFT);
 	}
 
 	if (dma_cfg->dche)
@@ -207,8 +213,12 @@ static void _dwmac4_dump_dma_regs(void __iomem *ioaddr, u32 channel,
 		readl(ioaddr + DMA_CHAN_CUR_TX_DESC(channel));
 	reg_space[DMA_CHAN_CUR_RX_DESC(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_RX_DESC(channel));
+	reg_space[DMA_CHAN_CUR_TX_BUF_HI_ADDR(channel) / 4] =
+		readl(ioaddr + DMA_CHAN_CUR_TX_BUF_HI_ADDR(channel));
 	reg_space[DMA_CHAN_CUR_TX_BUF_ADDR(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_TX_BUF_ADDR(channel));
+	reg_space[DMA_CHAN_CUR_RX_BUF_HI_ADDR(channel) / 4] =
+		readl(ioaddr + DMA_CHAN_CUR_RX_BUF_HI_ADDR(channel));
 	reg_space[DMA_CHAN_CUR_RX_BUF_ADDR(channel) / 4] =
 		readl(ioaddr + DMA_CHAN_CUR_RX_BUF_ADDR(channel));
 	reg_space[DMA_CHAN_STATUS(channel) / 4] =
@@ -572,4 +582,75 @@ const struct stmmac_dma_ops dwmac410_dma_ops = {
 	.set_bfsize = dwmac4_set_bfsize,
 	.enable_sph = dwmac4_enable_sph,
 	.enable_tbs = dwmac4_enable_tbs,
+};
+
+static void dwmac5_dma_init_tx_chan(void __iomem *ioaddr,
+				    struct stmmac_dma_cfg *dma_cfg,
+				    dma_addr_t dma_tx_phy, u32 chan)
+{
+	u32 txpbl = dma_cfg->txpbl ? 0 : dma_cfg->pbl;
+	u32 value;
+
+	value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
+	value = value | (txpbl << DMA_BUS_MODE_PBL_SHIFT);
+
+	/* Enable OSP to get best performance */
+	value |= DMA_CONTROL_OSP;
+
+	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+#ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
+	writel(upper_32_bits(dma_tx_phy),
+	       ioaddr + DMA_CHAN_TX_BASE_ADDR_HI(chan));
+#endif
+
+	writel(dma_tx_phy, ioaddr + DMA_CHAN_TX_BASE_ADDR(chan));
+}
+
+static int dwmac5_enable_tbs(void __iomem *ioaddr, bool en, u32 chan)
+{
+	u32 value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+	if (en)
+		value |= DMA_CONTROL_EDSE;
+	else
+		value &= ~DMA_CONTROL_EDSE;
+
+	writel(value, ioaddr + DMA_CHAN_TX_CONTROL(chan));
+
+	value = readl(ioaddr + DMA_CHAN_TX_CONTROL(chan)) & DMA_CONTROL_EDSE;
+	if (en && !value)
+		return -EIO;
+
+	return 0;
+}
+
+const struct stmmac_dma_ops dwmac5_dma_ops = {
+	.reset = dwmac4_dma_reset,
+	.init = dwmac4_dma_init,
+	.init_chan = dwmac410_dma_init_channel,
+	.init_rx_chan = dwmac4_dma_init_rx_chan,
+	.init_tx_chan = dwmac5_dma_init_tx_chan,
+	.axi = dwmac4_dma_axi,
+	.dump_regs = dwmac4_dump_dma_regs,
+	.dma_rx_mode = dwmac4_dma_rx_chan_op_mode,
+	.dma_tx_mode = dwmac4_dma_tx_chan_op_mode,
+	.enable_dma_irq = dwmac410_enable_dma_irq,
+	.disable_dma_irq = dwmac4_disable_dma_irq,
+	.start_tx = dwmac4_dma_start_tx,
+	.stop_tx = dwmac4_dma_stop_tx,
+	.start_rx = dwmac4_dma_start_rx,
+	.stop_rx = dwmac4_dma_stop_rx,
+	.dma_interrupt = dwmac4_dma_interrupt,
+	.get_hw_feature = dwmac4_get_hw_feature,
+	.rx_watchdog = dwmac4_rx_watchdog,
+	.set_rx_ring_len = dwmac4_set_rx_ring_len,
+	.set_tx_ring_len = dwmac4_set_tx_ring_len,
+	.set_rx_tail_ptr = dwmac4_set_rx_tail_ptr,
+	.set_tx_tail_ptr = dwmac4_set_tx_tail_ptr,
+	.enable_tso = dwmac4_enable_tso,
+	.qmode = dwmac4_qmode,
+	.set_bfsize = dwmac4_set_bfsize,
+	.enable_tbs = dwmac5_enable_tbs,
+	.enable_sph = dwmac4_enable_sph,
 };

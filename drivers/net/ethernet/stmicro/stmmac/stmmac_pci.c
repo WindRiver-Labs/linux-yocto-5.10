@@ -10,9 +10,10 @@
 *******************************************************************************/
 
 #include <linux/clk-provider.h>
+#include <linux/phy.h>
 #include <linux/pci.h>
 #include <linux/dmi.h>
-
+#include <linux/dwxpcs.h>
 #include "stmmac.h"
 
 struct stmmac_pci_info {
@@ -242,6 +243,7 @@ static void stmmac_pci_remove(struct pci_dev *pdev)
 		break;
 	}
 
+	pci_free_irq_vectors(pdev);
 	pci_disable_device(pdev);
 }
 
