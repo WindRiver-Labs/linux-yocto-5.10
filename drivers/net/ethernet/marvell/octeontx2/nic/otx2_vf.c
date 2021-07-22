@@ -686,8 +686,8 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 err_unreg_netdev:
 	unregister_netdev(netdev);
 err_detach_rsrc:
-	if (hw->lmt_base)
-		iounmap(hw->lmt_base);
+	if (test_bit(CN10K_LMTST, &vf->hw.cap_flag))
+		qmem_free(vf->dev, vf->dync_lmt);
 	otx2_detach_resources(&vf->mbox);
 err_disable_mbox_intr:
 	otx2vf_disable_mbox_intr(vf);

@@ -217,10 +217,9 @@ struct otx2_hw {
 	u8			tx_link;    /* Transmit channel link number */
 	u8			lmac_rx_stats_cnt;
 	u8			lmac_tx_stats_cnt;
-
-#define HW_TSO			BIT_ULL(0)
-#define CN10K_MBOX		BIT_ULL(1)
-#define CN10K_LMTST		BIT_ULL(2)
+#define HW_TSO			0
+#define CN10K_MBOX		1
+#define CN10K_LMTST		2
 	unsigned long		cap_flag;
 
 #define LMT_LINE_SIZE		128
@@ -265,6 +264,16 @@ struct refill_work {
 	struct otx2_nic *pf;
 };
 
+struct otx2_ptp {
+	struct ptp_clock_info ptp_info;
+	struct ptp_clock *ptp_clock;
+	struct otx2_nic *nic;
+
+	struct cyclecounter cycle_counter;
+	struct timecounter time_counter;
+	bool ptp_en;
+};
+
 struct otx2_mac_table {
 	u8 addr[ETH_ALEN];
 	u16 mcam_entry;
@@ -299,16 +308,6 @@ struct otx2_flow_config {
 	struct list_head	flow_list;
 };
 
-struct otx2_ptp {
-	struct ptp_clock_info ptp_info;
-	struct ptp_clock *ptp_clock;
-	struct otx2_nic *nic;
-
-	struct cyclecounter cycle_counter;
-	struct timecounter time_counter;
-	bool ptp_en;
-};
-
 #define OTX2_HW_TIMESTAMP_LEN	8
 
 struct otx2_tc_info {
@@ -324,7 +323,7 @@ struct dev_hw_ops {
 	void	(*sqe_flush)(void *dev, struct otx2_snd_queue *sq,
 			     int size, int qidx);
 	void	(*refill_pool_ptrs)(void *dev, struct otx2_cq_queue *cq);
-	void	(*aura_freeptr)(void *dev, int aura, s64 buf);
+	void	(*aura_freeptr)(void *dev, int aura, u64 buf);
 };
 
 struct otx2_nic {
@@ -612,18 +611,9 @@ static inline u64 otx2_atomic64_add(u64 incr, u64 *ptr)
 	return result;
 }
 
-static inline void cn10k_lmt_flush(u64 val, uint64_t addr)
-{
-	__asm__ volatile(".cpu  generic+lse\n"
-			 "steor %x[rf],[%[rs]]"
-			 : [rf]"+r"(val)
-			 : [rs]"r"(addr));
-}
-
 #else
-#define otx2_write128(lo, hi, addr)
+#define otx2_write128(lo, hi, addr)		writeq((hi) | (lo), addr)
 #define otx2_atomic64_add(incr, ptr)		({ *ptr += incr; })
-#define cn10k_lmt_flush(val, addr)
 #endif
 
 static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
@@ -635,7 +625,7 @@ static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
 
 	tar_addr = (__force u64)otx2_get_regaddr(pfvf, NPA_LF_AURA_BATCH_FREE0);
 	/* LMTID is same as AURA Id */
-	val = aura & 0x7FF;
+	val = (aura & 0x7FF) | BIT_ULL(63);
 	/* Set if [127:64] of last 128bit word has a valid pointer */
 	count_eot = (num_ptrs % 2) ? 0ULL : 1ULL;
 	/* Set AURA ID to free pointer */
@@ -656,6 +646,16 @@ static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
 	cn10k_lmt_flush(val, tar_addr);
 }
 
+static inline void cn10k_aura_freeptr(void *dev, int aura, u64 buf)
+{
+	struct otx2_nic *pfvf = dev;
+	struct otx2_pool *pool;
+	u64 ptrs[2];
+
+	pool = &pfvf->qset.pool[aura];
+	ptrs[1] = buf;
+	__cn10k_aura_freeptr(pfvf, aura, ptrs, 2, pool->lmt_addr);
+}
 /* Alloc pointer from pool/aura */
 static inline u64 otx2_aura_allocptr(struct otx2_nic *pfvf, int aura)
 {
@@ -666,24 +666,13 @@ static inline u64 otx2_aura_allocptr(struct otx2_nic *pfvf, int aura)
 	return otx2_atomic64_add(incr, ptr);
 }
 
-static inline void cn10k_aura_freeptr(void *dev, int aura, s64 buf)
-{
-	struct otx2_nic *pfvf = dev;
-	struct otx2_pool *pool;
-	u64 ptrs[2];
-
-	pool = &pfvf->qset.pool[aura];
-	ptrs[1] = (u64)buf;
-	__cn10k_aura_freeptr(pfvf, aura, ptrs, 2, pool->lmt_addr);
-}
-
 /* Free pointer to a pool/aura */
-static inline void otx2_aura_freeptr(void *dev, int aura, s64 buf)
+static inline void otx2_aura_freeptr(void *dev, int aura, u64 buf)
 {
 	struct otx2_nic *pfvf = dev;
+	void __iomem *addr = otx2_get_regaddr(pfvf, NPA_LF_AURA_OP_FREE0);
 
-	otx2_write128((u64)buf, (u64)aura | BIT_ULL(63),
-		      otx2_get_regaddr(pfvf, NPA_LF_AURA_OP_FREE0));
+	otx2_write128(buf, (u64)aura | BIT_ULL(63), addr);
 }
 
 static inline int otx2_get_pool_idx(struct otx2_nic *pfvf, int type, int idx)
@@ -831,16 +820,17 @@ int otx2_txschq_config(struct otx2_nic *pfvf, int lvl);
 int otx2_txsch_alloc(struct otx2_nic *pfvf);
 int otx2_txschq_stop(struct otx2_nic *pfvf);
 void otx2_sqb_flush(struct otx2_nic *pfvf);
-int otx2_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
-int cn10k_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
-dma_addr_t __otx2_alloc_rbuf(struct otx2_nic *pfvf, struct otx2_pool *pool);
-
-s64 otx2_alloc_buffer(struct otx2_nic *pfvf, struct otx2_cq_queue *cq);
+int __otx2_alloc_rbuf(struct otx2_nic *pfvf, struct otx2_pool *pool,
+		      dma_addr_t *dma);
 int otx2_rxtx_enable(struct otx2_nic *pfvf, bool enable);
 void otx2_ctx_disable(struct mbox *mbox, int type, bool npa);
 int otx2_nix_config_bp(struct otx2_nic *pfvf, bool enable);
 void otx2_cleanup_rx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq);
 void otx2_cleanup_tx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq);
+int otx2_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
+int cn10k_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
+int otx2_alloc_buffer(struct otx2_nic *pfvf, struct otx2_cq_queue *cq,
+		      dma_addr_t *dma);
 
 /* RSS configuration APIs*/
 int otx2_rss_init(struct otx2_nic *pfvf);
@@ -885,11 +875,8 @@ int otx2_set_real_num_queues(struct net_device *netdev,
 int otx2_set_npc_parse_mode(struct otx2_nic *pfvf, bool unbind);
 
 /* MCAM filter related APIs */
-void otx2_do_set_rx_mode(struct work_struct *work);
-int otx2_add_macfilter(struct net_device *netdev, const u8 *mac);
 int otx2_mcam_flow_init(struct otx2_nic *pf);
 int otx2_alloc_mcam_entries(struct otx2_nic *pfvf);
-int otx2_del_macfilter(struct net_device *netdev, const u8 *mac);
 void otx2_mcam_flow_del(struct otx2_nic *pf);
 int otx2_destroy_ntuple_flows(struct otx2_nic *pf);
 int otx2_destroy_mcam_flows(struct otx2_nic *pfvf);
@@ -901,6 +888,8 @@ int otx2_add_flow(struct otx2_nic *pfvf,
 		  struct ethtool_rxnfc *nfc);
 int otx2_remove_flow(struct otx2_nic *pfvf, u32 location);
 void otx2_rss_ctx_flow_del(struct otx2_nic *pfvf, int ctx_id);
+int otx2_del_macfilter(struct net_device *netdev, const u8 *mac);
+int otx2_add_macfilter(struct net_device *netdev, const u8 *mac);
 int otx2_enable_rxvlan(struct otx2_nic *pf, bool enable);
 int otx2_enable_vf_vlan(struct otx2_nic *pf);
 int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf);

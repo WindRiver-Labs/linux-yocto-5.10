@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Physcial Function ethernet driver
+/* Marvell OcteonTx2 RVU Physical Function ethernet driver
  *
  * Copyright (C) 2020 Marvell International Ltd.
  *
@@ -1895,7 +1895,7 @@ static void otx2_set_rx_mode(struct net_device *netdev)
 	queue_work(pf->otx2_wq, &pf->rx_mode_work);
 }
 
-void otx2_do_set_rx_mode(struct work_struct *work)
+static void otx2_do_set_rx_mode(struct work_struct *work)
 {
 	struct otx2_nic *pf = container_of(work, struct otx2_nic, rx_mode_work);
 	struct net_device *netdev = pf->netdev;
@@ -2352,6 +2352,9 @@ static int otx2_get_vf_config(struct net_device *netdev, int vf,
 	struct otx2_nic *pf = netdev_priv(netdev);
 	struct pci_dev *pdev = pf->pdev;
 	struct otx2_vf_config *config;
+
+	if (!netif_running(netdev))
+		return -EAGAIN;
 
 	if (vf >= pci_num_vf(pdev))
 		return -EINVAL;
@@ -2854,8 +2857,8 @@ err_del_mcam_entries:
 err_ptp_destroy:
 	otx2_ptp_destroy(pf);
 err_detach_rsrc:
-	if (hw->lmt_base)
-		iounmap(hw->lmt_base);
+	if (test_bit(CN10K_LMTST, &pf->hw.cap_flag))
+		qmem_free(pf->dev, pf->dync_lmt);
 	otx2_detach_resources(&pf->mbox);
 err_disable_mbox_intr:
 	otx2_disable_mbox_intr(pf);
