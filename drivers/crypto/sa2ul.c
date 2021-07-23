@@ -2398,11 +2398,6 @@ static int sa_ul_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	sa_init_mem(dev_data);
-	ret = sa_dma_init(dev_data);
-	if (ret)
-		goto destroy_dma_pool;
-
 	spin_lock_init(&dev_data->scid_lock);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	saul_base = devm_ioremap_resource(dev, res);
@@ -2417,7 +2412,7 @@ static int sa_ul_probe(struct platform_device *pdev)
 	sa_init_mem(dev_data);
 	ret = sa_dma_init(dev_data);
 	if (ret)
-		goto disable_pm_runtime;
+		goto destroy_dma_pool;
 
 	sa_register_algos(dev);
 
@@ -2445,7 +2440,6 @@ release_dma:
 destroy_dma_pool:
 	dma_pool_destroy(dev_data->sc_pool);
 
-disable_pm_runtime:
 	writel_relaxed(0, saul_base + SA_ENGINE_ENABLE_CONTROL);
 
 	pm_runtime_put_sync(&pdev->dev);
