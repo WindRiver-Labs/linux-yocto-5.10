@@ -130,8 +130,8 @@ static irqreturn_t j721e_pcie_link_irq_handler(int irq, void *priv)
 
 	dev_err(dev, "LINK DOWN!\n");
 
-+	j721e_pcie_intd_writel(pcie, STATUS_CLR_REG_SYS_2, pcie->link_irq_reg_field);
-	 return IRQ_HANDLED;
+	j721e_pcie_intd_writel(pcie, STATUS_CLR_REG_SYS_2, pcie->linkdown_irq_regfield);
+	return IRQ_HANDLED;
 }
 
 static void j721e_pcie_config_link_irq(struct j721e_pcie *pcie)
@@ -613,6 +613,7 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 		clk = devm_clk_get_optional(dev, "pcie_refclk");
 		if (IS_ERR(clk)) {
 			dev_err(dev, "failed to get pcie_refclk\n");
+			ret = PTR_ERR(clk);
 			goto err_pcie_setup;
 		}
 
