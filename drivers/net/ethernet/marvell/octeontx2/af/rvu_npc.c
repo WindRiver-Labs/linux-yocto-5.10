@@ -1518,7 +1518,7 @@ static int npc_apply_custom_kpu(struct rvu *rvu,
 	if (NPC_KPU_VER_MIN(profile->version) <
 	    NPC_KPU_VER_MIN(NPC_KPU_PROFILE_VER)) {
 		dev_warn(rvu->dev,
-			 "Invalid KPU profile version: %d.%d.%d expected vesion <= %d.%d.%d\n",
+			 "Invalid KPU profile version: %d.%d.%d expected version <= %d.%d.%d\n",
 			 NPC_KPU_VER_MAJ(profile->version),
 			 NPC_KPU_VER_MIN(profile->version),
 			 NPC_KPU_VER_PATCH(profile->version),
@@ -1594,7 +1594,7 @@ static int npc_fwdb_detect_load_prfl_img(struct rvu *rvu, uint64_t prfl_sz,
 {
 	struct npc_coalesced_kpu_prfl *img_data = NULL;
 	int i = 0, rc = -EINVAL;
-	void *kpu_prfl_addr;
+	void __iomem *kpu_prfl_addr;
 	u16 offset;
 
 	img_data = (struct npc_coalesced_kpu_prfl __force *)rvu->kpu_prfl_addr;
@@ -1613,7 +1613,7 @@ static int npc_fwdb_detect_load_prfl_img(struct rvu *rvu, uint64_t prfl_sz,
 	while (i < img_data->num_prfl) {
 		/* Profile image offsets are rounded up to next 8 multiple.*/
 		offset = ALIGN_8B_CEIL(offset);
-		kpu_prfl_addr = (void *)((uintptr_t)rvu->kpu_prfl_addr +
+		kpu_prfl_addr = (void __iomem *)((uintptr_t)rvu->kpu_prfl_addr +
 					 offset);
 		rc = npc_load_kpu_prfl_img(rvu, kpu_prfl_addr,
 					   img_data->prfl_sz[i], kpu_profile);

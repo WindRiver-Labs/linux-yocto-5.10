@@ -397,9 +397,9 @@ struct rvu_hwinfo {
 	u8	npc_intfs;         /* No of interfaces */
 	u8	npc_kpu_entries;   /* No of KPU entries */
 	u16	npc_counters;	   /* No of match stats counters */
+	u32	lbk_bufsize;	   /* FIFO size supported by LBK */
 	bool	npc_ext_set;	   /* Extended register set */
 	u64     npc_stat_ena;      /* Match stats enable bit */
-	u32	lbk_bufsize;	   /* FIFO size supported by LBK */
 
 	struct hw_cap    cap;
 	struct rvu_block block[BLK_COUNT]; /* Block info */
@@ -446,17 +446,6 @@ struct rvu_fwdata {
 
 struct ptp;
 
-#define RVU_SWITCH_LBK_CHAN	63
-
-struct rvu_switch {
-	struct mutex switch_lock; /* Serialize flow installation */
-	u32 used_entries;
-	u16 *entry2pcifunc;
-	u16 mode;
-	u16 start_entry;
-};
-
-
 /* KPU profile adapter structure gathering all KPU configuration data and abstracting out the
  * source where it came from.
  */
@@ -466,10 +455,20 @@ struct npc_kpu_profile_adapter {
 	const struct npc_lt_def_cfg	*lt_def;
 	const struct npc_kpu_profile_action	*ikpu; /* array[pkinds] */
 	const struct npc_kpu_profile	*kpu; /* array[kpus] */
-	struct npc_mcam_kex	*mkex;
-	bool				custom; /* true if loadable profile used */
+	struct npc_mcam_kex		*mkex;
+	bool				custom;
 	size_t				pkinds;
 	size_t				kpus;
+};
+
+#define RVU_SWITCH_LBK_CHAN	63
+
+struct rvu_switch {
+	struct mutex switch_lock; /* Serialize flow installation */
+	u32 used_entries;
+	u16 *entry2pcifunc;
+	u16 mode;
+	u16 start_entry;
 };
 
 struct rvu {
@@ -507,7 +506,7 @@ struct rvu {
 	u8			cgx_mapped_pfs;
 	u8			cgx_cnt_max;	 /* CGX port count max */
 	u8			*pf2cgxlmac_map; /* pf to cgx_lmac map */
-	u64			*cgxlmac2pf_map; /* bitmap of mapped pfs for
+	u16			*cgxlmac2pf_map; /* bitmap of mapped pfs for
 						  * every cgx lmac port
 						  */
 	unsigned long		pf_notify_bmap; /* Flags for PF notification */
@@ -772,8 +771,6 @@ int rvu_cgx_nix_cuml_stats(struct rvu *rvu, void *cgxd, int lmac_id, int index,
 			   int rxtxflag, u64 *stat);
 bool is_cgx_config_permitted(struct rvu *rvu, u16 pcifunc);
 bool rvu_cgx_is_pkind_config_permitted(struct rvu *rvu, u16 pcifunc);
-bool is_mac_feature_supported(struct rvu *rvu, int pf, int feature);
-u32  rvu_cgx_get_fifolen(struct rvu *rvu);
 void *rvu_first_cgx_pdata(struct rvu *rvu);
 int cgxlmac_to_pf(struct rvu *rvu, int cgx_id, int lmac_id);
 
@@ -813,19 +810,19 @@ int nix_update_mce_list(struct rvu *rvu, u16 pcifunc,
 			int mce_idx, int mcam_index, bool add);
 void nix_get_mce_list(struct rvu *rvu, u16 pcifunc, int type,
 		      struct nix_mce_list **mce_list, int *mce_idx);
-void rvu_nix_reset_mac(struct rvu_pfvf *pfvf, int pcifunc);
 bool rvu_nix_is_ptp_tx_enabled(struct rvu *rvu, u16 pcifunc);
 struct nix_hw *get_nix_hw(struct rvu_hwinfo *hw, int blkaddr);
 int rvu_get_next_nix_blkaddr(struct rvu *rvu, int blkaddr);
-int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc);
+void rvu_nix_reset_mac(struct rvu_pfvf *pfvf, int pcifunc);
+int nix_get_struct_ptrs(struct rvu *rvu, u16 pcifunc,
+			struct nix_hw **nix_hw, int *blkaddr);
 int rvu_nix_setup_ratelimit_aggr(struct rvu *rvu, u16 pcifunc,
 				 u16 rq_idx, u16 match_id);
 int nix_aq_context_read(struct rvu *rvu, struct nix_hw *nix_hw,
 			struct nix_cn10k_aq_enq_req *aq_req,
 			struct nix_cn10k_aq_enq_rsp *aq_rsp,
 			u16 pcifunc, u8 ctype, u32 qidx);
-int nix_get_struct_ptrs(struct rvu *rvu, u16 pcifunc,
-			struct nix_hw **nix_hw, int *blkaddr);
+int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc);
 
 /* NPC APIs */
 int rvu_npc_init(struct rvu *rvu);
@@ -861,21 +858,23 @@ void rvu_npc_get_mcam_entry_alloc_info(struct rvu *rvu, u16 pcifunc,
 void rvu_npc_get_mcam_counter_alloc_info(struct rvu *rvu, u16 pcifunc,
 					 int blkaddr, int *alloc_cnt,
 					 int *enable_cnt);
+bool is_npc_intf_tx(u8 intf);
+bool is_npc_intf_rx(u8 intf);
+bool is_npc_interface_valid(struct rvu *rvu, u8 intf);
+int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel);
 int npc_flow_steering_init(struct rvu *rvu, int blkaddr);
 const char *npc_get_field_name(u8 hdr);
-int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel);
 int npc_get_bank(struct npc_mcam *mcam, int index);
 void npc_mcam_enable_flows(struct rvu *rvu, u16 target);
 void npc_mcam_disable_flows(struct rvu *rvu, u16 target);
 void npc_enable_mcam_entry(struct rvu *rvu, struct npc_mcam *mcam,
 			   int blkaddr, int index, bool enable);
 void npc_read_mcam_entry(struct rvu *rvu, struct npc_mcam *mcam,
-			 int blkaddr, u16 src,
-			 struct mcam_entry *entry, u8 *intf, u8 *ena);
-bool is_npc_intf_tx(u8 intf);
-bool is_npc_intf_rx(u8 intf);
-bool is_npc_interface_valid(struct rvu *rvu, u8 intf);
-
+			 int blkaddr, u16 src, struct mcam_entry *entry,
+			 u8 *intf, u8 *ena);
+bool is_mac_feature_supported(struct rvu *rvu, int pf, int feature);
+u32  rvu_cgx_get_fifolen(struct rvu *rvu);
+void *rvu_first_cgx_pdata(struct rvu *rvu);
 int npc_get_nixlf_mcam_index(struct npc_mcam *mcam, u16 pcifunc, int nixlf,
 			     int type);
 bool is_mcam_entry_enabled(struct rvu *rvu, struct npc_mcam *mcam, int blkaddr,
@@ -887,6 +886,14 @@ int rvu_cpt_register_interrupts(struct rvu *rvu);
 void rvu_cpt_unregister_interrupts(struct rvu *rvu);
 int rvu_cpt_lf_teardown(struct rvu *rvu, u16 pcifunc, int blkaddr, int lf,
 			int slot);
+
+/* CN10K RVU */
+int rvu_set_channels_base(struct rvu *rvu);
+void rvu_program_channels(struct rvu *rvu);
+
+/* CN10K RVU - LMT*/
+void rvu_reset_lmt_map_tbl(struct rvu *rvu, u16 pcifunc);
+void rvu_apr_block_cn10k_init(struct rvu *rvu);
 
 /* TIM APIs */
 int rvu_tim_init(struct rvu *rvu);
@@ -927,14 +934,6 @@ bool is_parse_nibble_config_valid(struct rvu *rvu,
 int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 			   u64 pkind);
 void rvu_tim_hw_fixes(struct rvu *rvu, int blkaddr);
-
-/* CN10K RVU */
-int rvu_set_channels_base(struct rvu *rvu);
-void rvu_program_channels(struct rvu *rvu);
-
-/* CN10K RVU - LMT*/
-void rvu_reset_lmt_map_tbl(struct rvu *rvu, u16 pcifunc);
-void rvu_apr_block_cn10k_init(struct rvu *rvu);
 
 /* CN10K NIX */
 void rvu_nix_block_cn10k_init(struct rvu *rvu, struct nix_hw *nix_hw);
