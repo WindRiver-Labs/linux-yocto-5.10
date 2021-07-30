@@ -202,7 +202,7 @@ static bool mvl_mhu_last_tx_done(struct mbox_chan *chan)
 
 	spin_lock_irqsave(&mhu->link_lock, flags);
 	val = readq_relaxed(mhu->base + SCP_TO_AP0_MBOX_RINT);
-	spin_unlock_irqstore(&mhu->link_lock, flags);
+	spin_unlock_irqrestore(&mhu->link_lock, flags);
 
 	dev_dbg(mhu->dev, "%s\n", __func__);
 
@@ -216,7 +216,7 @@ static int mvl_mhu_send_data(struct mbox_chan *chan, void *data)
 
 	spin_lock_irqsave(&mhu->link_lock, flags);
 	writeq_relaxed(DONT_CARE_DATA, mhu->base + AP0_TO_SCP_MBOX);
-	spin_unlock_irqstore(&mhu->link_lock, flags);
+	spin_unlock_irqrestore(&mhu->link_lock, flags);
 
 	return 0;
 }
