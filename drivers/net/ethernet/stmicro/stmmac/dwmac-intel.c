@@ -320,7 +320,6 @@ static int intel_crosststamp(ktime_t *device,
 	u32 num_snapshot;
 	u32 gpio_value;
 	u32 acr_value;
-	int ret;
 	u32 v;
 	int i;
 
