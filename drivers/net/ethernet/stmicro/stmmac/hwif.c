@@ -338,7 +338,9 @@ int stmmac_hwif_init(struct stmmac_priv *priv)
 		mac->mode = mac->mode ? : entry->mode;
 		mac->tc = mac->tc ? : entry->tc;
 		mac->mmc = mac->mmc ? : entry->mmc;
-		mac->mdio_intr_en = mac->mdio_intr_en ? : entry->mdio_intr_en;
+
+		if (!mac->mdio_intr_en)
+			mac->mdio_intr_en = entry->mdio_intr_en;
 
 		if (mac->mdio_intr_en)
 			init_waitqueue_head(&mac->mdio_busy_wait);
