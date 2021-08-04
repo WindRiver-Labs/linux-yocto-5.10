@@ -12,6 +12,7 @@
 #include <dt-bindings/mailbox/nxp-llce-mb.h>
 #include <dt-bindings/pinctrl/s32g-pinctrl.h>
 #include <dt-bindings/clock/s32g-scmi-clock.h>
+#include <dt-bindings/reset/s32g-scmi-reset.h>
 #include <dt-bindings/net/fsl-s32g-pfeng.h>
 
 / {
@@ -97,10 +98,16 @@
 			     <GIC_SPI 196 IRQ_TYPE_EDGE_RISING>,
 			     <GIC_SPI 197 IRQ_TYPE_EDGE_RISING>;
 		interrupt-names = "bmu", "upegpt", "safety";
+		resets = <&reset S32GEN1_SCMI_RST_PART2>;
+		reset-names = "pfe_part";
 		clocks = <&clks S32G_SCMI_CLK_PFE_AXI>,
 			 <&clks S32G_SCMI_CLK_PFE_PE>,
 			 <&clks S32G_SCMI_CLK_PFE_TS>;
 		clock-names = "pfe_sys", "pfe_pe", "pfe_ts";
+		phys = <&serdes1 PHY_TYPE_XPCS 0 0>,
+			 <&serdes1 PHY_TYPE_XPCS 1 1>,
+			 <&serdes0 PHY_TYPE_XPCS 1 1>;
+		phy-names = "emac0_xpcs", "emac1_xpcs", "emac2_xpcs";
 		dma-coherent;
 		memory-region = <&pfe_reserved_bmu2>,
 				<&pfe_reserved>,
@@ -131,7 +138,7 @@
 			status = "okay";
 			interrupts = <GIC_SPI 191 IRQ_TYPE_EDGE_RISING>;
 			reg = <1>;
-			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_EXCLUSIVE>;
+			fsl,pfeng-hif-mode = <PFENG_HIF_MODE_SHARED>;
 		};
 
 		/* PFE_HIF_2 */
@@ -254,7 +261,7 @@
 			status = "okay";
 			local-mac-address = [ 00 04 9F BE EF 00 ];
 			fsl,pfeng-if-name = "pfe0";
-			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_TX_INJECT>;
 			fsl,pfeng-emac-link = <&pfe_emac0>;
 			fsl,pfeng-hif-channels = <&pfe_hif0>;
 		};
@@ -267,7 +274,7 @@
 			status = "okay";
 			local-mac-address = [ 00 04 9F BE EF 01 ];
 			fsl,pfeng-if-name = "pfe1";
-			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_TX_INJECT>;
 			fsl,pfeng-emac-link = <&pfe_emac1>;
 			fsl,pfeng-hif-channels = <&pfe_hif1>;
 		};
@@ -280,9 +287,21 @@
 			status = "okay";
 			local-mac-address = [ 00 04 9F BE EF 02 ];
 			fsl,pfeng-if-name = "pfe2";
-			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_TX_CLASS>;
 			fsl,pfeng-emac-link = <&pfe_emac2>;
 			fsl,pfeng-hif-channels = <&pfe_hif2>;
+		};
+
+		/* Logical network interface 'aux0' */
+		pfe_aux0: ethernet@3 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			local-mac-address = [ 00 04 9F BE EF 80 ];
+			fsl,pfeng-if-name = "aux0";
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_AUX>;
+			fsl,pfeng-hif-channels = <&pfe_hif1>;
 		};
 	};
 
@@ -296,6 +315,8 @@
 		dma-coherent;
 		memory-region = <&pfe_reserved_slave>,
 				<&pfe_reserved_bdr_slave>;
+		nvmem-cells = <&soc_revision>;
+		nvmem-cell-names = "soc_revision";
 		fsl,pfeng-master-hif-channel = <0>;
 		status = "disabled";
 
@@ -311,17 +332,28 @@
 			fsl,pfeng-ihc;
 		};
 
-
 		/* Logical network interface 'pfe0sl' */
-		pfesl_logif0: ethernet@0 {
+		pfesl_logif0: ethernet@10 {
 			compatible = "fsl,pfeng-logif";
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
 			local-mac-address = [ 00 04 9F BE FF 10 ];
 			fsl,pfeng-if-name = "pfe0sl";
-			fsl,pfeng-logif-mode = <0>;
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_TX_INJECT>;
 			fsl,pfeng-emac-id = <0>; /* PFE_EMAC_0 */
+			fsl,pfeng-hif-channels = <&pfesl_hif3>;
+		};
+
+		/* Logical network interface 'aux0sl' */
+		pfesl_aux0: ethernet@11 {
+			compatible = "fsl,pfeng-logif";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+			local-mac-address = [ 00 04 9F BE FF 80 ];
+			fsl,pfeng-if-name = "aux0sl";
+			fsl,pfeng-logif-mode = <PFENG_LOGIF_MODE_AUX>;
 			fsl,pfeng-hif-channels = <&pfesl_hif3>;
 		};
 	};

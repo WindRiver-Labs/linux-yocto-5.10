@@ -81,6 +81,7 @@ struct hse_drvdata {
 	struct list_head hmac_key_ring;
 	struct list_head aes_key_ring;
 	spinlock_t key_ring_lock; /* covers key slot acquisition */
+	u32 rng_srv_id;
 };
 
 /**
@@ -117,6 +118,18 @@ static void hse_print_fw_version(struct device *dev)
 
 	dev_info(dev, "firmware type %d, version %d.%d.%d\n", fw_ver->fw_type,
 		 fw_ver->major, fw_ver->minor, fw_ver->patch);
+
+	drv->rng_srv_id = HSE_SRV_ID_GET_RANDOM_NUM;
+	if (fw_ver->major == 0u && fw_ver->minor == 9u &&
+	    (fw_ver->patch == 0u || fw_ver->patch == 1u))
+		drv->rng_srv_id |= 0x00A50000ul;
+}
+
+u32 _get_rng_srv_id(struct device *dev)
+{
+	struct hse_drvdata *drv = dev_get_drvdata(dev);
+
+	return drv->rng_srv_id;
 }
 
 /**
@@ -515,20 +528,16 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 		return -EBUSY;
 	}
 
+	drv->channel_busy[channel] = true;
+
+	spin_unlock(&drv->tx_lock);
+
 	drv->rx_cbk[channel].fn = rx_cbk;
 	drv->rx_cbk[channel].ctx = ctx;
 
 	hse_sync_srv_desc(dev, channel, srv_desc);
 
 	err = hse_mu_msg_send(drv->mu, channel, drv->srv_desc[channel].dma);
-	if (unlikely(err)) {
-		spin_unlock(&drv->tx_lock);
-		return err;
-	}
-
-	drv->channel_busy[channel] = true;
-
-	spin_unlock(&drv->tx_lock);
 
 	return err;
 }
@@ -573,25 +582,23 @@ int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 		return -EBUSY;
 	}
 
+	drv->channel_busy[channel] = true;
+
+	spin_unlock(&drv->tx_lock);
+
 	drv->sync[channel].done = &done;
 	drv->sync[channel].reply = &reply;
 
 	hse_sync_srv_desc(dev, channel, srv_desc);
 
 	err = hse_mu_msg_send(drv->mu, channel, drv->srv_desc[channel].dma);
-	if (unlikely(err)) {
-		spin_unlock(&drv->tx_lock);
+	if (unlikely(err))
 		return err;
-	}
-
-	drv->channel_busy[channel] = true;
-
-	spin_unlock(&drv->tx_lock);
 
 	err = wait_for_completion_interruptible(&done);
 	if (err) {
-		drv->sync[channel].done = NULL;
-		dev_dbg(dev, "%s: request interrupted: %d\n", __func__, err);
+		dev_dbg(dev, "%s: request on channel %d interrupted: %d\n",
+			__func__, channel, err);
 		return err;
 	}
 
@@ -631,9 +638,19 @@ static void hse_srv_rsp_dispatch(struct device *dev, u8 channel)
 	}
 
 	if (drv->rx_cbk[channel].fn) {
-		drv->rx_cbk[channel].fn(err, drv->rx_cbk[channel].ctx);
+		void (*rx_cbk)(int err, void *ctx) = drv->rx_cbk[channel].fn;
+		void *ctx = drv->rx_cbk[channel].ctx;
+
 		drv->rx_cbk[channel].fn = NULL;
-	} else if (drv->sync[channel].done) {
+		drv->rx_cbk[channel].ctx = NULL;
+
+		drv->channel_busy[channel] = false;
+
+		rx_cbk(err, ctx); /* upper layer RX callback */
+		return;
+	}
+
+	if (drv->sync[channel].done) {
 		*drv->sync[channel].reply = err;
 		wmb(); /* ensure reply is written before calling complete */
 
@@ -706,13 +723,11 @@ static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 			void *ctx = drv->rx_cbk[channel].ctx;
 
 			drv->rx_cbk[channel].fn(-ECANCELED, ctx);
-			drv->rx_cbk[channel].fn = NULL;
 		} else if (drv->sync[channel].done) {
 			*drv->sync[channel].reply = -ECANCELED;
 			wmb(); /* ensure reply is written before complete */
 
 			complete(drv->sync[channel].done);
-			drv->sync[channel].done = NULL;
 		}
 
 		if (drv->channel_busy[channel])
@@ -814,11 +829,13 @@ static int hse_probe(struct platform_device *pdev)
 	if (unlikely(err))
 		goto err_probe_failed;
 
-	/* register kernel crypto algorithms */
-	hse_ahash_register(dev, &drv->ahash_algs);
-	hse_skcipher_register(dev, &drv->skcipher_algs);
-	hse_aead_register(dev, &drv->aead_algs);
-
+	/* register kernel crypto algorithms and hwrng */
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AHASH))
+		hse_ahash_register(dev, &drv->ahash_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_SKCIPHER))
+		hse_skcipher_register(dev, &drv->skcipher_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
+		hse_aead_register(dev, &drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
 		hse_hwrng_register(dev);
 
@@ -839,14 +856,13 @@ static int hse_remove(struct platform_device *pdev)
 	hse_mu_irq_disable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
 	hse_mu_irq_disable(drv->mu, HSE_INT_SYS_EVENT, HSE_EVT_MASK_ALL);
 
-	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO))
-		return 0;
-
-	/* unregister algorithms */
-	hse_ahash_unregister(&drv->ahash_algs);
-	hse_skcipher_unregister(&drv->skcipher_algs);
-	hse_aead_unregister(&drv->aead_algs);
-
+	/* unregister kernel crypto algorithms and hwrng */
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AHASH))
+		hse_ahash_unregister(&drv->ahash_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_SKCIPHER))
+		hse_skcipher_unregister(&drv->skcipher_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
+		hse_aead_unregister(&drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
 		hse_hwrng_unregister(dev);
 
