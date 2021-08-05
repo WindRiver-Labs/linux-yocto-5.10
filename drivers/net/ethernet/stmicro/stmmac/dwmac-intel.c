@@ -610,6 +610,9 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
 
 	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
+		plat->mdio_bus_data->has_xpcs = true;
+		plat->mdio_bus_data->xpcs_an_inband = true;
+
 		plat->xpcs_pdata = devm_kzalloc(&pdev->dev,
 						sizeof(*plat->xpcs_pdata),
 						GFP_KERNEL);
@@ -623,6 +626,10 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 		plat->intel_bi->mdio_addr = 0x16;
 		plat->intel_bi->platform_data = plat->xpcs_pdata;
 	}
+
+	/* Ensure mdio bus scan skips intel serdes and pcs-xpcs */
+	plat->mdio_bus_data->phy_mask = 1 << INTEL_MGBE_ADHOC_ADDR;
+	plat->mdio_bus_data->phy_mask |= 1 << INTEL_MGBE_XPCS_ADDR;
 
 	plat->int_snapshot_num = AUX_SNAPSHOT1;
 	plat->ext_snapshot_num = AUX_SNAPSHOT0;
