@@ -444,17 +444,18 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 		min_idx = mmc_first_nonreserved_index();
 		max_idx = 0;
 
-	alias_id = mmc_get_reserved_index(host);
-	if (alias_id >= 0)
-		err = ida_simple_get(&mmc_host_ida, alias_id,
-					alias_id + 1, GFP_KERNEL);
-	else
-		err = ida_simple_get(&mmc_host_ida,
-					mmc_first_nonreserved_index(),
-					0, GFP_KERNEL);
-	if (err < 0) {
-		kfree(host);
-		return NULL;
+		alias_id = mmc_get_reserved_index(host);
+		if (alias_id >= 0)
+			index = ida_simple_get(&mmc_host_ida, alias_id,
+						alias_id + 1, GFP_KERNEL);
+		else
+			index = ida_simple_get(&mmc_host_ida,
+						mmc_first_nonreserved_index(),
+						0, GFP_KERNEL);
+		if (index < 0) {
+			kfree(host);
+			return NULL;
+		}
 	}
 
 	host->index = index;
