@@ -151,7 +151,6 @@ void imx_cscmr1_fixup(u32 *val)
 #ifndef MODULE
 
 static bool imx_keep_uart_clocks;
-static int imx_enabled_uart_clocks;
 static bool imx_uart_clks_on;
 
 static int __init imx_keep_uart_clocks_param(char *str)
