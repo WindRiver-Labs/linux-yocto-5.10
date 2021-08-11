@@ -151,9 +151,12 @@ ssize_t HDCPTX_Status_store(struct device *dev,
 		mhdp->hdcp.state = HDCP_STATE_DISABLING;
     else if (strncmp(buf, "HDCP_STATE_AUTH_FAILED", count - 1) == 0)
 		mhdp->hdcp.state = HDCP_STATE_AUTH_FAILED;
-    else
+    else {
 		dev_err(dev, "%s &hdp->state invalid\n", __func__);
 		return -1;
+    }
+    return ret;
+
 }
 
 static void hdmi_sink_config(struct cdns_mhdp_device *mhdp)
