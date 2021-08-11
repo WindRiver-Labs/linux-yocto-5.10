@@ -91,10 +91,6 @@
 #define XEL_HEADER_IP_LENGTH_OFFSET	16	/* IP Length Offset */
 
 #define TX_TIMEOUT		(60 * HZ)	/* Tx timeout is 60 seconds. */
-#define ALIGNMENT		4
-
-/* BUFFER_ALIGN(adr) calculates the number of bytes to the next alignment. */
-#define BUFFER_ALIGN(adr) ((ALIGNMENT - ((uintptr_t)adr)) % ALIGNMENT)
 
 #ifdef __BIG_ENDIAN
 #define xemaclite_readl		ioread32be
