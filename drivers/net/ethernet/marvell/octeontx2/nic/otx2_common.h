@@ -285,7 +285,6 @@ struct otx2_mac_table {
 };
 
 struct otx2_flow_config {
-	u16			entry[NPC_MAX_NONCONTIG_ENTRIES];
 	u16			*flow_ent;
 	u16			*def_ent;
 	u16			nr_flows;
@@ -296,16 +295,13 @@ struct otx2_flow_config {
 #define OTX2_MCAM_COUNT		(OTX2_DEFAULT_FLOWCOUNT + \
 				 OTX2_MAX_UNICAST_FLOWS + \
 				 OTX2_MAX_VLAN_FLOWS)
-	u16			vf_vlan_offset;
-	u16			ntuple_offset;
 	u16			unicast_offset;
 	u16			rx_vlan_offset;
+	u16			vf_vlan_offset;
 #define OTX2_PER_VF_VLAN_FLOWS	2 /* Rx + Tx per VF */
 #define OTX2_VF_VLAN_RX_INDEX	0
 #define OTX2_VF_VLAN_TX_INDEX	1
-	u16			tc_flower_offset;
-	u16                     ntuple_max_flows;
-	u16			tc_max_flows;
+	u16                     max_flows;
 	u8			dmacflt_max_flows;
 	u8			*bmap_to_dmacindex;
 	unsigned long		dmacflt_bmap;
@@ -318,8 +314,7 @@ struct otx2_tc_info {
 	/* hash table to store TC offloaded flows */
 	struct rhashtable		flow_table;
 	struct rhashtable_params	flow_ht_params;
-	DECLARE_BITMAP(tc_entries_bitmap, OTX2_MAX_TC_FLOWS);
-	unsigned long			num_entries;
+	unsigned long			*tc_entries_bitmap;
 };
 
 struct dev_hw_ops {
@@ -395,12 +390,12 @@ struct otx2_nic {
 	u16			tot_lmt_lines;
 	u16			npa_lmt_lines;
 	u32			nix_lmt_size;
-	struct otx2_tc_info	tc_info;
 	unsigned long		rq_bmap;
 
 	struct otx2_ptp		*ptp;
 	struct hwtstamp_config	tstamp;
 	struct otx2_mac_table	*mac_table;
+	struct otx2_tc_info	tc_info;
 	struct workqueue_struct	*otx2_ndo_wq;
 	struct work_struct	otx2_rx_mode_work;
 
