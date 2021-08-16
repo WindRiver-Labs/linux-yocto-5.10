@@ -586,9 +586,6 @@ int rvu_mbox_handler_cgx_mac_addr_add(struct rvu *rvu,
 	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
 		return -EPERM;
 
-	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
-		return -EPERM;
-
 	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
 	rc = cgx_lmac_addr_add(cgx_id, lmac_id, req->mac_addr);
 	if (rc >= 0) {
