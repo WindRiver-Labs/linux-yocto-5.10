@@ -364,13 +364,6 @@ try_again:
 	count  = min_t(unsigned, count, hidg->report_length);
 
 	spin_unlock_irqrestore(&hidg->write_spinlock, flags);
-	if (req) {
-		status = copy_from_user(req->buf, buffer, count);
-	} else {
-		ERROR(hidg->func.config->cdev, "hidg->req is NULL\n");
-		status = -ESHUTDOWN;
-		goto release_write_pending;
-	}
 
 	if (!req) {
 		ERROR(hidg->func.config->cdev, "hidg->req is NULL\n");
@@ -411,8 +404,9 @@ try_again:
 		status = -ESHUTDOWN;
 		goto release_write_pending;
 	}
+
 	status = usb_ep_queue(hidg->in_ep, req, GFP_ATOMIC);
-	if (status < 0) 
+	if (status < 0)
 		goto release_write_pending;
 	else
 		status = count;
