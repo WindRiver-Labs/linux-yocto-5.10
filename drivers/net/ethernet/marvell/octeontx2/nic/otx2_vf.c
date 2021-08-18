@@ -708,6 +708,10 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto err_unreg_netdev;
 
+	err = otx2_register_dl(vf);
+	if (err)
+		goto err_unreg_netdev;
+
 	/* Enable pause frames by default */
 	vf->flags |= OTX2_FLAG_RX_PAUSE_ENABLED;
 	vf->flags |= OTX2_FLAG_TX_PAUSE_ENABLED;
@@ -749,8 +753,10 @@ static void otx2vf_remove(struct pci_dev *pdev)
 
 	cancel_work_sync(&vf->reset_task);
 
-	if (otx2smqvf_remove(vf))
+	if (otx2smqvf_remove(vf)) {
+		otx2_unregister_dl(vf);
 		unregister_netdev(netdev);
+	}
 
 	if (vf->otx2_wq)
 		destroy_workqueue(vf->otx2_wq);

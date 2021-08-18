@@ -18,11 +18,13 @@
 #include <linux/timecounter.h>
 #include <linux/soc/marvell/octeontx2/asm.h>
 #include <net/pkt_cls.h>
+#include <net/devlink.h>
 
 #include <mbox.h>
 #include <npc.h>
 #include "otx2_reg.h"
 #include "otx2_txrx.h"
+#include "otx2_devlink.h"
 #include <rvu_trace.h>
 
 /* PCI device IDs */
@@ -422,6 +424,9 @@ struct otx2_nic {
 #define OTX2_HIGIG2_HDR_LEN			16
 #define OTX2_FDSA_HDR_LEN			4
 	u32			addl_mtu;
+
+	/* Devlink */
+	struct otx2_devlink	*dl;
 };
 
 static inline bool is_otx2_lbkvf(struct pci_dev *pdev)
@@ -883,7 +888,7 @@ int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr);
 /* MCAM filter related APIs */
 int otx2_mcam_flow_init(struct otx2_nic *pf);
 int otx2vf_mcam_flow_init(struct otx2_nic *pfvf);
-int otx2_alloc_mcam_entries(struct otx2_nic *pfvf);
+int otx2_alloc_mcam_entries(struct otx2_nic *pfvf, u16 count);
 void otx2_mcam_flow_del(struct otx2_nic *pf);
 int otx2_destroy_ntuple_flows(struct otx2_nic *pf);
 int otx2_destroy_mcam_flows(struct otx2_nic *pfvf);
@@ -914,6 +919,7 @@ int otx2_init_tc(struct otx2_nic *nic);
 void otx2_shutdown_tc(struct otx2_nic *nic);
 int otx2_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		  void *type_data);
+int otx2_tc_alloc_ent_bitmap(struct otx2_nic *nic);
 /* CGX/RPM DMAC filters support */
 int otx2_dmacflt_get_max_cnt(struct otx2_nic *pf);
 int otx2_dmacflt_add(struct otx2_nic *pf, const u8 *mac, u8 bit_pos);
