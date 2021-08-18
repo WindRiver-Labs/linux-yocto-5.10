@@ -23,15 +23,21 @@ properties:
       represents the ID of the channel.
       Channel types
         * S32G_LLCE_CAN_CONF_MB
+        * S32G_LLCE_CAN_LOGGER_MB
         * S32G_LLCE_CAN_RX_MB
         * S32G_LLCE_CAN_TX_MB
     const: 2
 
   memory-region:
     description:
-      phandle to a node describing the shared memory (System RAM memory)
-      used by LLCE accelelerator.
-    maxItems: 1
+      A set of phandles to memory regions corresponding to LLCE shared memory and LLCE status region.
+    maxItems: 2
+    minItems: 2
+
+  memory-region-names:
+    items:
+      - const: shmem
+      - const: status
 
   reg-names:
     items:
@@ -59,6 +65,7 @@ properties:
       - const: rxout_fifo_8_15
       - const: txack_fifo_0_7
       - const: txack_fifo_8_15
+      - const: logger_rx
 
   interrupts:
     items:
@@ -68,6 +75,7 @@ properties:
       - description: Shared interrupt line for RXOUT 8-15 fifos
       - description: Shared interrupt line for TXACK 0-7 fifos
       - description: Shared interrupt line for TXACK 8-15 fifos
+      - description: Interrupt line for LLCE CAN logger
 
   clock-names:
     const: llce_sys
@@ -116,19 +124,22 @@ examples:
         clocks = <&clks S32G_SCMI_CLK_LLCE_SYS>;
         clock-names = "llce_sys";
 
-        memory-region = <&llce_shmem>;
+        memory-region = <&llce_shmem>, <&llce_boot_status>;
+        memory-region-names = "shmem", "status";
         interrupts = <0 174 IRQ_TYPE_LEVEL_HIGH>,
             <0 175 IRQ_TYPE_LEVEL_HIGH>,
             <0 176 IRQ_TYPE_LEVEL_HIGH>,
             <0 177 IRQ_TYPE_LEVEL_HIGH>,
             <0 182 IRQ_TYPE_LEVEL_HIGH>,
-            <0 183 IRQ_TYPE_LEVEL_HIGH>;
+            <0 183 IRQ_TYPE_LEVEL_HIGH>,
+            <0 184 IRQ_TYPE_LEVEL_HIGH>;
         interrupt-names = "rxin_fifo_0_7",
             "rxin_fifo_8_15",
             "rxout_fifo_0_7",
             "rxout_fifo_8_15",
             "txack_fifo_0_7",
-            "txack_fifo_8_15";
+            "txack_fifo_8_15",
+            "logger_rx";
         status = "okay";
       };
     };

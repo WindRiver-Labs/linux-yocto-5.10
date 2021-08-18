@@ -22,6 +22,7 @@ struct llce_chan_priv {
 	unsigned int index;
 	enum llce_chan_state state;
 	spinlock_t lock;
+	void *data;
 };
 
 struct llce_tx_msg {
@@ -40,7 +41,7 @@ enum llce_rx_cmd {
 	LLCE_ENABLE_RX_NOTIF,
 	LLCE_IS_RX_EMPTY,
 	LLCE_POP_RX,
-	LLCE_RELESE_RX_INDEX,
+	LLCE_RELEASE_RX_INDEX,
 	LLCE_ERROR,
 };
 
@@ -52,11 +53,17 @@ struct llce_rx_msg {
 		struct {
 			uint32_t index;
 			struct llce_can_mb *can_mb;
+			bool skip;
 		} rx_pop;
 		struct {
 			uint32_t index;
 		} rx_release;
 	};
+};
+
+struct llce_logger_msg {
+	struct llce_can_mb *frame;
+	u8 hw_ctrl;
 };
 
 #endif

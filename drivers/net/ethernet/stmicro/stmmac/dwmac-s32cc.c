@@ -50,8 +50,8 @@ struct s32cc_priv_data {
 	const struct s32gen1_xpcs_ops *xpcs_ops;
 };
 
-int xpcs_config(struct mdio_xpcs_args *xpcs,
-		const struct phylink_link_state *state)
+static int xpcs_config(struct mdio_xpcs_args *xpcs,
+		       const struct phylink_link_state *state)
 {
 	struct phylink_link_state sgmii_state = { 0 };
 	struct s32cc_priv_data *gmac = (struct s32cc_priv_data *)xpcs->bus;
@@ -77,8 +77,8 @@ int xpcs_config(struct mdio_xpcs_args *xpcs,
 	return 0;
 }
 
-int xpcs_get_state(struct mdio_xpcs_args *xpcs,
-		   struct phylink_link_state *state)
+static int xpcs_get_state(struct mdio_xpcs_args *xpcs,
+			  struct phylink_link_state *state)
 {
 	struct s32cc_priv_data *gmac = (struct s32cc_priv_data *)xpcs->bus;
 
@@ -301,6 +301,10 @@ static int s32cc_dwmac_probe(struct platform_device *pdev)
 		return PTR_ERR(plat_dat);
 
 	plat_dat->bsp_priv = gmac;
+
+	/* Enable AXI fixup call */
+	plat_dat->axi = devm_kzalloc(&pdev->dev, sizeof(struct stmmac_axi),
+				     GFP_KERNEL);
 
 	if (plat_dat->phy_interface != PHY_INTERFACE_MODE_SGMII &&
 	    !phy_interface_mode_is_rgmii(plat_dat->phy_interface)) {

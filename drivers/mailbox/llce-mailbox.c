@@ -13,9 +13,13 @@
 #include <linux/mailbox/nxp-llce/llce_can.h>
 #include <linux/mailbox/nxp-llce/llce_interface_fifo.h>
 #include <linux/mailbox/nxp-llce/llce_mailbox.h>
+#include <linux/mailbox_client.h>
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
+#include <linux/of_address.h>
 #include <linux/of_platform.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/once.h>
 #include <linux/platform_device.h>
 #include <linux/processor.h>
 #include <linux/slab.h>
@@ -24,6 +28,7 @@
 #include "mailbox.h"
 
 #define LLCE_FIFO_SIZE			0x400
+#define LLCE_RXMBEXTENSION_OFFSET	0x50
 
 #define LLCE_NFIFO_WITH_IRQ		16
 #define LLCE_RXIN_N_FIFO		20
@@ -37,13 +42,21 @@
 #define LLCE_CAN_RXOUT_ICSR_8_15	17
 #define LLCE_CAN_TXACK_ICSR_0_7		22
 #define LLCE_CAN_TXACK_ICSR_8_15	23
+#define LLCE_CAN_LOGGER_ICSR		24
 #define LLCE_CAN_ICSR_N_ACK		8
 
 #define LLCE_CAN_ICSR_RXIN_INDEX	0
 #define LLCE_CAN_ICSR_RXOUT_INDEX	1
 #define LLCE_CAN_ICSR_TXACK_INDEX	2
 
-#define LLCE_CAN_COMPATIBLE "nxp,s32g-llce-can"
+#define LLCE_CAN_LOGGER_IN_FIFO		16
+#define LLCE_CAN_LOGGER_OUT_FIFO	17
+
+#define LLCE_LOGGER_ICSR_IRQ		BIT(5)
+
+#define LLCE_CAN_COMPATIBLE		"nxp,s32g-llce-can"
+#define LLCE_SHMEM_REG_NAME		"shmem"
+#define LLCE_STATUS_REG_NAME		"status"
 
 #define LLCE_ARR_ENTRY(BASE_INDEX, ENTRY) \
 	[ENTRY - BASE_INDEX] = __stringify_1(ENTRY)
@@ -60,17 +73,24 @@ struct llce_icsr {
 };
 
 struct llce_fifoirq {
-	int irq0;
-	int irq8;
+	int num;
+	const char *name;
+	irq_handler_t handler;
+};
+
+struct llce_pair_irq {
+	struct llce_fifoirq irq0;
+	struct llce_fifoirq irq8;
 };
 
 struct llce_mb {
 	struct mbox_controller controller;
-	struct llce_fifoirq rxin_irqs;
-	struct llce_fifoirq rxout_irqs;
-	struct llce_fifoirq txack_irqs;
+	struct llce_pair_irq rxin_irqs;
+	struct llce_pair_irq rxout_irqs;
+	struct llce_pair_irq txack_irqs;
 	struct mutex txack_lock;
 	struct llce_can_shared_memory *sh_mem;
+	void __iomem *status;
 	void __iomem *rxout_fifo;
 	void __iomem *rxin_fifo;
 	void __iomem *txack_fifo;
@@ -78,15 +98,10 @@ struct llce_mb {
 	void __iomem *blrin_fifo;
 	void __iomem *icsr;
 	struct clk *clk;
+	struct device *dev;
 	DECLARE_BITMAP(chans_map, LLCE_NFIFO_WITH_IRQ);
+	struct llce_fifoirq logger_irq;
 	bool suspended;
-};
-
-struct sram_pool {
-	struct gen_pool *pool;
-	size_t size;
-	unsigned long vaddr;
-	const char *name;
 };
 
 struct llce_mb_desc {
@@ -95,11 +110,28 @@ struct llce_mb_desc {
 	void (*shutdown)(struct mbox_chan *chan);
 };
 
+struct llce_logger_data {
+	bool has_leftover;
+	struct llce_can_mb *frame;
+	u32 index;
+};
+
 static int llce_rx_startup(struct mbox_chan *chan);
 static int llce_tx_startup(struct mbox_chan *chan);
 static void llce_rx_shutdown(struct mbox_chan *chan);
 static void llce_tx_shutdown(struct mbox_chan *chan);
+static int llce_hif_startup(struct mbox_chan *chan);
+static int llce_logger_startup(struct mbox_chan *chan);
+static void llce_logger_shutdown(struct mbox_chan *chan);
 static int process_rx_cmd(struct mbox_chan *chan, struct llce_rx_msg *msg);
+static int process_logger_cmd(struct mbox_chan *chan, struct llce_rx_msg *msg);
+
+/**
+ * Platform configuration can be skipped for cases when the HIF is completely
+ * managed by another software
+ */
+static bool config_platform = true;
+module_param(config_platform, bool, 0660);
 
 const char *llce_errors[] = {
 	LLCE_ERROR_ENTRY(LLCE_ERROR_TXACK_FIFO_FULL),
@@ -209,6 +241,7 @@ const char *llce_modules[] = {
 static const struct llce_mb_desc mb_map[] = {
 	[S32G_LLCE_HIF_CONF_MB] = {
 		.nchan = 2,
+		.startup = llce_hif_startup,
 	},
 	[S32G_LLCE_CAN_CONF_MB] = {
 		.nchan = 16,
@@ -222,6 +255,11 @@ static const struct llce_mb_desc mb_map[] = {
 		.nchan = 16,
 		.startup = llce_tx_startup,
 		.shutdown = llce_tx_shutdown,
+	},
+	[S32G_LLCE_CAN_LOGGER_MB] = {
+		.nchan = 16,
+		.startup = llce_logger_startup,
+		.shutdown = llce_logger_shutdown,
 	},
 };
 
@@ -339,6 +377,16 @@ static void __iomem *get_host_notif(struct llce_mb *mb, unsigned int host_index)
 	return get_rxin_by_index(mb, 8);
 }
 
+static void __iomem *get_logger_in(struct llce_mb *mb)
+{
+	return get_rxout_by_index(mb, LLCE_CAN_LOGGER_IN_FIFO);
+}
+
+static void __iomem *get_logger_out(struct llce_mb *mb)
+{
+	return get_rxout_by_index(mb, LLCE_CAN_LOGGER_OUT_FIFO);
+}
+
 static void __iomem *get_host_txack(struct llce_mb *mb, unsigned int host_index)
 {
 	if (host_index == LLCE_CAN_HIF0)
@@ -364,6 +412,14 @@ static void __iomem *get_rxout_fifo(struct mbox_chan *chan)
 	struct llce_mb *mb = priv->mb;
 
 	return get_rxout_by_index(mb, priv->index);
+}
+
+static void __iomem *get_logger_out_fifo(struct mbox_chan *chan)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+
+	return get_rxout_by_index(mb, LLCE_CAN_LOGGER_OUT_FIFO);
 }
 
 static void __iomem *get_blrout_fifo(struct mbox_chan *chan)
@@ -400,6 +456,11 @@ static bool is_tx_chan(unsigned int chan_type)
 	return chan_type == S32G_LLCE_CAN_TX_MB;
 }
 
+static bool is_logger_chan(unsigned int chan_type)
+{
+	return chan_type == S32G_LLCE_CAN_LOGGER_MB;
+}
+
 static int init_chan_priv(struct mbox_chan *chan, struct llce_mb *mb,
 			  unsigned int type, unsigned int index)
 {
@@ -420,7 +481,7 @@ static int init_chan_priv(struct mbox_chan *chan, struct llce_mb *mb,
 		chan->txdone_method = TXDONE_BY_POLL;
 		priv->state = LLCE_REGISTERED_CHAN;
 	} else {
-		if (is_rx_chan(type))
+		if (is_rx_chan(type) || is_logger_chan(type))
 			chan->txdone_method = TXDONE_BY_ACK;
 		else
 			chan->txdone_method = TXDONE_BY_IRQ;
@@ -428,6 +489,7 @@ static int init_chan_priv(struct mbox_chan *chan, struct llce_mb *mb,
 		priv->state = LLCE_UNREGISTERED_CHAN;
 	}
 
+	priv->data = NULL;
 	spin_lock_init(&priv->lock);
 
 	return 0;
@@ -622,33 +684,106 @@ static int llce_mb_send_data(struct mbox_chan *chan, void *data)
 	if (is_rx_chan(priv->type))
 		return process_rx_cmd(chan, data);
 
+	if (is_logger_chan(priv->type))
+		return process_logger_cmd(chan, data);
+
 	return -EINVAL;
+}
+
+static void enable_fifo_irq(void __iomem *fifo)
+{
+	void __iomem *status1 = LLCE_FIFO_STATUS1(fifo);
+	void __iomem *ier = LLCE_FIFO_IER(fifo);
+
+	/* Clear interrupt status flags. */
+	writel(readl(status1), status1);
+	/* Enable interrupt */
+	writel(LLCE_FIFO_FNEMTY, ier);
+}
+
+static void disable_fifo_irq(void __iomem *fifo)
+{
+	void __iomem *ier = LLCE_FIFO_IER(fifo);
+	u32 ier_val;
+
+	ier_val = readl(ier) & ~LLCE_FIFO_FNEMTY;
+	writel(ier_val, ier);
 }
 
 static void disable_rx_irq(struct mbox_chan *chan)
 {
 	void __iomem *rxout = get_rxout_fifo(chan);
-	void __iomem *ier = LLCE_FIFO_IER(rxout);
 
-	writel(0, ier);
+	disable_fifo_irq(rxout);
 }
 
 static void enable_rx_irq(struct mbox_chan *chan)
 {
 	void __iomem *rxout = get_rxout_fifo(chan);
-	void __iomem *status0 = LLCE_FIFO_STATUS0(rxout);
-	void __iomem *ier = LLCE_FIFO_IER(rxout);
 
-	/* Clear interrupt status flags. */
-	writel(readl(status0), status0);
-	/* Enable interrupt */
-	writel(LLCE_FIFO_FNEMTY, ier);
+	enable_fifo_irq(rxout);
+}
+
+static void enable_logger_irq(struct llce_mb *mb)
+{
+	void __iomem *rxout = get_logger_out(mb);
+
+	/* Enable interrupt routing inside FIFO module. */
+	enable_fifo_irq(rxout);
+}
+
+static void disable_logger_irq(struct llce_mb *mb)
+{
+	void __iomem *rxout = get_logger_out(mb);
+
+	disable_fifo_irq(rxout);
+}
+
+static int request_llce_irq(struct llce_mb *mb, struct llce_fifoirq *fifo_irq)
+{
+	int ret;
+
+	ret = devm_request_irq(mb->dev, fifo_irq->num, fifo_irq->handler,
+			       IRQF_SHARED, fifo_irq->name, mb);
+	if (ret < 0)
+		dev_err(mb->dev, "Failed to register '%s' IRQ\n",
+			fifo_irq->name);
+
+	return ret;
+}
+
+static int request_llce_pair_irq(struct llce_mb *mb, struct llce_pair_irq *pair)
+{
+	int ret;
+
+	ret = request_llce_irq(mb, &pair->irq0);
+	if (ret)
+		return ret;
+
+	ret = request_llce_irq(mb, &pair->irq8);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int llce_hif_startup(struct mbox_chan *chan)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+
+	DO_ONCE(request_llce_pair_irq, mb, &mb->rxin_irqs);
+
+	return 0;
 }
 
 static int llce_rx_startup(struct mbox_chan *chan)
 {
 	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
 	unsigned long flags;
+
+	DO_ONCE(request_llce_pair_irq, mb, &mb->rxout_irqs);
 
 	/* State change must go under the lock protection */
 	spin_lock_irqsave(&priv->lock, flags);
@@ -687,19 +822,16 @@ static void enable_bus_off_irq(struct llce_mb *mb)
 static int llce_tx_startup(struct mbox_chan *chan)
 {
 	void __iomem *txack = get_txack_fifo(chan);
-	void __iomem *status1 = LLCE_FIFO_STATUS1(txack);
-	void __iomem *ier = LLCE_FIFO_IER(txack);
 	struct llce_chan_priv *priv = chan->con_priv;
 	struct llce_mb *mb = priv->mb;
 	unsigned long flags;
 
+	DO_ONCE(request_llce_pair_irq, mb, &mb->txack_irqs);
+
 	spin_lock_irqsave(&priv->lock, flags);
 	priv->state = LLCE_REGISTERED_CHAN;
 
-	/* Clear interrupt status flags. */
-	writel(readl(status1), status1);
-	/* Enable interrupt */
-	writel(LLCE_FIFO_FNEMTY, ier);
+	enable_fifo_irq(txack);
 	enable_bus_off_irq(mb);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
@@ -711,14 +843,55 @@ static void llce_tx_shutdown(struct mbox_chan *chan)
 {
 	struct llce_chan_priv *priv = chan->con_priv;
 	void __iomem *txack = get_txack_fifo(chan);
-	void __iomem *ier = LLCE_FIFO_IER(txack);
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->lock, flags);
 	priv->state = LLCE_UNREGISTERED_CHAN;
 
 	/* Disable interrupts */
-	writel(0, ier);
+	disable_fifo_irq(txack);
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+}
+
+static int llce_logger_startup(struct mbox_chan *chan)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+	struct llce_logger_data *data;
+	unsigned long flags;
+	int ret = 0;
+
+	DO_ONCE(request_llce_irq, mb, &mb->logger_irq);
+
+	spin_lock_irqsave(&priv->lock, flags);
+	priv->state = LLCE_REGISTERED_CHAN;
+
+	/* Make room for POP leftovers */
+	priv->data = kmalloc(sizeof(struct llce_logger_data), GFP_KERNEL);
+	if (!priv->data)
+		ret = -ENOMEM;
+
+	if (!ret) {
+		data = priv->data;
+		data->has_leftover = false;
+	}
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return ret;
+}
+
+static void llce_logger_shutdown(struct mbox_chan *chan)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->lock, flags);
+
+	priv->state = LLCE_UNREGISTERED_CHAN;
+	kfree(priv->data);
+	priv->data = NULL;
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
@@ -733,17 +906,32 @@ static int llce_mb_startup(struct mbox_chan *chan)
 	return 0;
 }
 
-static void llce_mbox_chan_received_data(struct mbox_chan *chan, void *mssg)
+static bool is_chan_registered(struct mbox_chan *chan)
 {
 	struct llce_chan_priv *priv = chan->con_priv;
 	unsigned long flags;
+	bool ret;
+
+	if (!priv)
+		return false;
 
 	spin_lock_irqsave(&priv->lock, flags);
-
-	if (priv->state == LLCE_REGISTERED_CHAN)
-		mbox_chan_received_data(chan, mssg);
-
+	ret = (priv->state == LLCE_REGISTERED_CHAN);
 	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return ret;
+}
+
+static void llce_mbox_chan_received_data(struct mbox_chan *chan, void *msg)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+
+	if (!is_chan_registered(chan)) {
+		dev_err(chan->cl->dev, "Received a message on an unregistered channel (type = %u, index = %u)\n",
+		       priv->type, priv->index);
+	}
+
+	mbox_chan_received_data(chan, msg);
 }
 
 static bool llce_mb_last_tx_done(struct mbox_chan *chan)
@@ -795,83 +983,74 @@ static const struct mbox_chan_ops llce_mb_ops = {
 	.last_tx_done = llce_mb_last_tx_done,
 };
 
-static void devm_sram_pool_release(struct device *dev, void *res)
+static struct device_node *get_sram_node(struct device *dev, const char *name)
 {
-	struct sram_pool *spool = res;
+	struct device_node *node, *dev_node;
+	int idx;
 
-	gen_pool_free(spool->pool, spool->vaddr, spool->size);
-}
-
-static struct sram_pool *devm_sram_pool_alloc(struct device *dev,
-					      struct gen_pool *pool)
-{
-	struct sram_pool *spool = devres_alloc(devm_sram_pool_release,
-					       sizeof(*spool), GFP_KERNEL);
-
-	if (!spool)
-		return ERR_PTR(-ENOMEM);
-
-	spool->size = gen_pool_size(pool);
-	spool->vaddr = gen_pool_alloc(pool, spool->size);
-	if (!spool->vaddr) {
-		devres_free(spool);
-		return ERR_PTR(-ENOMEM);
+	dev_node = dev->of_node;
+	idx = of_property_match_string(dev_node, "memory-region-names", name);
+	node = of_parse_phandle(dev_node, "memory-region", idx);
+	if (!node) {
+		dev_err(dev, "Failed to get '%s' memory region\n", name);
+		return ERR_PTR(-EIO);
 	}
 
-	spool->pool = pool;
-	devres_add(dev, spool);
-
-	return spool;
+	return node;
 }
 
-static int alloc_sram_pool(struct platform_device *pdev,
-			   struct llce_mb *mb)
+static int map_sram_node(struct device *dev, const char *name,
+			 void __iomem **addr)
 {
 	struct device_node *sram_node;
-	struct device *dev = &pdev->dev;
-	struct gen_pool *pool;
-	const char *name;
-	struct sram_pool *spool;
-	struct platform_device *sram_pdev;
+	struct resource r;
+	resource_size_t size;
+	int ret;
 
-	sram_node = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
-	if (!sram_node) {
-		dev_err(&pdev->dev, "Failed to get 'memory-region'\n");
-		return -EIO;
+	sram_node = get_sram_node(dev, name);
+	if (IS_ERR(sram_node))
+		return PTR_ERR(sram_node);
+
+	ret = of_address_to_resource(sram_node, 0, &r);
+	of_node_put(sram_node);
+	if (ret)
+		return ret;
+
+	size = resource_size(&r);
+
+	*addr = devm_ioremap_wc(dev, r.start, size);
+	if (!*addr) {
+		dev_err(dev, "Failed to map '%s' memory region\n", name);
+		return -ENOMEM;
 	}
-
-	name = sram_node->name;
-	sram_pdev = of_find_device_by_node(sram_node);
-	if (!sram_pdev) {
-		dev_err(dev, "failed to find sram device for '%s'!\n", name);
-		return -ENODEV;
-	}
-
-	pool = gen_pool_get(&sram_pdev->dev, NULL);
-	if (!pool) {
-		dev_err(dev, "Pool '%s' is unavailable!\n", name);
-		return -ENODEV;
-	}
-
-	spool = devm_sram_pool_alloc(dev, pool);
-	if (IS_ERR(spool)) {
-		dev_err(dev, "Unable to alloc '%s' pool\n", name);
-		return PTR_ERR(spool);
-	}
-
-	mb->sh_mem = (void *)spool->vaddr;
 
 	return 0;
 }
 
-static void __iomem *get_icsr(struct llce_mb *mb, struct llce_fifoirq *irqs,
+static int map_llce_status(struct llce_mb *mb)
+{
+	return map_sram_node(mb->dev, LLCE_STATUS_REG_NAME, &mb->status);
+}
+
+static int map_llce_shmem(struct llce_mb *mb)
+{
+	return map_sram_node(mb->dev, LLCE_SHMEM_REG_NAME,
+			     (void __iomem **)&mb->sh_mem);
+}
+
+static void __iomem *get_icsr_addr(struct llce_mb *mb, uint32_t icsr_id)
+{
+	return mb->icsr + icsr_id * sizeof(uint32_t);
+}
+
+static void __iomem *get_icsr(struct llce_mb *mb, struct llce_pair_irq *irqs,
 			      uint32_t icsr_index, int irq,
 			      uint8_t *base_id)
 {
 	uint32_t icsr_id;
 	const struct llce_icsr *icsrs_conf = &icsrs[icsr_index];
 
-	if (irq == irqs->irq0) {
+	if (irq == irqs->irq0.num) {
 		icsr_id = icsrs_conf->icsr0_num;
 		*base_id = 0;
 	} else {
@@ -879,7 +1058,7 @@ static void __iomem *get_icsr(struct llce_mb *mb, struct llce_fifoirq *irqs,
 		*base_id = 8;
 	}
 
-	return mb->icsr + icsr_id * sizeof(uint32_t);
+	return get_icsr_addr(mb, icsr_id);
 }
 
 static void __iomem *get_txack_icsr(struct llce_mb *mb, int irq,
@@ -901,6 +1080,11 @@ static void __iomem *get_rxout_icsr(struct llce_mb *mb, int irq,
 {
 	return get_icsr(mb, &mb->rxout_irqs, LLCE_CAN_ICSR_RXOUT_INDEX,
 			irq, base_id);
+}
+
+static void __iomem *get_logger_icsr(struct llce_mb *mb)
+{
+	return get_icsr_addr(mb, LLCE_CAN_LOGGER_ICSR);
 }
 
 static void llce_process_tx_ack(struct llce_mb *mb, uint8_t index)
@@ -1033,10 +1217,82 @@ static void llce_process_rxin(struct llce_mb *mb, uint8_t index)
 	writel(LLCE_FIFO_FNEMTY, status1);
 }
 
+static bool has_leftovers(struct mbox_chan *chan)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_logger_data *data = priv->data;
+	unsigned long flags;
+	bool ret;
+
+	spin_lock_irqsave(&priv->lock, flags);
+	ret = data->has_leftover;
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return ret;
+}
+
+static void push_llce_logger_data(struct mbox_chan *chan, struct llce_can_mb *frame,
+				  uint32_t index)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_logger_data *data = priv->data;
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->lock, flags);
+
+	if (data->has_leftover)
+		dev_err(chan->cl->dev, "Overwriting logger's internal frame\n");
+
+	data->has_leftover = true;
+	data->frame = frame;
+	data->index = index;
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+}
+
+static bool pop_llce_logger_data(struct mbox_chan *chan, struct llce_can_mb **frame,
+				 uint32_t *index)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_logger_data *data = priv->data;
+	unsigned long flags;
+	bool ret;
+
+	spin_lock_irqsave(&priv->lock, flags);
+
+	if (!data->has_leftover) {
+		ret = false;
+	} else {
+		ret = true;
+		data->has_leftover = false;
+		*frame = data->frame;
+		*index = data->index;
+	}
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return ret;
+}
+
 static int process_is_rx_empty(struct mbox_chan *chan, struct llce_rx_msg *msg)
 {
 	void __iomem *rxout = get_rxout_fifo(chan);
 	void __iomem *status1 = LLCE_FIFO_STATUS1(rxout);
+
+	msg->is_rx_empty = !!(readl(status1) & LLCE_FIFO_FEMTYD);
+	return 0;
+}
+
+static int process_is_logger_empty(struct mbox_chan *chan,
+				   struct llce_rx_msg *msg)
+{
+	void __iomem *rxout = get_logger_out_fifo(chan);
+	void __iomem *status1 = LLCE_FIFO_STATUS1(rxout);
+
+	if (has_leftovers(chan)) {
+		msg->is_rx_empty = false;
+		return 0;
+	}
 
 	msg->is_rx_empty = !!(readl(status1) & LLCE_FIFO_FEMTYD);
 	return 0;
@@ -1062,12 +1318,108 @@ static int process_pop_rxout(struct mbox_chan *chan, struct llce_rx_msg *msg)
 	chan_index = get_channel_offset(S32G_LLCE_CAN_RX_MB, priv->index);
 	msg->rx_pop.can_mb = &sh_mem->can_mb[frame_id];
 	msg->rx_pop.index = rx_mb;
+	msg->rx_pop.skip = false;
 
 	return 0;
 }
 
-static int process_release_index(struct mbox_chan *chan,
-				 struct llce_rx_msg *msg)
+static u8 *get_ctrl_extension(struct llce_mb *mb)
+{
+	return (u8 *)mb->status + LLCE_RXMBEXTENSION_OFFSET;
+}
+
+static uint8_t get_hwctrl(struct llce_mb *mb, uint32_t frame_id,
+			  uint32_t mb_index)
+{
+	u8 *ctrl_extensions = get_ctrl_extension(mb);
+
+	return ctrl_extensions[frame_id - LLCE_CAN_CONFIG_MAXTXMB];
+}
+
+static void pop_logger_frame(struct llce_mb *mb, struct llce_can_mb **frame,
+			     u32 *index, u32 *hw_ctrl)
+{
+	struct llce_can_shared_memory *sh_mem = mb->sh_mem;
+	void __iomem *out_fifo = get_logger_out(mb);
+	void __iomem *pop0 = LLCE_FIFO_POP0(out_fifo);
+	u32 frame_id;
+
+	*index = readl(pop0) & LLCE_CAN_CONFIG_FIFO_FIXED_MASK;
+
+	frame_id = sh_mem->can_rx_mb_desc[*index].mb_frame_idx;
+
+	*frame = &sh_mem->can_mb[frame_id];
+	*hw_ctrl = get_hwctrl(mb, frame_id, *index);
+}
+
+static void release_logger_index(struct llce_mb *mb, uint32_t index)
+{
+	void __iomem *in_fifo = get_logger_in(mb);
+	void __iomem *push0 = LLCE_FIFO_PUSH0(in_fifo);
+
+	writel(index, push0);
+}
+
+static void send_llce_chan_notif(struct llce_mb *mb, u32 hw_ctrl,
+				 struct llce_can_mb *frame, u32 mb_index)
+{
+	struct mbox_controller *ctrl = &mb->controller;
+	struct mbox_chan *chan;
+	unsigned int chan_index;
+	struct llce_rx_msg msg = {
+		.error = 0,
+		.cmd = LLCE_RX_NOTIF,
+	};
+
+	chan_index = get_channel_offset(S32G_LLCE_CAN_LOGGER_MB, hw_ctrl);
+
+	chan = &ctrl->chans[chan_index];
+	if (chan->con_priv && is_chan_registered(chan)) {
+		push_llce_logger_data(chan, frame, mb_index);
+		llce_mbox_chan_received_data(chan, &msg);
+	} else {
+		/* Release the index if there are no clients to process it */
+		release_logger_index(mb, mb_index);
+		enable_logger_irq(mb);
+	}
+}
+
+static int process_pop_logger(struct mbox_chan *chan, struct llce_rx_msg *msg)
+{
+	u32 hw_ctrl, mb_index;
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+	struct llce_can_mb *frame;
+	bool pop;
+
+	/* Use a stashed frame */
+	pop = pop_llce_logger_data(chan, &frame, &mb_index);
+	if (pop) {
+		msg->rx_pop.skip = false;
+		msg->rx_pop.can_mb = frame;
+		msg->rx_pop.index = mb_index;
+
+		return 0;
+	}
+
+	pop_logger_frame(mb, &frame, &mb_index, &hw_ctrl);
+
+	/* Skip the frame as it's not for this channel */
+	if (hw_ctrl != priv->index) {
+		msg->rx_pop.skip = true;
+		send_llce_chan_notif(mb, hw_ctrl, frame, mb_index);
+		return 0;
+	}
+
+	msg->rx_pop.skip = false;
+	msg->rx_pop.can_mb = frame;
+	msg->rx_pop.index = mb_index;
+
+	return 0;
+}
+
+static int process_release_rxout_index(struct mbox_chan *chan,
+				       struct llce_rx_msg *msg)
 {
 	struct llce_chan_priv *priv = chan->con_priv;
 	struct llce_mb *mb = priv->mb;
@@ -1078,11 +1430,30 @@ static int process_release_index(struct mbox_chan *chan,
 	return 0;
 }
 
+static int process_release_logger_index(struct mbox_chan *chan,
+					struct llce_rx_msg *msg)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+
+	release_logger_index(mb, msg->rx_release.index);
+	return 0;
+}
+
 static int process_disable_rx_notif(struct mbox_chan *chan,
 				    struct llce_rx_msg __always_unused *msg)
 {
 	disable_rx_irq(chan);
+	return 0;
+}
 
+static int process_disable_logger_notif(struct mbox_chan *chan,
+					struct llce_rx_msg __always_unused *msg)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+
+	disable_logger_irq(mb);
 	return 0;
 }
 
@@ -1090,7 +1461,16 @@ static int process_enable_rx_notif(struct mbox_chan *chan,
 				   struct llce_rx_msg __always_unused *msg)
 {
 	enable_rx_irq(chan);
+	return 0;
+}
 
+static int process_enable_logger_notif(struct mbox_chan *chan,
+				       struct llce_rx_msg __always_unused *msg)
+{
+	struct llce_chan_priv *priv = chan->con_priv;
+	struct llce_mb *mb = priv->mb;
+
+	enable_logger_irq(mb);
 	return 0;
 }
 
@@ -1104,8 +1484,24 @@ static int process_rx_cmd(struct mbox_chan *chan, struct llce_rx_msg *msg)
 		return process_is_rx_empty(chan, msg);
 	if (msg->cmd == LLCE_POP_RX)
 		return process_pop_rxout(chan, msg);
-	if (msg->cmd == LLCE_RELESE_RX_INDEX)
-		return process_release_index(chan, msg);
+	if (msg->cmd == LLCE_RELEASE_RX_INDEX)
+		return process_release_rxout_index(chan, msg);
+
+	return 0;
+}
+
+static int process_logger_cmd(struct mbox_chan *chan, struct llce_rx_msg *msg)
+{
+	if (msg->cmd == LLCE_DISABLE_RX_NOTIF)
+		return process_disable_logger_notif(chan, msg);
+	if (msg->cmd == LLCE_ENABLE_RX_NOTIF)
+		return process_enable_logger_notif(chan, msg);
+	if (msg->cmd == LLCE_IS_RX_EMPTY)
+		return process_is_logger_empty(chan, msg);
+	if (msg->cmd == LLCE_POP_RX)
+		return process_pop_logger(chan, msg);
+	if (msg->cmd == LLCE_RELEASE_RX_INDEX)
+		return process_release_logger_index(chan, msg);
 
 	return 0;
 }
@@ -1175,46 +1571,72 @@ static irqreturn_t llce_rxout_fifo_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t llce_logger_rx_irq(int irq, void *data)
+{
+	struct llce_mb *mb = data;
+	void __iomem *icsr_addr = get_logger_icsr(mb);
+	u32 icsr, mb_index, hw_ctrl;
+	struct llce_can_mb *frame;
+
+	icsr = readl(icsr_addr);
+	if (!(icsr & LLCE_LOGGER_ICSR_IRQ))
+		return IRQ_NONE;
+
+	disable_logger_irq(mb);
+
+	pop_logger_frame(mb, &frame, &mb_index, &hw_ctrl);
+
+	send_llce_chan_notif(mb, hw_ctrl, frame, mb_index);
+
+	return IRQ_HANDLED;
+}
+
 static int init_llce_irq_resources(struct platform_device *pdev,
 				   struct llce_mb *mb)
 {
-	int irq, ret;
+	int irq;
 	size_t i;
 	struct device *dev = &pdev->dev;
+	struct llce_fifoirq *fifo_irq;
 	struct {
 		const char *name;
-		int *irq;
 		irq_handler_t handler;
+		struct llce_fifoirq *fifo_irq;
 	} resources[] = {
 		{
 			.name = "rxin_fifo_0_7",
-			.irq = &mb->rxin_irqs.irq0,
 			.handler = llce_rxin_fifo_irq,
+			.fifo_irq = &mb->rxin_irqs.irq0,
 		},
 		{
 			.name = "rxin_fifo_8_15",
-			.irq = &mb->rxin_irqs.irq8,
 			.handler = llce_rxin_fifo_irq,
+			.fifo_irq = &mb->rxin_irqs.irq8,
 		},
 		{
 			.name = "rxout_fifo_0_7",
-			.irq = &mb->rxout_irqs.irq0,
 			.handler = llce_rxout_fifo_irq,
+			.fifo_irq = &mb->rxout_irqs.irq0,
 		},
 		{
 			.name = "rxout_fifo_8_15",
-			.irq = &mb->rxout_irqs.irq8,
 			.handler = llce_rxout_fifo_irq,
+			.fifo_irq = &mb->rxout_irqs.irq8,
 		},
 		{
 			.name = "txack_fifo_0_7",
-			.irq = &mb->txack_irqs.irq0,
 			.handler = llce_txack_fifo_irq,
+			.fifo_irq = &mb->txack_irqs.irq0,
 		},
 		{
 			.name = "txack_fifo_8_15",
-			.irq = &mb->txack_irqs.irq8,
 			.handler = llce_txack_fifo_irq,
+			.fifo_irq = &mb->txack_irqs.irq8,
+		},
+		{
+			.name = "logger_rx",
+			.handler = llce_logger_rx_irq,
+			.fifo_irq = &mb->logger_irq,
 		},
 	};
 
@@ -1226,16 +1648,10 @@ static int init_llce_irq_resources(struct platform_device *pdev,
 			return irq;
 		}
 
-		*resources[i].irq = irq;
-		ret = devm_request_irq(dev, irq, resources[i].handler,
-				       IRQF_SHARED,
-				       resources[i].name, mb);
-		if (ret < 0) {
-			dev_err(&pdev->dev,
-				"Failed to register '%s' IRQ\n",
-				resources[i].name);
-			return ret;
-		}
+		fifo_irq = resources[i].fifo_irq;
+		fifo_irq->name = resources[i].name;
+		fifo_irq->handler = resources[i].handler;
+		fifo_irq->num = irq;
 	}
 
 	return 0;
@@ -1306,9 +1722,14 @@ static struct mbox_chan *get_hif_cfg_chan(struct llce_mb *mb)
 static int init_hif_config_chan(struct llce_mb *mb)
 {
 	struct mbox_chan *chan = get_hif_cfg_chan(mb);
+	int ret;
 
-	return init_chan_priv(chan, mb, S32G_LLCE_HIF_CONF_MB,
-			      LLCE_CAN_HIF0);
+	ret = init_chan_priv(chan, mb, S32G_LLCE_HIF_CONF_MB,
+			     LLCE_CAN_HIF0);
+	if (ret)
+		return ret;
+
+	return llce_hif_startup(chan);
 }
 
 static void deinit_hif_config_chan(struct llce_mb *mb)
@@ -1392,6 +1813,9 @@ static int llce_platform_init(struct device *dev, struct llce_mb *mb)
 		},
 	};
 
+	if (!config_platform)
+		return 0;
+
 	pcmd = &cmd.cmd_list.init_platform;
 	memset(&pcmd->ctrl_init_status, UNINITIALIZED,
 	       sizeof(pcmd->ctrl_init_status));
@@ -1426,6 +1850,9 @@ static int llce_platform_deinit(struct llce_mb *mb)
 		.cmd_id = LLCE_CAN_CMD_DEINIT_PLATFORM,
 	};
 
+	if (!config_platform)
+		return 0;
+
 	return execute_hif_cmd(mb, &cmd);
 }
 
@@ -1438,6 +1865,9 @@ static int print_fw_version(struct llce_mb *mb)
 		.cmd_id = LLCE_CAN_CMD_GETFWVERSION,
 	};
 	int ret;
+
+	if (!config_platform)
+		return 0;
 
 	ret = execute_hif_cmd(mb, &cmd);
 	if (ret)
@@ -1503,6 +1933,8 @@ static int llce_mb_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mb);
 
+	mb->dev = dev;
+
 	ret = llce_init_chan_map(dev, mb);
 	if (ret)
 		return ret;
@@ -1515,7 +1947,11 @@ static int llce_mb_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = alloc_sram_pool(pdev, mb);
+	ret = map_llce_status(mb);
+	if (ret)
+		return ret;
+
+	ret = map_llce_shmem(mb);
 	if (ret)
 		return ret;
 

@@ -19,18 +19,6 @@
 #include "hse-core.h"
 #include "hse-mu.h"
 
-#if !defined(CONFIG_CRYPTO_DEV_NXP_HSE_UIO)
-#define HSE_KS_RAM_AES_GID       CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_ID
-#define HSE_KS_RAM_AES_GSIZE     CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_SIZE
-#define HSE_KS_RAM_HMAC_GID      CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_ID
-#define HSE_KS_RAM_HMAC_GSIZE    CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_SIZE
-#else
-#define HSE_KS_RAM_AES_GID       0u
-#define HSE_KS_RAM_AES_GSIZE     0u
-#define HSE_KS_RAM_HMAC_GID      0u
-#define HSE_KS_RAM_HMAC_GSIZE    0u
-#endif /* CONFIG_CRYPTO_DEV_NXP_HSE_UIO */
-
 /**
  * struct hse_drvdata - HSE driver private data
  * @srv_desc[n].ptr: service descriptor virtual address for channel n
@@ -40,7 +28,6 @@
  * @skcipher_algs: registered symmetric key cipher algorithms
  * @aead_algs: registered authenticated encryption and AEAD algorithms
  * @mu: MU instance handle returned by lower abstraction layer
- * @uio: user-space I/O device handle
  * @channel_busy[n]: internally cached status of MU channel n
  * @refcnt[n]: service channel n acquired reference counter
  * @type[n]: designated type of service channel n
@@ -53,6 +40,7 @@
  * @hmac_key_ring: HMAC key slots currently available
  * @aes_key_ring: AES key slots currently available
  * @key_ring_lock: lock used for key slot acquisition
+ * @firmware_dead: used to signal firmware fatal error
  */
 struct hse_drvdata {
 	struct {
@@ -64,7 +52,6 @@ struct hse_drvdata {
 	struct list_head skcipher_algs;
 	struct list_head aead_algs;
 	void *mu;
-	void *uio;
 	bool channel_busy[HSE_NUM_CHANNELS];
 	atomic_t refcnt[HSE_NUM_CHANNELS];
 	enum hse_ch_type type[HSE_NUM_CHANNELS];
@@ -81,6 +68,7 @@ struct hse_drvdata {
 	struct list_head hmac_key_ring;
 	struct list_head aes_key_ring;
 	spinlock_t key_ring_lock; /* covers key slot acquisition */
+	bool firmware_dead;
 	u32 rng_srv_id;
 };
 
@@ -499,7 +487,8 @@ int hse_channel_release(struct device *dev, u8 channel)
  * must be set to HSE_CHANNEL_ANY unless obtained via hse_channel_acquire().
  *
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
- *         index out of range, -EBUSY for channel busy or none available
+ *         index out of range, -ENOTRECOVERABLE for firmware stopped due to
+ *         internal fatal error, -EBUSY for channel busy or none available
  */
 int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 		      void *ctx, void (*rx_cbk)(int err, void *ctx))
@@ -512,6 +501,9 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
+
+	if (unlikely(drv->firmware_dead))
+		return -ENOTRECOVERABLE;
 
 	spin_lock(&drv->tx_lock);
 
@@ -553,7 +545,8 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
  * shall be set to HSE_CHANNEL_ANY unless obtained via hse_channel_acquire().
  *
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
- *         index out of range, -EBUSY for channel busy or none available
+ *         index out of range, -ENOTRECOVERABLE for firmware stopped due to
+ *         internal fatal error, -EBUSY for channel busy or none available
  */
 int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 {
@@ -566,6 +559,9 @@ int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
+
+	if (unlikely(drv->firmware_dead))
+		return -ENOTRECOVERABLE;
 
 	spin_lock(&drv->tx_lock);
 
@@ -631,12 +627,6 @@ static void hse_srv_rsp_dispatch(struct device *dev, u8 channel)
 		dev_dbg(dev, "%s: service response 0x%08X on channel %d\n",
 			__func__, srv_rsp, channel);
 
-	/* when UIO support is enabled, let upper layer handle the reply */
-	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO) && likely(drv->uio)) {
-		hse_uio_notify(drv->uio, channel, srv_rsp);
-		return;
-	}
-
 	if (drv->rx_cbk[channel].fn) {
 		void (*rx_cbk)(int err, void *ctx) = drv->rx_cbk[channel].fn;
 		void *ctx = drv->rx_cbk[channel].ctx;
@@ -685,9 +675,10 @@ static irqreturn_t hse_rx_dispatcher(int irq, void *dev)
  * @irq: interrupt line
  * @dev: HSE device
  *
+ * In case a warning has been reported, log the event mask, clear irq and exit.
  * In case a fatal error has been reported, all MU interfaces are disabled
  * and communication with HSE terminated. Therefore, all service requests
- * currently in progress are canceled and any further requests are prevented.
+ * currently in progress are canceled and any subsequent requests are prevented.
  */
 static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 {
@@ -701,6 +692,9 @@ static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 
 		return IRQ_HANDLED;
 	}
+
+	/* stop any subsequent requests */
+	drv->firmware_dead = true;
 
 	/* disable RX and event notifications */
 	hse_mu_irq_disable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
@@ -719,6 +713,10 @@ static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 
 	/* notify upper layers that all requests are canceled */
 	for (channel = 0; channel < HSE_NUM_CHANNELS; channel++) {
+		if (drv->channel_busy[channel])
+			dev_dbg(dev, "request id 0x%08x canceled, channel %d\n",
+				channel, drv->srv_desc[channel].id);
+
 		if (drv->rx_cbk[channel].fn) {
 			void *ctx = drv->rx_cbk[channel].ctx;
 
@@ -729,14 +727,15 @@ static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 
 			complete(drv->sync[channel].done);
 		}
-
-		if (drv->channel_busy[channel])
-			dev_dbg(dev, "request id 0x%08x canceled, channel %d\n",
-				channel, drv->srv_desc[channel].id);
-		drv->channel_busy[channel] = true;
 	}
 
-	/* unregister hwrng */
+	/* unregister kernel crypto algorithms and hwrng */
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AHASH))
+		hse_ahash_unregister(&drv->ahash_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_SKCIPHER))
+		hse_skcipher_unregister(&drv->skcipher_algs);
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
+		hse_aead_unregister(&drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
 		hse_hwrng_unregister(dev);
 
@@ -775,6 +774,7 @@ static int hse_probe(struct platform_device *pdev)
 		dev_err(dev, "firmware not found\n");
 		return -ENODEV;
 	}
+	drv->firmware_dead = false;
 
 	/* manage channels and descriptor space */
 	hse_manage_channels(dev, desc_base_ptr, desc_base_dma);
@@ -799,8 +799,7 @@ static int hse_probe(struct platform_device *pdev)
 		err = -ENODEV;
 		goto err_probe_failed;
 	}
-	if (!IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO) &&
-	    !likely(status & HSE_STATUS_INSTALL_OK)) {
+	if (!likely(status & HSE_STATUS_INSTALL_OK)) {
 		dev_err(dev, "key catalogs not formatted\n");
 		err = -ENODEV;
 		goto err_probe_failed;
@@ -808,24 +807,16 @@ static int hse_probe(struct platform_device *pdev)
 	if (unlikely(status & HSE_STATUS_PUBLISH_SYS_IMAGE))
 		dev_warn(dev, "volatile configuration, publish SYS_IMAGE\n");
 
-	/* register UIO device */
-	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_UIO)) {
-		drv->uio = hse_uio_register(dev, drv->mu);
-		if (IS_ERR_OR_NULL(drv->uio)) {
-			dev_err(dev, "failed to register UIO device\n");
-			return PTR_ERR(drv->uio);
-		}
-		return 0;
-	}
-
 	/* initialize key rings */
-	err = hse_key_ring_init(dev, &drv->hmac_key_ring, HSE_KEY_TYPE_HMAC,
-				HSE_KS_RAM_HMAC_GID, HSE_KS_RAM_HMAC_GSIZE);
+	err = hse_key_ring_init(dev, &drv->aes_key_ring, HSE_KEY_TYPE_AES,
+				CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_ID,
+				CONFIG_CRYPTO_DEV_NXP_HSE_AES_KEY_GROUP_SIZE);
 	if (unlikely(err))
 		goto err_probe_failed;
 
-	err = hse_key_ring_init(dev, &drv->aes_key_ring, HSE_KEY_TYPE_AES,
-				HSE_KS_RAM_AES_GID, HSE_KS_RAM_AES_GSIZE);
+	err = hse_key_ring_init(dev, &drv->hmac_key_ring, HSE_KEY_TYPE_HMAC,
+				CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_ID,
+				CONFIG_CRYPTO_DEV_NXP_HSE_HMAC_KEY_GROUP_SIZE);
 	if (unlikely(err))
 		goto err_probe_failed;
 

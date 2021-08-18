@@ -6,13 +6,14 @@
 #include <linux/kernel.h>
 #include <linux/mailbox/nxp-llce/llce_fw_interface.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/processor.h>
 #include <linux/slab.h>
 
-#define LLCE_STATUS_POOL	"llce_boot_status"
+#define LLCE_STATUS_REGION	"status"
 #define LLCE_SYSRSTR		0x0
 #define LLCE_SYSRSTR_RST0	BIT(0)
 #define LLCE_SYSRSTR_RST1	BIT(1)
@@ -37,165 +38,162 @@ struct llce_fw_cont {
 	u16 retries;
 };
 
-struct sram_pool {
-	struct gen_pool *pool;
-	const struct firmware *fw_entry;
-	size_t size;
-	unsigned long vaddr;
+struct sram_node {
 	const char *name;
+	void __iomem *addr;
+	size_t size;
+};
+
+struct llce_fw {
+	const struct firmware *fw_entry;
+	struct sram_node *node;
 };
 
 struct llce_core {
 	struct clk *clk;
 	void __iomem *sysctrl_base;
+	struct llce_fw *fws;
 
-	/* SRAM pools */
-	struct sram_pool **pools;
-	size_t npools;
+	struct sram_node *sram_nodes;
+	size_t n_sram;
 
 	size_t nfrws;
 };
 
-static void devm_sram_pool_release(struct device *dev, void *res)
-{
-	struct sram_pool *spool = res;
+static bool load_fw = true;
+module_param(load_fw, bool, 0660);
 
-	gen_pool_free(spool->pool, spool->vaddr, spool->size);
+static struct device_node *get_sram_node(struct device *dev, const char *name)
+{
+	struct device_node *node, *dev_node;
+	int idx;
+
+	dev_node = dev->of_node;
+	idx = of_property_match_string(dev_node, "memory-region-names", name);
+	node = of_parse_phandle(dev_node, "memory-region", idx);
+	if (!node) {
+		dev_err(dev, "Failed to get '%s' memory region\n", name);
+		return ERR_PTR(-EIO);
+	}
+
+	return node;
 }
 
-static struct sram_pool *devm_sram_pool_alloc(struct device *dev,
-					      struct gen_pool *pool)
+static int map_sram_nodes(struct device *dev, struct llce_core *core)
 {
-	struct sram_pool *spool = devres_alloc(devm_sram_pool_release,
-					       sizeof(*spool), GFP_KERNEL);
-
-	if (!spool)
-		return ERR_PTR(-ENOMEM);
-
-	spool->size = gen_pool_size(pool);
-	spool->vaddr = gen_pool_alloc(pool, spool->size);
-	if (!spool->vaddr) {
-		devres_free(spool);
-		return ERR_PTR(-ENOMEM);
-	}
-
-	spool->pool = pool;
-	devres_add(dev, spool);
-
-	return spool;
-}
-
-static struct sram_pool *alloc_sram_node(struct device_node *sram_node,
-					 struct device *dev)
-{
-	struct platform_device *pdev;
-	struct gen_pool *pool;
-	struct sram_pool *spool;
-	const char *name = sram_node->name;
-
-	pdev = of_find_device_by_node(sram_node);
-	if (!pdev) {
-		dev_err(dev, "failed to find SRAM device for '%s'!\n", name);
-		return ERR_PTR(-ENODEV);
-	}
-
-	pool = gen_pool_get(&pdev->dev, NULL);
-	if (!pool) {
-		dev_err(dev, "Pool '%s' is unavailable!\n", name);
-		return ERR_PTR(-ENODEV);
-	}
-
-	spool = devm_sram_pool_alloc(dev, pool);
-	if (IS_ERR(spool)) {
-		dev_err(dev, "Unable to allocate '%s' pool\n", name);
-		return spool;
-	}
-	spool->name = name;
-
-	return spool;
-}
-
-static struct sram_pool *alloc_sram_node_index(struct platform_device *pdev,
-					       int index)
-{
-	struct device_node *sram_node;
-
-	sram_node = of_parse_phandle(pdev->dev.of_node, "memory-region", index);
-	if (!sram_node) {
-		dev_err(&pdev->dev, "Failed to get the element %d from 'memory-region' list\n",
-			index);
-		return ERR_PTR(-EINVAL);
-	}
-
-	return alloc_sram_node(sram_node, &pdev->dev);
-}
-
-static int llce_fw_load(struct platform_device *pdev, int index,
-			struct sram_pool *spool)
-{
-	int ret;
+	int ret, n_reg, i;
 	const char *img_name;
+	struct device_node *node;
+	struct resource r;
+	resource_size_t size;
 
-	ret = of_property_read_string_index(pdev->dev.of_node, "firmware-name",
-					    index, &img_name);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to get 'firmware-name' property\n");
-		return ret;
-	}
+	n_reg = of_property_count_strings(dev->of_node, "memory-region-names");
+	if (n_reg < 0)
+		return n_reg;
 
-	ret = request_firmware(&spool->fw_entry, img_name, &pdev->dev);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to load '%s' binary\n", img_name);
-		return ret;
+	core->sram_nodes = devm_kmalloc(dev, sizeof(*core->sram_nodes) * n_reg,
+					GFP_KERNEL);
+	if (!core->sram_nodes)
+		return -ENOMEM;
+
+	core->n_sram = n_reg;
+
+	for (i = 0; i < n_reg; i++) {
+		ret = of_property_read_string_index(dev->of_node,
+						    "memory-region-names",
+						    i, &img_name);
+		if (ret) {
+			dev_err(dev, "Failed to get 'memory-region-names' %d property\n",
+				i);
+			return ret;
+		}
+
+		core->sram_nodes[i].name = img_name;
+		node = get_sram_node(dev, img_name);
+		if (IS_ERR(node))
+			return PTR_ERR(node);
+
+		ret = of_address_to_resource(node, 0, &r);
+		of_node_put(node);
+		if (ret)
+			return ret;
+
+		size = resource_size(&r);
+		core->sram_nodes[i].size = size;
+
+		core->sram_nodes[i].addr = devm_ioremap_wc(dev, r.start, size);
+		if (!core->sram_nodes[i].addr) {
+			dev_err(dev, "Failed to map '%s' memory region\n",
+				img_name);
+			return -ENOMEM;
+		}
 	}
 
 	return ret;
 }
 
-static void llce_release_fw(struct sram_pool *spool)
+static void init_sram_nodes(struct llce_core *core)
 {
-	release_firmware(spool->fw_entry);
+	size_t i;
+
+	for (i = 0; i < core->n_sram; i++)
+		memset_io(core->sram_nodes[i].addr, 0,
+			  core->sram_nodes[i].size);
 }
 
-static int llce_alloc_sram(struct platform_device *pdev,
-			   struct llce_core *core)
+static struct sram_node *get_core_sram(struct llce_core *core, const char *name)
 {
 	int i;
-	struct sram_pool *spool;
 
-	core->npools = of_count_phandle_with_args(pdev->dev.of_node,
-						  "memory-region",
-						  NULL);
-	core->pools = devm_kmalloc(&pdev->dev,
-				   core->npools * sizeof(*core->pools),
-				   GFP_KERNEL);
-	if (!core->pools)
-		return -ENOMEM;
-
-	for (i = 0; i < core->npools; i++) {
-		spool = alloc_sram_node_index(pdev, i);
-		if (IS_ERR(spool)) {
-			dev_err(&pdev->dev, "Failed to initialize SRAM buffer %d\n",
-				i);
-			return PTR_ERR(spool);
-		}
-		core->pools[i] = spool;
+	for (i = 0; i < core->n_sram; i++) {
+		if (!strcmp(core->sram_nodes[i].name, name))
+			return &core->sram_nodes[i];
 	}
 
-	return 0;
+	return NULL;
 }
 
-static int llce_load_fw_images(struct platform_device *pdev,
-			       struct llce_core *core)
+static int llce_load_fw_images(struct device *dev, struct llce_core *core)
 {
 	int i, ret;
+	struct llce_fw *fw;
+	const char *img_name;
 
-	core->nfrws = of_property_count_strings(pdev->dev.of_node,
-						"firmware-name");
+	core->nfrws = of_property_count_strings(dev->of_node, "firmware-name");
+	if (core->nfrws < 0) {
+		dev_err(dev, "Failed to get 'firmware-name' property\n");
+		return core->nfrws;
+	}
+
+	core->fws = devm_kmalloc(dev, core->nfrws * sizeof(*core->fws),
+				 GFP_KERNEL);
+	if (!core->fws)
+		return -ENOMEM;
+
 	for (i = 0; i < core->nfrws; i++) {
-		ret = llce_fw_load(pdev, i, core->pools[i]);
-		if (ret)
+		ret = of_property_read_string_index(dev->of_node,
+						    "firmware-name", i,
+						    &img_name);
+		if (ret) {
+			dev_err(dev, "Failed to get firmware's name (idx=%d)\n",
+				i);
 			return ret;
+		}
+
+		fw = &core->fws[i];
+
+		ret = request_firmware(&fw->fw_entry, img_name, dev);
+		if (ret) {
+			dev_err(dev, "Failed to load '%s' binary\n", img_name);
+			return ret;
+		}
+
+		fw->node = get_core_sram(core, img_name);
+		if (!fw->node) {
+			dev_err(dev, "Unable to find '%s' sram node\n",
+				img_name);
+			return -EINVAL;
+		}
 	}
 
 	return 0;
@@ -203,14 +201,14 @@ static int llce_load_fw_images(struct platform_device *pdev,
 
 static void llce_flush_fw(struct llce_core *core)
 {
-	struct sram_pool *pool;
+	struct llce_fw *fw;
 	size_t i;
 
 	for (i = 0; i < core->nfrws; i++) {
-		pool = core->pools[i];
+		fw = &core->fws[i];
 
-		memcpy_toio((void __iomem *)pool->vaddr, pool->fw_entry->data,
-			    pool->fw_entry->size);
+		memcpy_toio(fw->node->addr, fw->fw_entry->data,
+			    fw->fw_entry->size);
 	}
 }
 
@@ -219,7 +217,7 @@ static void llce_release_fw_images(struct llce_core *core)
 	size_t i;
 
 	for (i = 0; i < core->nfrws; i++)
-		llce_release_fw(core->pools[i]);
+		release_firmware(core->fws[i].fw_entry);
 }
 
 static void reset_llce_cores(void __iomem *sysctrl_base)
@@ -290,20 +288,6 @@ static int llce_cores_kickoff(struct device *dev, void __iomem *sysctrl_base,
 	return 0;
 }
 
-static struct sram_pool *get_status_pool(struct llce_core *core)
-{
-	size_t i;
-	struct sram_pool *pool;
-
-	for (i = 0; i < core->npools; i++) {
-		pool = core->pools[i];
-		if (!strcmp(LLCE_STATUS_POOL, pool->name))
-			return pool;
-	}
-
-	return NULL;
-}
-
 static int init_core_clock(struct device *dev, struct llce_core *core)
 {
 	int ret;
@@ -330,22 +314,14 @@ static void deinit_core_clock(struct llce_core *core)
 
 static int start_llce_cores(struct device *dev, struct llce_core *core)
 {
-	struct sram_pool *status_pool;
 	int ret;
+	struct sram_node *status = get_core_sram(core, LLCE_STATUS_REGION);
 
 	reset_llce_cores(core->sysctrl_base);
 
 	llce_flush_fw(core);
 
-	status_pool = get_status_pool(core);
-	if (!status_pool) {
-		dev_err(dev, "'%s' pool is not attached to LLCE core\n",
-			LLCE_STATUS_POOL);
-		return -EIO;
-	}
-
-	ret = llce_cores_kickoff(dev, core->sysctrl_base,
-				 (void *)status_pool->vaddr);
+	ret = llce_cores_kickoff(dev, core->sysctrl_base, status->addr);
 	if (ret) {
 		dev_err(dev, "Failed to start LLCE cores\n");
 		return ret;
@@ -361,6 +337,9 @@ static int llce_core_probe(struct platform_device *pdev)
 	struct llce_core *core;
 	int ret;
 
+	if (!load_fw)
+		return devm_of_platform_populate(&pdev->dev);
+
 	core = devm_kmalloc(dev, sizeof(*core), GFP_KERNEL);
 	if (!core)
 		return -ENOMEM;
@@ -374,8 +353,8 @@ static int llce_core_probe(struct platform_device *pdev)
 		return -EIO;
 	}
 
-	core->sysctrl_base = devm_ioremap(dev, sysctrl_res->start,
-				    resource_size(sysctrl_res));
+	core->sysctrl_base = devm_ioremap_wc(dev, sysctrl_res->start,
+					     resource_size(sysctrl_res));
 	if (!core->sysctrl_base) {
 		dev_err(dev, "Failed to map 'sysctrl'\n");
 		return -ENOMEM;
@@ -385,11 +364,13 @@ static int llce_core_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = llce_alloc_sram(pdev, core);
+	ret = map_sram_nodes(dev, core);
 	if (ret)
 		goto disable_clk;
 
-	ret = llce_load_fw_images(pdev, core);
+	init_sram_nodes(core);
+
+	ret = llce_load_fw_images(dev, core);
 	if (ret)
 		goto disable_clk;
 
@@ -417,6 +398,9 @@ static int llce_core_remove(struct platform_device *pdev)
 {
 	struct llce_core *core = platform_get_drvdata(pdev);
 
+	if (!load_fw)
+		return 0;
+
 	llce_release_fw_images(core);
 	deinit_core_clock(core);
 	return 0;
@@ -425,6 +409,9 @@ static int llce_core_remove(struct platform_device *pdev)
 static int __maybe_unused llce_core_suspend(struct device *dev)
 {
 	struct llce_core *core = dev_get_drvdata(dev);
+
+	if (!load_fw)
+		return 0;
 
 	deinit_core_clock(core);
 
@@ -435,6 +422,11 @@ static int __maybe_unused llce_core_resume(struct device *dev)
 {
 	struct llce_core *core = dev_get_drvdata(dev);
 	int ret;
+
+	if (!load_fw)
+		return 0;
+
+	init_sram_nodes(core);
 
 	ret = init_core_clock(dev, core);
 	if (ret)
