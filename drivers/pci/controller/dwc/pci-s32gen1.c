@@ -151,7 +151,7 @@
 			BAR_ ## bar_no, \
 			PCIE_EP_BAR ## bar_no ## _INIT}
 
-struct pci_epf_bar s32gen1_ep_bars[] = {
+static struct pci_epf_bar s32gen1_ep_bars[] = {
 		PCIE_EP_BAR_INIT(0),
 		PCIE_EP_BAR_INIT(1),
 		PCIE_EP_BAR_INIT(2),
@@ -159,7 +159,8 @@ struct pci_epf_bar s32gen1_ep_bars[] = {
 		PCIE_EP_BAR_INIT(4),
 		PCIE_EP_BAR_INIT(5)
 };
-int s32gen1_ep_bars_en[] = {
+
+static int s32gen1_ep_bars_en[] = {
 		PCIE_EP_BAR0_EN_DIS,
 		PCIE_EP_BAR1_EN_DIS,
 		PCIE_EP_BAR2_EN_DIS,
@@ -809,6 +810,7 @@ static int s32gen1_pcie_dt_init(struct platform_device *pdev,
 	struct device_node *np = dev->of_node;
 	struct dw_pcie *pcie = &s32_pp->pcie;
 	struct resource *res;
+	const char *pcie_phy_mode;
 	const struct of_device_id *match;
 	const struct s32gen1_pcie_data *data;
 	enum dw_pcie_device_mode mode;
@@ -832,33 +834,48 @@ static int s32gen1_pcie_dt_init(struct platform_device *pdev,
 		return ret;
 	}
 
+	ret = of_property_read_string(np, "nxp,phy-mode", &pcie_phy_mode);
+	if (ret) {
+		dev_info(dev, "Missing 'nxp,phy-mode' property, using default CRNS\n");
+		s32_pp->phy_mode = CRNS;
+	} else if (!strcmp(pcie_phy_mode, "crns")) {
+		s32_pp->phy_mode = CRNS;
+	} else if (!strcmp(pcie_phy_mode, "crss")) {
+		s32_pp->phy_mode = CRSS;
+	} else if (!strcmp(pcie_phy_mode, "sris")) {
+		s32_pp->phy_mode = SRIS;
+	} else {
+		dev_info(dev, "Unsupported 'nxp,phy-mode' specified, using default CRNS\n");
+		s32_pp->phy_mode = CRNS;
+	}
+
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dbi");
 	pcie->dbi_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(pcie->dbi_base))
 		return PTR_ERR(pcie->dbi_base);
 	dev_dbg(dev, "dbi: %pR\n", res);
-	dev_dbg(dev, "dbi virt: 0x%llx\n", (u64)pcie->dbi_base);
+	dev_dbg(dev, "dbi virt: 0x%p\n", pcie->dbi_base);
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dbi2");
 	pcie->dbi_base2 = devm_ioremap_resource(dev, res);
 	if (IS_ERR(pcie->dbi_base2))
 		return PTR_ERR(pcie->dbi_base2);
 	dev_dbg(dev, "dbi2: %pR\n", res);
-	dev_dbg(dev, "dbi2 virt: 0x%llx\n", (u64)pcie->dbi_base2);
+	dev_dbg(dev, "dbi2 virt: 0x%p\n", pcie->dbi_base2);
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "atu");
 	dev_dbg(dev, "atu: %pR\n", res);
 	pcie->atu_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(pcie->atu_base))
 		return PTR_ERR(pcie->atu_base);
-	dev_dbg(dev, "atu virt: 0x%llx\n", (u64)pcie->atu_base);
+	dev_dbg(dev, "atu virt: 0x%p\n", pcie->atu_base);
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ctrl");
 	s32_pp->ctrl_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(s32_pp->ctrl_base))
 		return PTR_ERR(s32_pp->ctrl_base);
 	dev_dbg(dev, "ctrl: %pR\n", res);
-	dev_dbg(dev, "ctrl virt: 0x%llx\n", (u64)s32_pp->ctrl_base);
+	dev_dbg(dev, "ctrl virt: 0x%p\n", s32_pp->ctrl_base);
 
 	s32_pp->linkspeed = of_pci_get_max_link_speed(np);
 	if (s32_pp->linkspeed < GEN1 || s32_pp->linkspeed > GEN3) {
@@ -918,6 +935,10 @@ static int init_pcie(struct s32gen1_pcie *pci)
 	else
 		W32(pci, ctrl, PE0_GEN_CTRL_1,
 		    BUILD_MASK_VALUE(DEVICE_TYPE, PCIE_RC));
+
+	if (pci->phy_mode == SRIS)
+		BSET32(pci, ctrl, PE0_GEN_CTRL_1,
+		       SRIS_MODE_MASK);
 
 	/* Enable writing dbi registers */
 	dw_pcie_dbi_ro_wr_en(pcie);
@@ -1020,6 +1041,12 @@ static int init_pcie_phy(struct s32gen1_pcie *s32_pp)
 		return ret;
 	}
 
+	ret = phy_set_mode_ext(s32_pp->phy0, PHY_MODE_PCIE, s32_pp->phy_mode);
+	if (ret) {
+		dev_err(dev, "Failed to set mode on 'serdes_lane0' PHY\n");
+		return ret;
+	}
+
 	ret = phy_power_on(s32_pp->phy0);
 	if (ret) {
 		dev_err(dev, "Failed to power on 'serdes_lane0' PHY\n");
@@ -1037,6 +1064,12 @@ static int init_pcie_phy(struct s32gen1_pcie *s32_pp)
 	ret = phy_init(s32_pp->phy1);
 	if (ret) {
 		dev_err(dev, "Failed to init 'serdes_lane1' PHY\n");
+		return ret;
+	}
+
+	ret = phy_set_mode_ext(s32_pp->phy1, PHY_MODE_PCIE, s32_pp->phy_mode);
+	if (ret) {
+		dev_err(dev, "Failed to set mode on 'serdes_lane1' PHY\n");
 		return ret;
 	}
 
