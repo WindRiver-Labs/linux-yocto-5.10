@@ -17,6 +17,8 @@
 DEFINE_SPINLOCK(imx_ccm_lock);
 EXPORT_SYMBOL_GPL(imx_ccm_lock);
 
+bool uart_from_osc;
+
 void imx_unregister_clocks(struct clk *clks[], unsigned int count)
 {
 	unsigned int i;
@@ -149,8 +151,7 @@ void imx_cscmr1_fixup(u32 *val)
 #ifndef MODULE
 
 static bool imx_keep_uart_clocks;
-static int imx_enabled_uart_clocks;
-static struct clk **imx_uart_clocks;
+static bool imx_uart_clks_on;
 
 static int __init imx_keep_uart_clocks_param(char *str)
 {
@@ -163,50 +164,53 @@ __setup_param("earlycon", imx_keep_uart_earlycon,
 __setup_param("earlyprintk", imx_keep_uart_earlyprintk,
 	      imx_keep_uart_clocks_param, 0);
 
-void imx_register_uart_clocks(unsigned int clk_count)
+static void imx_earlycon_uart_clks_onoff(bool is_on)
 {
-	imx_enabled_uart_clocks = 0;
+	struct clk *uart_clk;
+	int i = 0;
 
-/* i.MX boards use device trees now.  For build tests without CONFIG_OF, do nothing */
-#ifdef CONFIG_OF
-	if (imx_keep_uart_clocks) {
-		int i;
+	if (!imx_keep_uart_clocks || (!is_on && !imx_uart_clks_on))
+		return;
 
-		imx_uart_clocks = kcalloc(clk_count, sizeof(struct clk *), GFP_KERNEL);
+	/* only support dt */
+	if (!of_stdout)
+		return;
 
-		if (!of_stdout)
-			return;
+	do {
+		uart_clk = of_clk_get(of_stdout, i++);
+		if (IS_ERR(uart_clk))
+			break;
 
-		for (i = 0; i < clk_count; i++) {
-			imx_uart_clocks[imx_enabled_uart_clocks] = of_clk_get(of_stdout, i);
+		if (is_on)
+			clk_prepare_enable(uart_clk);
+		else
+			clk_disable_unprepare(uart_clk);
+	} while (true);
 
-			/* Stop if there are no more of_stdout references */
-			if (IS_ERR(imx_uart_clocks[imx_enabled_uart_clocks]))
-				return;
+	if (is_on)
+		imx_uart_clks_on = true;
 
-			/* Only enable the clock if it's not NULL */
-			if (imx_uart_clocks[imx_enabled_uart_clocks])
-				clk_prepare_enable(imx_uart_clocks[imx_enabled_uart_clocks++]);
-		}
-	}
-#endif
+}
+
+void imx_register_uart_clocks(void)
+{
+	imx_earlycon_uart_clks_onoff(true);
 }
 
 static int __init imx_clk_disable_uart(void)
 {
-	if (imx_keep_uart_clocks && imx_enabled_uart_clocks) {
-		int i;
-
-		for (i = 0; i < imx_enabled_uart_clocks; i++) {
-			clk_disable_unprepare(imx_uart_clocks[i]);
-			clk_put(imx_uart_clocks[i]);
-		}
-		kfree(imx_uart_clocks);
-	}
-
+	imx_earlycon_uart_clks_onoff(false);
 	return 0;
 }
 late_initcall_sync(imx_clk_disable_uart);
+
+static int __init setup_uart_clk(char *uart_rate)
+{
+       uart_from_osc = true;
+       return 1;
+}
+__setup("uart_from_osc", setup_uart_clk);
+
 #endif
 
 MODULE_LICENSE("GPL v2");

@@ -403,9 +403,9 @@ void __init arm64_memblock_init(void)
 		initrd_end = initrd_start + phys_initrd_size;
 	}
 
-	early_init_fdt_scan_reserved_mem();
-
 	reserve_elfcorehdr();
+
+	early_init_fdt_scan_reserved_mem();
 
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
