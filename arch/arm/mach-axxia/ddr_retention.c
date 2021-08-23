@@ -8,6 +8,7 @@
 #include <linux/proc_fs.h>
 #include <linux/prefetch.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 
 #include <linux/of.h>
 #include <linux/io.h>
@@ -205,8 +206,12 @@ static inline void flush_tlb_ID(void)
 static void exercise_stack_ptr(volatile char *recursions)
 {
 	volatile char *p;
-	char stack_var[1024];
+	char *stack_var;
 	int i;
+
+	stack_var = kmalloc(1024, GFP_KERNEL);
+	if (!stack_var)
+		return;
 
 	p = stack_var;
 
@@ -217,6 +222,8 @@ static void exercise_stack_ptr(volatile char *recursions)
 		*recursions -= 1;
 		exercise_stack_ptr(recursions);
 	}
+
+	kfree(stack_var);
 }
 
 void
