@@ -630,9 +630,6 @@ int rvu_mbox_handler_cgx_mac_addr_set(struct rvu *rvu,
 	struct rvu_pfvf *pfvf;
 	u8 cgx_id, lmac_id;
 
-	if (!is_pf_cgxmapped(rvu, pf))
-		return -EPERM;
-
 	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
 		return -EPERM;
 
@@ -707,9 +704,6 @@ int rvu_mbox_handler_cgx_mac_addr_get(struct rvu *rvu,
 {
 	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, req->hdr.pcifunc);
 	int i;
-
-	if (!is_pf_cgxmapped(rvu, rvu_get_pf(req->hdr.pcifunc)))
-		return -EPERM;
 
 	if (!is_cgx_config_permitted(rvu, req->hdr.pcifunc))
 		return -EPERM;
