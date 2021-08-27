@@ -21,17 +21,26 @@
 
 #define DEVICE_NAME	"otx-bphy-ctr"
 #define OTX_IOC_MAGIC	0xF3
+/* Old MAX_IRQ has been redefined - now it describes
+ * maximum supported number of interrupts rather than
+ * actual number on current platform. The latter is obtained
+ * from ATF and indicates current capabilities.
+ * This is a limitationm but complies with maximum number of
+ * interrupts' bitmask.
+ */
+#define MAX_IRQ		64
 
 static unsigned long bphy_max_irq;
+static unsigned long bphy_irq_bmask;
 static struct device *otx_device;
 static struct class *otx_class;
 static struct cdev *otx_cdev;
 static dev_t otx_dev;
 static DEFINE_SPINLOCK(el3_inthandler_lock);
 static int in_use;
-static int *irq_installed;
-static struct thread_info **irq_installed_threads;
-static struct task_struct **irq_installed_tasks;
+static int irq_installed[MAX_IRQ];
+static struct thread_info *irq_installed_threads[MAX_IRQ];
+static struct task_struct *irq_installed_tasks[MAX_IRQ];
 
 /* SMC definitons */
 /* X1 - irq_num, X2 - sp, X3 - cpu, X4 - ttbr0 */
@@ -40,6 +49,8 @@ static struct task_struct **irq_installed_tasks;
 #define OCTEONTX_REMOVE_BPHY_PSM_ERRINT        0xc2000804
 /* no params */
 #define OCTEONTX_GET_BPHY_PSM_MAX_IRQ          0xc2000805
+/* no params */
+#define OCTEONTX_GET_BPHY_PSM_IRQS_BITMASK     0xc2000806
 
 struct otx_irq_usr_data {
 	u64	isr_base;
@@ -57,6 +68,9 @@ struct otx_irq_usr_data {
 
 #define OTX_IOC_GET_BPHY_MAX_IRQ \
 	_IOR(OTX_IOC_MAGIC, 3, u64)
+
+#define OTX_IOC_GET_BPHY_BMASK_IRQ \
+	_IOR(OTX_IOC_MAGIC, 4, u64)
 
 static inline int __install_el3_inthandler(unsigned long irq_num,
 					   unsigned long sp,
@@ -165,6 +179,11 @@ static long otx_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		if (copy_to_user((u64 *)arg, &irq_num, sizeof(irq_num)))
 			return -EFAULT;
 		break;
+	case OTX_IOC_GET_BPHY_BMASK_IRQ:
+		if (copy_to_user((u64 *)arg, &bphy_irq_bmask,
+				 sizeof(bphy_irq_bmask)))
+			return -EFAULT;
+		break;
 	default:
 		return -ENOTTY;
 	}
@@ -195,6 +214,19 @@ static void cleanup_el3_irqs(struct task_struct *task)
 
 static int otx_dev_open(struct inode *inode, struct file *fp)
 {
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(OCTEONTX_GET_BPHY_PSM_IRQS_BITMASK, 0,
+		      0, 0, 0, 0, 0, 0, &res);
+	bphy_irq_bmask = res.a0;
+
+	arm_smccc_smc(OCTEONTX_GET_BPHY_PSM_MAX_IRQ, 0,
+		      0, 0, 0, 0, 0, 0, &res);
+	bphy_max_irq = res.a0;
+
+	if (bphy_max_irq > MAX_IRQ)
+		return -1;
+
 	in_use = 1;
 	return 0;
 }
@@ -217,7 +249,6 @@ static const struct file_operations fops = {
 
 static int __init otx_ctr_dev_init(void)
 {
-	struct arm_smccc_res res;
 	int err = 0;
 
 	/* create a character device */
@@ -261,26 +292,7 @@ static int __init otx_ctr_dev_init(void)
 		goto cleanup_handler_err;
 	}
 
-	arm_smccc_smc(OCTEONTX_GET_BPHY_PSM_MAX_IRQ, 0,
-		      0, 0, 0, 0, 0, 0, &res);
-	bphy_max_irq = res.a0;
-
-	irq_installed = kcalloc(bphy_max_irq, sizeof(int), GFP_KERNEL);
-	irq_installed_threads = (struct thread_info **)
-		kcalloc(bphy_max_irq, sizeof(struct thread_info *), GFP_KERNEL);
-	irq_installed_tasks = (struct task_struct **)
-		kcalloc(bphy_max_irq, sizeof(struct task_struct *), GFP_KERNEL);
-	if (!irq_installed || !irq_installed_threads || !irq_installed_tasks) {
-		err = -ENOMEM;
-		goto alloc_err;
-	}
-
 	return err;
-
-alloc_err:
-	kfree(irq_installed);
-	kfree(irq_installed_threads);
-	kfree(irq_installed_tasks);
 
 device_create_err:
 	class_destroy(otx_class);
@@ -304,10 +316,6 @@ static void __exit otx_ctr_dev_exit(void)
 	unregister_chrdev_region(otx_dev, 1);
 
 	task_cleanup_handler_remove(cleanup_el3_irqs);
-
-	kfree(irq_installed);
-	kfree(irq_installed_threads);
-	kfree(irq_installed_tasks);
 }
 
 module_init(otx_ctr_dev_init);

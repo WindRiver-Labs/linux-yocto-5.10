@@ -1349,6 +1349,9 @@ static int otx2_init_hw_resources(struct otx2_nic *pf)
 				  OTX2_HW_TIMESTAMP_LEN + pf->addl_mtu +
 				  pf->xtra_hdr);
 
+	/* Maximum hardware supported transmit length */
+	pf->tx_max_pktlen = pf->netdev->max_mtu + OTX2_ETH_HLEN;
+
 	mutex_lock(&mbox->lock);
 	/* NPA init */
 	err = otx2_config_npa(pf);
@@ -1761,7 +1764,7 @@ static netdev_tx_t otx2_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	/* Check for minimum and maximum packet length */
 	if (skb->len <= ETH_HLEN ||
-	    (!skb_shinfo(skb)->gso_size && skb->len > pf->max_frs)) {
+	    (!skb_shinfo(skb)->gso_size && skb->len > pf->tx_max_pktlen)) {
 		dev_kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}

@@ -23,6 +23,7 @@ static int rvu_nix_get_bpid(struct rvu *rvu, struct nix_bp_cfg_req *req,
 			    int type, int chan_id);
 static int nix_update_mce_rule(struct rvu *rvu, u16 pcifunc,
 			       int type, bool add);
+static const char *nix_get_ctx_name(int ctype);
 
 enum mc_tbl_sz {
 	MC_TBL_SZ_256,
@@ -188,11 +189,22 @@ static void nix_rx_sync(struct rvu *rvu, int blkaddr)
 {
 	int err;
 
-	/*Sync all in flight RX packets to LLC/DRAM */
+	/* Sync all in flight RX packets to LLC/DRAM */
 	rvu_write64(rvu, blkaddr, NIX_AF_RX_SW_SYNC, BIT_ULL(0));
 	err = rvu_poll_reg(rvu, blkaddr, NIX_AF_RX_SW_SYNC, BIT_ULL(0), true);
 	if (err)
-		dev_err(rvu->dev, "NIX RX software sync failed\n");
+		dev_err(rvu->dev, "SYNC1: NIX RX software sync failed\n");
+
+	/* SW_SYNC ensures all existing transactions are finished and pkts
+	 * are written to LLC/DRAM, queues should be teared down after
+	 * successful SW_SYNC. Due to a HW errata, in some rare scenarios
+	 * an existing transaction might end after SW_SYNC operation. To
+	 * ensure operation is fully done, do the SW_SYNC twice.
+	 */
+	rvu_write64(rvu, blkaddr, NIX_AF_RX_SW_SYNC, BIT_ULL(0));
+	err = rvu_poll_reg(rvu, blkaddr, NIX_AF_RX_SW_SYNC, BIT_ULL(0), true);
+	if (err)
+		dev_err(rvu->dev, "SYNC2: NIX RX software sync failed\n");
 }
 
 static bool is_valid_txschq(struct rvu *rvu, int blkaddr,
@@ -231,7 +243,7 @@ static bool is_valid_txschq(struct rvu *rvu, int blkaddr,
 }
 
 static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
-			      struct nix_lf_alloc_rsp *rsp)
+			      struct nix_lf_alloc_rsp *rsp, bool loop)
 {
 	struct rvu_pfvf *parent_pf, *pfvf = rvu_get_pfvf(rvu, pcifunc);
 	u16 req_chan_base, req_chan_end, req_chan_cnt;
@@ -288,6 +300,25 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 		if (rvu->hw->lbk_links > 1)
 			lbkid = vf & 0x1 ? 0 : 1;
 
+		/* By default NIX0 is configured to send packet on lbk link 1
+		 * (which corresponds to LBK1), same packet will receive on
+		 * NIX1 over lbk link 0. If NIX1 sends packet on lbk link 0
+		 * (which corresponds to LBK2) packet will receive on NIX0 lbk
+		 * link 1.
+		 * But if lbk links for NIX0 and NIX1 are negated, i.e NIX0
+		 * transmits and receives on lbk link 0, whick corresponds
+		 * to LBK1 block, back to back connectivity between NIX and
+		 * LBK can be achieved (which is similar to 96xx)
+		 *
+		 *			RX		TX
+		 * NIX0 lbk link	1 (LBK2)	1 (LBK1)
+		 * NIX0 lbk link	0 (LBK0)	0 (LBK0)
+		 * NIX1 lbk link	0 (LBK1)	0 (LBK2)
+		 * NIX1 lbk link	1 (LBK3)	1 (LBK3)
+		 */
+		if (loop)
+			lbkid = !lbkid;
+
 		/* Note that AF's VFs work in pairs and talk over consecutive
 		 * loopback channels.Therefore if odd number of AF VFs are
 		 * enabled then the last VF remains with no pair.
@@ -299,6 +330,7 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 		pfvf->rx_chan_cnt = 1;
 		pfvf->tx_chan_cnt = 1;
 		rsp->tx_link = hw->cgx_links + lbkid;
+		pfvf->lbkid = lbkid;
 		rvu_npc_set_pkind(rvu, NPC_RX_LBK_PKIND, pfvf);
 		rvu_npc_install_promisc_entry(rvu, pcifunc, nixlf,
 					      pfvf->rx_chan_base,
@@ -948,10 +980,82 @@ static int rvu_nix_blk_aq_enq_inst(struct rvu *rvu, struct nix_hw *nix_hw,
 	return 0;
 }
 
+static int nix_aq_context_read(struct rvu *rvu, struct nix_hw *nix_hw,
+			       struct nix_aq_enq_req *aq_req,
+			       struct nix_aq_enq_rsp *aq_rsp,
+			       u16 pcifunc, u8 ctype, u32 qidx)
+{
+	memset(aq_req, 0, sizeof(struct nix_aq_enq_req));
+	aq_req->hdr.pcifunc = pcifunc;
+	aq_req->ctype = ctype;
+	aq_req->op = NIX_AQ_INSTOP_READ;
+	aq_req->qidx = qidx;
+
+	return rvu_nix_blk_aq_enq_inst(rvu, nix_hw, aq_req, aq_rsp);
+}
+
+static int rvu_nix_verify_aq_ctx(struct rvu *rvu, struct nix_hw *nix_hw,
+				 struct nix_aq_enq_req *req, u8 ctype)
+{
+	struct nix_aq_enq_req aq_req;
+	struct nix_aq_enq_rsp aq_rsp;
+	int rc, word;
+
+	if (req->ctype != NIX_AQ_CTYPE_CQ)
+		return 0;
+
+	rc = nix_aq_context_read(rvu, nix_hw, &aq_req, &aq_rsp,
+				 req->hdr.pcifunc, ctype, req->qidx);
+	if (rc) {
+		dev_err(rvu->dev,
+			"%s: Failed to fetch %s%d context of PFFUNC 0x%x\n",
+			__func__, nix_get_ctx_name(ctype), req->qidx,
+			req->hdr.pcifunc);
+		return rc;
+	}
+
+	/* Make copy of original context & mask which are required
+	 * for resubmission
+	 */
+	memcpy(&aq_req.cq_mask, &req->cq_mask, sizeof(struct nix_cq_ctx_s));
+	memcpy(&aq_req.cq, &req->cq, sizeof(struct nix_cq_ctx_s));
+
+	/* exclude fields which HW can update */
+	aq_req.cq_mask.cq_err       = 0;
+	aq_req.cq_mask.wrptr        = 0;
+	aq_req.cq_mask.tail         = 0;
+	aq_req.cq_mask.head	    = 0;
+	aq_req.cq_mask.avg_level    = 0;
+	aq_req.cq_mask.update_time  = 0;
+	aq_req.cq_mask.substream    = 0;
+
+	/* Context mask (cq_mask) holds mask value of fields which
+	 * are changed in AQ WRITE operation.
+	 * for example cq.drop = 0xa;
+	 *	       cq_mask.drop = 0xff;
+	 * Below logic performs '&' between cq and cq_mask so that non
+	 * updated fields are masked out for request and response
+	 * comparison
+	 */
+	for (word = 0; word < sizeof(struct nix_cq_ctx_s) / sizeof(u64);
+	     word++) {
+		*(u64 *)((u8 *)&aq_rsp.cq + word * 8) &=
+			(*(u64 *)((u8 *)&aq_req.cq_mask + word * 8));
+		*(u64 *)((u8 *)&aq_req.cq + word * 8) &=
+			(*(u64 *)((u8 *)&aq_req.cq_mask + word * 8));
+	}
+
+	if (memcmp(&aq_req.cq, &aq_rsp.cq, sizeof(struct nix_cq_ctx_s)))
+		return NIX_AF_ERR_AQ_CTX_RETRY_WRITE;
+
+	return 0;
+}
+
 static int rvu_nix_aq_enq_inst(struct rvu *rvu, struct nix_aq_enq_req *req,
 			       struct nix_aq_enq_rsp *rsp)
 {
 	struct nix_hw *nix_hw;
+	int err, retries = 5;
 	int blkaddr;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, req->hdr.pcifunc);
@@ -960,9 +1064,26 @@ static int rvu_nix_aq_enq_inst(struct rvu *rvu, struct nix_aq_enq_req *req,
 
 	nix_hw =  get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
-	return rvu_nix_blk_aq_enq_inst(rvu, nix_hw, req, rsp);
+retry:
+	err = rvu_nix_blk_aq_enq_inst(rvu, nix_hw, req, rsp);
+
+	/* HW errata 'AQ Modification to CQ could be discarded on heavy traffic'
+	 * As a work around perfrom CQ context read after each AQ write. If AQ
+	 * read shows AQ write is not updated perform AQ write again.
+	 */
+	if (!err && req->op == NIX_AQ_INSTOP_WRITE) {
+		err = rvu_nix_verify_aq_ctx(rvu, nix_hw, req, NIX_AQ_CTYPE_CQ);
+		if (err == NIX_AF_ERR_AQ_CTX_RETRY_WRITE) {
+			if (retries--)
+				goto retry;
+			else
+				return NIX_AF_ERR_CQ_CTX_WRITE_ERR;
+		}
+	}
+
+	return err;
 }
 
 static const char *nix_get_ctx_name(int ctype)
@@ -1080,6 +1201,7 @@ int rvu_mbox_handler_nix_aq_enq(struct rvu *rvu,
 	return rvu_nix_aq_enq_inst(rvu, req, rsp);
 }
 #endif
+EXPORT_SYMBOL(rvu_mbox_handler_nix_aq_enq);
 
 int rvu_mbox_handler_nix_hwctx_disable(struct rvu *rvu,
 				       struct hwctx_disable_req *req,
@@ -1274,7 +1396,8 @@ int rvu_mbox_handler_nix_lf_alloc(struct rvu *rvu,
 	if (is_sdp_pfvf(pcifunc))
 		intf = NIX_INTF_TYPE_SDP;
 
-	err = nix_interface_init(rvu, pcifunc, intf, nixlf, rsp);
+	err = nix_interface_init(rvu, pcifunc, intf, nixlf, rsp,
+				 !!(req->flags & NIX_LF_LBK_BLK_SEL));
 	if (err)
 		goto free_mem;
 
@@ -1385,7 +1508,7 @@ int rvu_mbox_handler_nix_mark_format_cfg(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	cfg = (((u32)req->offset & 0x7) << 16) |
 	      (((u32)req->y_mask & 0xF) << 12) |
@@ -1798,7 +1921,7 @@ int rvu_mbox_handler_nix_txsch_alloc(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	mutex_lock(&rvu->rsrc_lock);
 
@@ -1932,7 +2055,7 @@ static int nix_txschq_free(struct rvu *rvu, u16 pcifunc)
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	nixlf = rvu_get_lf(rvu, &hw->block[blkaddr], pcifunc, 0);
 	if (nixlf < 0)
@@ -2019,7 +2142,7 @@ static int nix_txschq_free_one(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	nixlf = rvu_get_lf(rvu, &hw->block[blkaddr], pcifunc, 0);
 	if (nixlf < 0)
@@ -2227,7 +2350,7 @@ int rvu_mbox_handler_nix_txschq_cfg(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	if (req->read)
 		return nix_txschq_cfg_read(rvu, nix_hw, blkaddr, req, rsp);
@@ -2341,8 +2464,12 @@ static int nix_tx_vtag_free(struct rvu *rvu, int blkaddr,
 			    u16 pcifunc, int index)
 {
 	struct nix_hw *nix_hw = get_nix_hw(rvu->hw, blkaddr);
-	struct nix_txvlan *vlan = &nix_hw->txvlan;
+	struct nix_txvlan *vlan;
 
+	if (!nix_hw)
+		return NIX_AF_ERR_INVALID_NIXBLK;
+
+	vlan = &nix_hw->txvlan;
 	if (vlan->entry2pfvf_map[index] != pcifunc)
 		return NIX_AF_ERR_PARAM;
 
@@ -2383,9 +2510,14 @@ static int nix_tx_vtag_alloc(struct rvu *rvu, int blkaddr,
 			     u64 vtag, u8 size)
 {
 	struct nix_hw *nix_hw = get_nix_hw(rvu->hw, blkaddr);
-	struct nix_txvlan *vlan = &nix_hw->txvlan;
+	struct nix_txvlan *vlan;
 	u64 regval;
 	int index;
+
+	if (!nix_hw)
+		return NIX_AF_ERR_INVALID_NIXBLK;
+
+	vlan = &nix_hw->txvlan;
 
 	mutex_lock(&vlan->rsrc_lock);
 
@@ -2411,12 +2543,16 @@ static int nix_tx_vtag_decfg(struct rvu *rvu, int blkaddr,
 			     struct nix_vtag_config *req)
 {
 	struct nix_hw *nix_hw = get_nix_hw(rvu->hw, blkaddr);
-	struct nix_txvlan *vlan = &nix_hw->txvlan;
 	u16 pcifunc = req->hdr.pcifunc;
 	int idx0 = req->tx.vtag0_idx;
 	int idx1 = req->tx.vtag1_idx;
+	struct nix_txvlan *vlan;
 	int err = 0;
 
+	if (!nix_hw)
+		return NIX_AF_ERR_INVALID_NIXBLK;
+
+	vlan = &nix_hw->txvlan;
 	if (req->tx.free_vtag0 && req->tx.free_vtag1)
 		if (vlan->entry2pfvf_map[idx0] != pcifunc ||
 		    vlan->entry2pfvf_map[idx1] != pcifunc)
@@ -2443,9 +2579,13 @@ static int nix_tx_vtag_cfg(struct rvu *rvu, int blkaddr,
 			   struct nix_vtag_config_rsp *rsp)
 {
 	struct nix_hw *nix_hw = get_nix_hw(rvu->hw, blkaddr);
-	struct nix_txvlan *vlan = &nix_hw->txvlan;
 	u16 pcifunc = req->hdr.pcifunc;
+	struct nix_txvlan *vlan;
 
+	if (!nix_hw)
+		return NIX_AF_ERR_INVALID_NIXBLK;
+
+	vlan = &nix_hw->txvlan;
 	if (req->tx.cfg_vtag0) {
 		rsp->vtag0_idx =
 			nix_tx_vtag_alloc(rvu, blkaddr,
@@ -3347,7 +3487,7 @@ static int reserve_flowkey_alg_idx(struct rvu *rvu, int blkaddr, u32 flow_cfg)
 
 	hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	/* No room to add new flow hash algoritham */
 	if (hw->flowkey.in_use >= NIX_FLOW_KEY_ALG_MAX)
@@ -3387,7 +3527,7 @@ int rvu_mbox_handler_nix_rss_flowkey_cfg(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	alg_idx = get_flowkey_alg_idx(nix_hw, req->flowkey_cfg);
 	/* Failed to get algo index from the exiting list, reserve new  */
@@ -3660,7 +3800,7 @@ nix_config_link_credits(struct rvu *rvu, int blkaddr, int link,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	if (tx_credits == nix_hw->tx_credits[link])
 		return 0;
@@ -3727,6 +3867,7 @@ int rvu_mbox_handler_nix_set_hw_frs(struct rvu *rvu, struct nix_frs_cfg *req,
 	struct nix_txsch *txsch;
 	u64 cfg, lmac_fifo_len;
 	struct nix_hw *nix_hw;
+	struct rvu_pfvf *pfvf;
 	u8 cgx = 0, lmac = 0;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
@@ -3735,7 +3876,7 @@ int rvu_mbox_handler_nix_set_hw_frs(struct rvu *rvu, struct nix_frs_cfg *req,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	if (!req->sdp_link && req->maxlen > NIC_HW_MAX_FRS)
 		return NIX_AF_ERR_FRS_INVALID;
@@ -3777,7 +3918,8 @@ rx_frscfg:
 		link = (cgx * hw->lmac_per_cgx) + lmac;
 	} else if (pf == 0) {
 		/* For VFs of PF0 ingress is LBK port, so config LBK link */
-		link = hw->cgx_links;
+		pfvf = rvu_get_pfvf(rvu, pcifunc);
+		link = hw->cgx_links + pfvf->lbkid;
 	}
 
 	if (link < 0)
@@ -4218,7 +4360,6 @@ static void rvu_nix_block_freemem(struct rvu *rvu, int blkaddr,
 		vlan = &nix_hw->txvlan;
 		kfree(vlan->rsrc.bmap);
 		mutex_destroy(&vlan->rsrc_lock);
-		devm_kfree(rvu->dev, vlan->entry2pfvf_map);
 
 		mcast = &nix_hw->mcast;
 		qmem_free(rvu->dev, mcast->mce_ctx);
@@ -4400,7 +4541,7 @@ int rvu_mbox_handler_nix_lso_format_cfg(struct rvu *rvu,
 
 	nix_hw = get_nix_hw(rvu->hw, blkaddr);
 	if (!nix_hw)
-		return -EINVAL;
+		return NIX_AF_ERR_INVALID_NIXBLK;
 
 	/* Find existing matching LSO format, if any */
 	for (idx = 0; idx < nix_hw->lso.in_use; idx++) {
