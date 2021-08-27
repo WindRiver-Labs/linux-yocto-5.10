@@ -266,6 +266,15 @@ void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
 	efi_memory_desc_t *md, *region = NULL;
 	pgprot_t prot;
 
+	/*
+	 * Workaround for OcteonTX2 GHES platform driver, skip searching
+	 * EFI memory map.
+	 */
+#ifdef CONFIG_OCTEONTX2_SDEI_GHES
+	if (memblock_is_map_memory(phys))
+		return (void __iomem *)__phys_to_virt(phys);
+#endif
+
 	if (WARN_ON_ONCE(!efi_enabled(EFI_MEMMAP)))
 		return NULL;
 

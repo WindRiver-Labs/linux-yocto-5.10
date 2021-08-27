@@ -284,7 +284,7 @@ struct otx2_nic {
 	struct net_device	*netdev;
 	void			*iommu_domain;
 	u16			iommu_domain_type;
-	u16			max_frs;
+	u16			tx_max_pktlen;
 	u16			xtra_hdr;
 	u16			rbsize; /* Receive buffer size */
 

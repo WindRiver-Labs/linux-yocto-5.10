@@ -602,7 +602,7 @@ struct cgx_set_link_mode_args {
 	u32 speed;
 	u8 duplex;
 	u8 an;
-	u8 ports;
+	u8 mode_baseidx;
 	u64 mode;
 };
 
@@ -747,6 +747,8 @@ enum nix_af_status {
 	NIX_AF_ERR_RX_VTAG_INUSE    = -422,
 	NIX_AF_ERR_PTP_CONFIG_FAIL  = -423,
 	NIX_AF_ERR_INVALID_NIXBLK   = -424,
+	NIX_AF_ERR_CQ_CTX_WRITE_ERR  = -425,
+	NIX_AF_ERR_AQ_CTX_RETRY_WRITE  = -426,
 };
 
 /* For NIX RX vtag action  */
@@ -776,6 +778,7 @@ struct nix_lf_alloc_req {
 	u64 rx_cfg;   /* See NIX_AF_LF(0..127)_RX_CFG */
 	u64 way_mask;
 #define NIX_LF_RSS_TAG_LSB_AS_ADDER BIT_ULL(0)
+#define NIX_LF_LBK_BLK_SEL	    BIT_ULL(1)
 	u64 flags;
 };
 
@@ -1742,4 +1745,14 @@ struct sdp_chan_info_msg {
 	struct mbox_msghdr hdr;
 	struct sdp_node_info info;
 };
+
+/* CGX mailbox error codes
+ * Range 1101 - 1200.
+ */
+enum cgx_af_status {
+	LMAC_AF_ERR_INVALID_PARAM	= -1101,
+	LMAC_AF_ERR_PF_NOT_MAPPED	= -1102,
+	LMAC_AF_ERR_PERM_DENIED		= -1103,
+};
+
 #endif /* MBOX_H */
