@@ -738,6 +738,7 @@ static int otx2_rss_ctx_delete(struct otx2_nic *pfvf, int ctx_id)
 	otx2_rss_ctx_flow_del(pfvf, ctx_id);
 	kfree(rss->rss_ctx[ctx_id]);
 	rss->rss_ctx[ctx_id] = NULL;
+
 	return 0;
 }
 
