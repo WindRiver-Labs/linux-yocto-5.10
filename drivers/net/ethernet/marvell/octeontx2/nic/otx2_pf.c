@@ -2177,7 +2177,7 @@ static int otx2_set_vf_mac(struct net_device *netdev, int vf, u8 *mac)
 	struct otx2_nic *pf = netdev_priv(netdev);
 	struct pci_dev *pdev = pf->pdev;
 	struct otx2_vf_config *config;
-	int ret = 0;
+	int ret;
 
 	if (!netif_running(netdev))
 		return -EAGAIN;
