@@ -1775,7 +1775,7 @@ static int cgx_lmac_init(struct cgx *cgx)
 				MAX_DMAC_ENTRIES_PER_CGX / cgx->lmac_count;
 		err = rvu_alloc_bitmap(&lmac->mac_to_index_bmap);
 		if (err)
-			return err;
+			goto err_name_free;
 
 		/* Reserve first entry for default MAC address */
 		set_bit(0, lmac->mac_to_index_bmap.bmap);
@@ -1786,7 +1786,7 @@ static int cgx_lmac_init(struct cgx *cgx)
 
 		err = cgx_configure_interrupt(cgx, lmac, lmac->lmac_id, false);
 		if (err)
-			goto err_irq;
+			goto err_bitmap_free;
 
 		/* Add reference */
 		cgx->lmac_idmap[lmac->lmac_id] = lmac;
@@ -1796,7 +1796,9 @@ static int cgx_lmac_init(struct cgx *cgx)
 
 	return cgx_lmac_verify_fwi_version(cgx);
 
-err_irq:
+err_bitmap_free:
+	rvu_free_bitmap(&lmac->mac_to_index_bmap);
+err_name_free:
 	kfree(lmac->name);
 err_lmac_free:
 	kfree(lmac);
