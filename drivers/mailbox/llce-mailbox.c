@@ -911,7 +911,7 @@ static int llce_logger_startup(struct mbox_chan *chan)
 	priv->state = LLCE_REGISTERED_CHAN;
 
 	/* Make room for POP leftovers */
-	priv->data = kmalloc(sizeof(struct llce_logger_data), GFP_KERNEL);
+	priv->data = kmalloc(sizeof(struct llce_logger_data), GFP_ATOMIC);
 	if (!priv->data)
 		ret = -ENOMEM;
 
