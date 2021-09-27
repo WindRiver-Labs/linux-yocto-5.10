@@ -29,6 +29,7 @@
 #define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
 
 #define ALIGN_8B_CEIL(__a)	(((__a) + 7) & (-8))
+#define NPC_PARSE_RESULT_DMAC_OFFSET	8
 
 static const char def_pfl_name[] = "default";
 
@@ -2068,6 +2069,22 @@ int rvu_npc_init(struct rvu *rvu)
 		    rvu_read64(rvu, blkaddr, NPC_AF_PCK_CFG) |
 		    ((u64)NPC_EC_OIP4_CSUM << 32) | (NPC_EC_IIP4_CSUM << 24) |
 		    BIT_ULL(7) | BIT_ULL(6) | BIT_ULL(2) | BIT_ULL(1));
+
+	/* Set RX and TX side MCAM search key size.
+	 * LA..LD (ltype only) + Channel
+	 */
+	rx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_RX];
+	tx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_TX];
+	nibble_ena = FIELD_GET(NPC_PARSE_NIBBLE, rx_kex);
+	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX), rx_kex);
+	/* Due to an errata (35786) in A0 pass silicon, parse nibble enable
+	 * configuration has to be identical for both Rx and Tx interfaces.
+	 */
+	if (is_rvu_96xx_B0(rvu)) {
+		tx_kex &= ~NPC_PARSE_NIBBLE;
+		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
+	}
+	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX), tx_kex);
 
 	rvu_npc_setup_interfaces(rvu, blkaddr);
 
