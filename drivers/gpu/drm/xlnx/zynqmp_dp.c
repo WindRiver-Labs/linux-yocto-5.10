@@ -512,6 +512,13 @@ static void zynqmp_dp_exit_phy(struct zynqmp_dp *dp)
 	int ret;
 
 	for (i = 0; i < dp->num_lanes; i++) {
+		ret = phy_power_off(dp->phy[i]);
+		if (ret)
+			dev_err(dp->dev, "failed to power off phy(%d) %d\n", i,
+				ret);
+	}
+
+	for (i = 0; i < dp->num_lanes; i++) {
 		ret = phy_exit(dp->phy[i]);
 		if (ret)
 			dev_err(dp->dev, "failed to exit phy(%d) %d\n", i, ret);
