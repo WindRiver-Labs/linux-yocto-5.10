@@ -1450,6 +1450,89 @@ static int vc4_hdmi_audio_prepare(struct device *dev, void *data,
 	return 0;
 }
 
+static int vc4_hdmi_audio_trigger(struct snd_pcm_substream *substream, int cmd,
+				  struct snd_soc_dai *dai)
+{
+	struct vc4_hdmi *vc4_hdmi = dai_to_hdmi(dai);
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+		vc4_hdmi->audio.streaming = true;
+
+		if (vc4_hdmi->variant->phy_rng_enable)
+			vc4_hdmi->variant->phy_rng_enable(vc4_hdmi);
+
+		HDMI_WRITE(HDMI_MAI_CTL,
+			   VC4_SET_FIELD(vc4_hdmi->audio.channels,
+					 VC4_HD_MAI_CTL_CHNUM) |
+					 VC4_HD_MAI_CTL_WHOLSMP |
+					 VC4_HD_MAI_CTL_CHALIGN |
+					 VC4_HD_MAI_CTL_ENABLE);
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+		HDMI_WRITE(HDMI_MAI_CTL,
+			   VC4_HD_MAI_CTL_DLATE |
+			   VC4_HD_MAI_CTL_ERRORE |
+			   VC4_HD_MAI_CTL_ERRORF);
+
+		if (vc4_hdmi->variant->phy_rng_disable)
+			vc4_hdmi->variant->phy_rng_disable(vc4_hdmi);
+
+		vc4_hdmi->audio.streaming = false;
+
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static inline struct vc4_hdmi *
+snd_component_to_hdmi(struct snd_soc_component *component)
+{
+	struct snd_soc_card *card = snd_soc_component_get_drvdata(component);
+
+	return snd_soc_card_get_drvdata(card);
+}
+
+static int vc4_hdmi_audio_eld_ctl_info(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_info *uinfo)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct vc4_hdmi *vc4_hdmi = snd_component_to_hdmi(component);
+	struct drm_connector *connector = &vc4_hdmi->connector;
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count = sizeof(connector->eld);
+
+	return 0;
+}
+
+static int vc4_hdmi_audio_eld_ctl_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct vc4_hdmi *vc4_hdmi = snd_component_to_hdmi(component);
+	struct drm_connector *connector = &vc4_hdmi->connector;
+
+	memcpy(ucontrol->value.bytes.data, connector->eld,
+	       sizeof(connector->eld));
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new vc4_hdmi_audio_controls[] = {
+	{
+		.access = SNDRV_CTL_ELEM_ACCESS_READ |
+			  SNDRV_CTL_ELEM_ACCESS_VOLATILE,
+		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+		.name = "ELD",
+		.info = vc4_hdmi_audio_eld_ctl_info,
+		.get = vc4_hdmi_audio_eld_ctl_get,
+	},
+};
+
 static const struct snd_soc_dapm_widget vc4_hdmi_audio_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("TX"),
 };
