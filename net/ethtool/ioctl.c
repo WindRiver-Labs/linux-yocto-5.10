@@ -907,7 +907,7 @@ static int ethtool_rxnfc_copy_to_user(void __user *useraddr,
 						   rule_buf);
 		useraddr += offsetof(struct compat_ethtool_rxnfc, rule_locs);
 	} else {
-		ret = copy_to_user(useraddr, &rxnfc, size);
+		ret = copy_to_user(useraddr, rxnfc, size);
 		useraddr += offsetof(struct ethtool_rxnfc, rule_locs);
 	}
 

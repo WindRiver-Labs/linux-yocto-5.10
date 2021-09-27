@@ -648,6 +648,7 @@ static int j721e_pcie_probe(struct platform_device *pdev)
 			ret = -ENOMEM;
 			goto err_get_sync;
 		}
+		ep->quirk_detect_quiet_flag = data->quirk_detect_quiet_flag;
 
 		ep->quirk_detect_quiet_flag = data->quirk_detect_quiet_flag;
 
