@@ -24,7 +24,12 @@
 #define RSVD_MCAM_ENTRIES_PER_PF	3 /* Broadcast, Promisc and AllMulticast */
 #define RSVD_MCAM_ENTRIES_PER_NIXLF	1 /* Ucast for LFs */
 
-#define NPC_HW_TSTAMP_OFFSET		8
+#define NIXLF_UCAST_ENTRY	0
+#define NIXLF_BCAST_ENTRY	1
+#define NIXLF_PROMISC_ENTRY	2
+
+#define NPC_PARSE_RESULT_DMAC_OFFSET	8
+#define NPC_HW_TSTAMP_OFFSET		8ULL
 
 #define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
 #define ALIGN_8B_CEIL(__a)	(((__a) + 7) & (-8))
@@ -1993,6 +1998,22 @@ int rvu_npc_init(struct rvu *rvu)
 		    ((u64)NPC_EC_OIP4_CSUM << 32) | (NPC_EC_IIP4_CSUM << 24) |
 		    BIT_ULL(7) | BIT_ULL(6) | BIT_ULL(2) | BIT_ULL(1));
 
+	/* Set RX and TX side MCAM search key size.
+	 * LA..LD (ltype only) + Channel
+	 */
+	rx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_RX];
+	tx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_TX];
+	nibble_ena = FIELD_GET(NPC_PARSE_NIBBLE, rx_kex);
+	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX), rx_kex);
+	/* Due to an errata (35786) in A0 pass silicon, parse nibble enable
+	 * configuration has to be identical for both Rx and Tx interfaces.
+	 */
+	if (is_rvu_96xx_B0(rvu)) {
+		tx_kex &= ~NPC_PARSE_NIBBLE;
+		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
+	}
+	rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX), tx_kex);
+
 	rvu_npc_setup_interfaces(rvu, blkaddr);
 
 	/* Configure MKEX profile */
@@ -2117,7 +2138,7 @@ static void npc_unmap_mcam_entry_and_cntr(struct rvu *rvu,
 					  int blkaddr, u16 entry, u16 cntr)
 {
 	u16 index = entry & (mcam->banksize - 1);
-	u16 bank = npc_get_bank(mcam, entry);
+	u32 bank = npc_get_bank(mcam, entry);
 
 	/* Remove mapping and reduce counter's refcnt */
 	mcam->entry2cntr_map[entry] = NPC_MCAM_INVALID_MAP;
@@ -2743,8 +2764,8 @@ int rvu_mbox_handler_npc_mcam_shift_entry(struct rvu *rvu,
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	u16 pcifunc = req->hdr.pcifunc;
 	u16 old_entry, new_entry;
+	int blkaddr, rc = 0;
 	u16 index, cntr;
-	int blkaddr, rc;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0)
