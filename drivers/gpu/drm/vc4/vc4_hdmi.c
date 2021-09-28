@@ -1450,89 +1450,6 @@ static int vc4_hdmi_audio_prepare(struct device *dev, void *data,
 	return 0;
 }
 
-static int vc4_hdmi_audio_trigger(struct snd_pcm_substream *substream, int cmd,
-				  struct snd_soc_dai *dai)
-{
-	struct vc4_hdmi *vc4_hdmi = dai_to_hdmi(dai);
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-		vc4_hdmi->audio.streaming = true;
-
-		if (vc4_hdmi->variant->phy_rng_enable)
-			vc4_hdmi->variant->phy_rng_enable(vc4_hdmi);
-
-		HDMI_WRITE(HDMI_MAI_CTL,
-			   VC4_SET_FIELD(vc4_hdmi->audio.channels,
-					 VC4_HD_MAI_CTL_CHNUM) |
-					 VC4_HD_MAI_CTL_WHOLSMP |
-					 VC4_HD_MAI_CTL_CHALIGN |
-					 VC4_HD_MAI_CTL_ENABLE);
-		break;
-	case SNDRV_PCM_TRIGGER_STOP:
-		HDMI_WRITE(HDMI_MAI_CTL,
-			   VC4_HD_MAI_CTL_DLATE |
-			   VC4_HD_MAI_CTL_ERRORE |
-			   VC4_HD_MAI_CTL_ERRORF);
-
-		if (vc4_hdmi->variant->phy_rng_disable)
-			vc4_hdmi->variant->phy_rng_disable(vc4_hdmi);
-
-		vc4_hdmi->audio.streaming = false;
-
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static inline struct vc4_hdmi *
-snd_component_to_hdmi(struct snd_soc_component *component)
-{
-	struct snd_soc_card *card = snd_soc_component_get_drvdata(component);
-
-	return snd_soc_card_get_drvdata(card);
-}
-
-static int vc4_hdmi_audio_eld_ctl_info(struct snd_kcontrol *kcontrol,
-				       struct snd_ctl_elem_info *uinfo)
-{
-	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	struct vc4_hdmi *vc4_hdmi = snd_component_to_hdmi(component);
-	struct drm_connector *connector = &vc4_hdmi->connector;
-
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
-	uinfo->count = sizeof(connector->eld);
-
-	return 0;
-}
-
-static int vc4_hdmi_audio_eld_ctl_get(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	struct vc4_hdmi *vc4_hdmi = snd_component_to_hdmi(component);
-	struct drm_connector *connector = &vc4_hdmi->connector;
-
-	memcpy(ucontrol->value.bytes.data, connector->eld,
-	       sizeof(connector->eld));
-
-	return 0;
-}
-
-static const struct snd_kcontrol_new vc4_hdmi_audio_controls[] = {
-	{
-		.access = SNDRV_CTL_ELEM_ACCESS_READ |
-			  SNDRV_CTL_ELEM_ACCESS_VOLATILE,
-		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
-		.name = "ELD",
-		.info = vc4_hdmi_audio_eld_ctl_info,
-		.get = vc4_hdmi_audio_eld_ctl_get,
-	},
-};
-
 static const struct snd_soc_dapm_widget vc4_hdmi_audio_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("TX"),
 };
@@ -1818,8 +1735,14 @@ static void vc4_cec_read_msg(struct vc4_hdmi *vc4_hdmi, u32 cntrl1)
 
 	msg->len = 1 + ((cntrl1 & VC4_HDMI_CEC_REC_WRD_CNT_MASK) >>
 					VC4_HDMI_CEC_REC_WRD_CNT_SHIFT);
+
+	if (msg->len > 16) {
+		drm_err(dev, "Attempting to read too much data (%d)\n", msg->len);
+		return;
+	}
+
 	for (i = 0; i < msg->len; i += 4) {
-		u32 val = HDMI_READ(HDMI_CEC_RX_DATA_1 + i);
+		u32 val = HDMI_READ(HDMI_CEC_RX_DATA_1 + (i >> 2));
 
 		msg->msg[i] = val & 0xff;
 		msg->msg[i + 1] = (val >> 8) & 0xff;
@@ -1965,8 +1888,13 @@ static int vc4_hdmi_cec_adap_transmit(struct cec_adapter *adap, u8 attempts,
 	u32 val;
 	unsigned int i;
 
+	if (msg->len > 16) {
+		drm_err(dev, "Attempting to transmit too much data (%d)\n", msg->len);
+		return -ENOMEM;
+	}
+
 	for (i = 0; i < msg->len; i += 4)
-		HDMI_WRITE(HDMI_CEC_TX_DATA_1 + i,
+		HDMI_WRITE(HDMI_CEC_TX_DATA_1 + (i >> 2),
 			   (msg->msg[i]) |
 			   (msg->msg[i + 1] << 8) |
 			   (msg->msg[i + 2] << 16) |
@@ -2014,14 +1942,8 @@ static int vc4_hdmi_cec_init(struct vc4_hdmi *vc4_hdmi)
 	cec_s_conn_info(vc4_hdmi->cec_adap, &conn_info);
 
 	value = HDMI_READ(HDMI_CEC_CNTRL_1);
-	value &= ~VC4_HDMI_CEC_DIV_CLK_CNT_MASK;
-	/*
-	 * Set the logical address to Unregistered and set the clock
-	 * divider: the hsm_clock rate and this divider setting will
-	 * give a 40 kHz CEC clock.
-	 */
-	value |= VC4_HDMI_CEC_ADDR_MASK |
-		 (4091 << VC4_HDMI_CEC_DIV_CLK_CNT_SHIFT);
+	/* Set the logical address to Unregistered */
+	value |= VC4_HDMI_CEC_ADDR_MASK;
 	HDMI_WRITE(HDMI_CEC_CNTRL_1, value);
 
 	vc4_hdmi_cec_update_clk_div(vc4_hdmi);
