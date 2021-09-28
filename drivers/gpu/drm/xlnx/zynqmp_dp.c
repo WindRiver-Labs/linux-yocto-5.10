@@ -1890,13 +1890,9 @@ int zynqmp_dp_probe(struct platform_device *pdev)
 	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_TX_FORCE_SCRAMBLER_RESET, 1);
 	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_TX_ENABLE, 0);
 
-	ret = zynqmp_dp_reset(dp, false);
-	if (ret < 0)
-		return ret;
-
 	ret = zynqmp_dp_phy_probe(dp);
 	if (ret)
-		goto err_reset;
+		return ret;
 
 	ret = zynqmp_dp_phy_init(dp);
 	if (ret)
@@ -1946,9 +1942,6 @@ error:
 	drm_dp_aux_unregister(&dp->aux);
 error_phy:
 	zynqmp_dp_phy_exit(dp);
-err_reset:
-	zynqmp_dp_reset(dp, true);
-
 	return ret;
 }
 
