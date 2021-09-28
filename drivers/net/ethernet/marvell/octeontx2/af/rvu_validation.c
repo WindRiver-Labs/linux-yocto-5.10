@@ -367,8 +367,7 @@ int rvu_mbox_handler_free_rsrc_cnt(struct rvu *rvu, struct msg_req *req,
 	rsp->tim = rvu->pf_limits.tim->a[pf].val - curlfs;
 
 	block = &hw->block[BLKADDR_CPT0];
-	curlfs = rvu_blk_count_rsrc(block, pcifunc, RVU_PFVF_PF_SHIFT);
-	rsp->cpt = rvu->pf_limits.cpt->a[pf].val - curlfs;
+	rsp->cpt = rvu_rsrc_free_count(&block->lf);
 
 	block = &hw->block[BLKADDR_CPT1];
 	rsp->cpt1 = rvu_rsrc_free_count(&block->lf);
@@ -518,17 +517,6 @@ int rvu_check_rsrc_policy(struct rvu *rvu, struct rsrc_attach *req,
 	if (!is_rvu_otx2(rvu))
 		return 0;
 
-	/* Only one NPA LF can be attached */
-	if (req->npalf) {
-		block = &hw->block[BLKADDR_NPA];
-		free_lfs = rvu_rsrc_free_count(&block->lf);
-		limit = rvu->pf_limits.npa->a[pf].val;
-		familylfs = rvu_blk_count_rsrc(block, pcifunc,
-					       RVU_PFVF_PF_SHIFT);
-		if (!free_lfs || (limit == familylfs))
-			goto fail;
-	}
-
 	/* Only one NIX LF can be attached */
 	if (req->nixlf) {
 		block = &hw->block[BLKADDR_NIX0];
@@ -579,21 +567,6 @@ int rvu_check_rsrc_policy(struct rvu *rvu, struct rsrc_attach *req,
 					       RVU_PFVF_PF_SHIFT);
 		/* Check if additional resources are available */
 		delta = req->timlfs - mappedlfs;
-		if ((delta > 0) && /* always allow usage decrease */
-		    ((limit < familylfs + delta) ||
-		     (delta > free_lfs)))
-			goto fail;
-	}
-
-	if (req->cptlfs) {
-		block = &hw->block[BLKADDR_CPT0];
-		mappedlfs = rvu_get_rsrc_mapcount(pfvf, block->addr);
-		free_lfs = rvu_rsrc_free_count(&block->lf);
-		limit = rvu->pf_limits.cpt->a[pf].val;
-		familylfs = rvu_blk_count_rsrc(block, pcifunc,
-					       RVU_PFVF_PF_SHIFT);
-		/* Check if additional resources are available */
-		delta = req->cptlfs - mappedlfs;
 		if ((delta > 0) && /* always allow usage decrease */
 		    ((limit < familylfs + delta) ||
 		     (delta > free_lfs)))
@@ -721,9 +694,7 @@ static void rvu_set_default_limits(struct rvu *rvu)
 			break;
 		case PCI_DEVID_OCTEONTX2_SDP_RVU_PF:
 			nnix -= 1 + nvfs;
-			nnpa -= 1 + nvfs;
 			rvu->pf_limits.nix->a[i].val = nnix > 0 ? 1 + nvfs : 0;
-			rvu->pf_limits.npa->a[i].val = nnpa > 0 ? 1 + nvfs : 0;
 			if (rvu->hw->cap.nix_fixed_txschq_mapping)
 				break;
 			rvu->pf_limits.smq->a[i].val = nsmq;

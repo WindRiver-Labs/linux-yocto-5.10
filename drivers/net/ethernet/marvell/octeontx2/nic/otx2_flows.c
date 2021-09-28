@@ -32,13 +32,130 @@ enum dmac_req {
 	DMAC_ADDR_DEL
 };
 
+static void otx2_clear_ntuple_flow_info(struct otx2_nic *pfvf, struct otx2_flow_config *flow_cfg)
+{
+	devm_kfree(pfvf->dev, flow_cfg->flow_ent);
+	flow_cfg->flow_ent = NULL;
+	flow_cfg->ntuple_max_flows = 0;
+	flow_cfg->tc_max_flows = 0;
+}
+
+static int otx2_free_ntuple_mcam_entries(struct otx2_nic *pfvf)
+{
+	struct otx2_flow_config *flow_cfg = pfvf->flow_cfg;
+	struct npc_mcam_free_entry_req *req;
+	int ent, err;
+
+	if (!flow_cfg->ntuple_max_flows)
+		return 0;
+
+	mutex_lock(&pfvf->mbox.lock);
+	for (ent = 0; ent < flow_cfg->ntuple_max_flows; ent++) {
+		req = otx2_mbox_alloc_msg_npc_mcam_free_entry(&pfvf->mbox);
+		if (!req)
+			break;
+
+		req->entry = flow_cfg->flow_ent[ent];
+
+		/* Send message to AF to free MCAM entries */
+		err = otx2_sync_mbox_msg(&pfvf->mbox);
+		if (err)
+			break;
+	}
+	mutex_unlock(&pfvf->mbox.lock);
+	otx2_clear_ntuple_flow_info(pfvf, flow_cfg);
+	return 0;
+}
+
+static int otx2_alloc_ntuple_mcam_entries(struct otx2_nic *pfvf, u16 count)
+{
+	struct otx2_flow_config *flow_cfg = pfvf->flow_cfg;
+	struct npc_mcam_alloc_entry_req *req;
+	struct npc_mcam_alloc_entry_rsp *rsp;
+	int ent, allocated = 0;
+
+	/* Free current ones and allocate new ones with requested count */
+	otx2_free_ntuple_mcam_entries(pfvf);
+
+	if (!count)
+		return 0;
+
+	flow_cfg->flow_ent = devm_kmalloc_array(pfvf->dev, count,
+						sizeof(u16), GFP_KERNEL);
+	if (!flow_cfg->flow_ent)
+		return -ENOMEM;
+
+	mutex_lock(&pfvf->mbox.lock);
+
+	/* In a single request a max of NPC_MAX_NONCONTIG_ENTRIES MCAM entries
+	 * can only be allocated.
+	 */
+	while (allocated < count) {
+		req = otx2_mbox_alloc_msg_npc_mcam_alloc_entry(&pfvf->mbox);
+		if (!req)
+			goto exit;
+
+		req->contig = false;
+		req->count = (count - allocated) > NPC_MAX_NONCONTIG_ENTRIES ?
+				NPC_MAX_NONCONTIG_ENTRIES : count - allocated;
+		/* For VFs setting the priority to be of NPC_MCAM_ANY_PRIO so
+		 * that MCAM entries gets allocated from middle zone
+		 */
+		req->priority = (pfvf->pcifunc & RVU_PFVF_FUNC_MASK) ?
+				 NPC_MCAM_ANY_PRIO : NPC_MCAM_HIGHER_PRIO;
+		req->ref_entry = flow_cfg->def_ent[0];
+
+		/* Send message to AF */
+		if (otx2_sync_mbox_msg(&pfvf->mbox))
+			goto exit;
+
+		rsp = (struct npc_mcam_alloc_entry_rsp *)otx2_mbox_get_rsp
+			(&pfvf->mbox.mbox, 0, &req->hdr);
+
+		for (ent = 0; ent < rsp->count; ent++)
+			flow_cfg->flow_ent[ent + allocated] = rsp->entry_list[ent];
+
+		allocated += rsp->count;
+
+		/* If this request is not fulfilled, no need to send
+		 * further requests.
+		 */
+		if (rsp->count != req->count)
+			break;
+	}
+
+exit:
+	mutex_unlock(&pfvf->mbox.lock);
+
+	flow_cfg->ntuple_offset = 0;
+	flow_cfg->ntuple_max_flows = allocated;
+	flow_cfg->tc_flower_offset = flow_cfg->ntuple_offset;
+	flow_cfg->tc_max_flows = allocated;
+
+	if (allocated != count)
+		netdev_info(pfvf->netdev,
+			    "Unable to allocate %d MCAM entries for ntuple, got %d\n",
+			    count, allocated);
+
+	return allocated;
+}
+
 int otx2_alloc_mcam_entries(struct otx2_nic *pfvf)
 {
 	struct otx2_flow_config *flow_cfg = pfvf->flow_cfg;
 	struct npc_mcam_alloc_entry_req *req;
 	struct npc_mcam_alloc_entry_rsp *rsp;
 	int vf_vlan_max_flows;
-	int i;
+	int ent, count;
+
+	vf_vlan_max_flows = pfvf->total_vfs * OTX2_PER_VF_VLAN_FLOWS;
+	count = OTX2_MAX_UNICAST_FLOWS +
+			OTX2_MAX_VLAN_FLOWS + vf_vlan_max_flows;
+
+	flow_cfg->def_ent = devm_kmalloc_array(pfvf->dev, count,
+					       sizeof(u16), GFP_KERNEL);
+	if (!flow_cfg->def_ent)
+		return -ENOMEM;
 
 	mutex_lock(&pfvf->mbox.lock);
 
@@ -48,9 +165,8 @@ int otx2_alloc_mcam_entries(struct otx2_nic *pfvf)
 		return -ENOMEM;
 	}
 
-	vf_vlan_max_flows = pfvf->total_vfs * OTX2_PER_VF_VLAN_FLOWS;
 	req->contig = false;
-	req->count = OTX2_MCAM_COUNT + vf_vlan_max_flows;
+	req->count = count;
 
 	/* Send message to AF */
 	if (otx2_sync_mbox_msg(&pfvf->mbox)) {
@@ -63,39 +179,89 @@ int otx2_alloc_mcam_entries(struct otx2_nic *pfvf)
 
 	if (rsp->count != req->count) {
 		netdev_info(pfvf->netdev,
-			    "Unable to allocate %d MCAM entries, got %d\n",
-			    req->count, rsp->count);
-		/* support only ntuples here */
-		flow_cfg->ntuple_max_flows = rsp->count;
-		flow_cfg->ntuple_offset = 0;
-		pfvf->flags |= OTX2_FLAG_NTUPLE_SUPPORT;
-		flow_cfg->tc_max_flows = flow_cfg->ntuple_max_flows;
-		pfvf->flags |= OTX2_FLAG_TC_FLOWER_SUPPORT;
-	} else {
-		flow_cfg->vf_vlan_offset = 0;
-		flow_cfg->ntuple_offset = flow_cfg->vf_vlan_offset +
-						vf_vlan_max_flows;
-		flow_cfg->tc_flower_offset = flow_cfg->ntuple_offset;
-		flow_cfg->unicast_offset = flow_cfg->ntuple_offset +
-						OTX2_MAX_NTUPLE_FLOWS;
-		flow_cfg->rx_vlan_offset = flow_cfg->unicast_offset +
-						OTX2_MAX_UNICAST_FLOWS;
-		pfvf->flags |= OTX2_FLAG_NTUPLE_SUPPORT;
-		pfvf->flags |= OTX2_FLAG_UCAST_FLTR_SUPPORT;
-		pfvf->flags |= OTX2_FLAG_RX_VLAN_SUPPORT;
-		pfvf->flags |= OTX2_FLAG_VF_VLAN_SUPPORT;
-		pfvf->flags |= OTX2_FLAG_TC_FLOWER_SUPPORT;
+			    "Unable to allocate MCAM entries for ucast, vlan and vf_vlan\n");
+		mutex_unlock(&pfvf->mbox.lock);
+		devm_kfree(pfvf->dev, flow_cfg->def_ent);
+		return 0;
 	}
 
-	for (i = 0; i < rsp->count; i++)
-		flow_cfg->entry[i] = rsp->entry_list[i];
+	for (ent = 0; ent < rsp->count; ent++)
+		flow_cfg->def_ent[ent] = rsp->entry_list[ent];
+
+	flow_cfg->vf_vlan_offset = 0;
+	flow_cfg->unicast_offset = vf_vlan_max_flows;
+	flow_cfg->rx_vlan_offset = flow_cfg->unicast_offset +
+					OTX2_MAX_UNICAST_FLOWS;
+	pfvf->flags |= OTX2_FLAG_UCAST_FLTR_SUPPORT;
+	pfvf->flags |= OTX2_FLAG_RX_VLAN_SUPPORT;
+	pfvf->flags |= OTX2_FLAG_VF_VLAN_SUPPORT;
 
 	pfvf->flags |= OTX2_FLAG_MCAM_ENTRIES_ALLOC;
-
 	mutex_unlock(&pfvf->mbox.lock);
+
+	/* Allocate entries for Ntuple filters */
+	count = otx2_alloc_ntuple_mcam_entries(pfvf, OTX2_DEFAULT_FLOWCOUNT);
+	if (count <= 0) {
+		otx2_clear_ntuple_flow_info(pfvf, flow_cfg);
+		return 0;
+	}
+
+	pfvf->flags |= OTX2_FLAG_NTUPLE_SUPPORT;
+	pfvf->flags |= OTX2_FLAG_TC_FLOWER_SUPPORT;
 
 	return 0;
 }
+
+static void otx2vf_free_flow_cfg(struct otx2_nic *pfvf)
+{
+	if (pfvf->flow_cfg) {
+		if (pfvf->flow_cfg->def_ent) {
+			devm_kfree(pfvf->dev, pfvf->flow_cfg->def_ent);
+			pfvf->flow_cfg->def_ent = NULL;
+		}
+
+		devm_kfree(pfvf->dev, pfvf->flow_cfg);
+		pfvf->flow_cfg = NULL;
+	}
+}
+
+int otx2vf_mcam_flow_init(struct otx2_nic *pfvf)
+{
+	struct otx2_flow_config *flow_cfg;
+	int count;
+
+	pfvf->flow_cfg = devm_kzalloc(pfvf->dev,
+				      sizeof(struct otx2_flow_config),
+				      GFP_KERNEL);
+	if (!pfvf->flow_cfg)
+		return -ENOMEM;
+
+	flow_cfg = pfvf->flow_cfg;
+	INIT_LIST_HEAD(&flow_cfg->flow_list);
+	flow_cfg->ntuple_max_flows = 0;
+	flow_cfg->def_ent = devm_kmalloc_array(pfvf->dev,
+					       OTX2_DEFAULT_FLOWCOUNT,
+					       sizeof(u16), GFP_KERNEL);
+	if (!flow_cfg->def_ent) {
+		otx2vf_free_flow_cfg(pfvf);
+		return -ENOMEM;
+	}
+
+	count = otx2_alloc_ntuple_mcam_entries(pfvf, OTX2_DEFAULT_FLOWCOUNT);
+	if (count <= 0) {
+		netdev_info(pfvf->netdev, "Unable to allocate MCAM entries\n");
+		otx2vf_free_flow_cfg(pfvf);
+		return -ENOMEM;
+	}
+
+	flow_cfg->ntuple_max_flows = count;
+
+	pfvf->flags |= OTX2_FLAG_MCAM_ENTRIES_ALLOC;
+	pfvf->flags |= OTX2_FLAG_NTUPLE_SUPPORT;
+
+	return 0;
+}
+EXPORT_SYMBOL(otx2vf_mcam_flow_init);
 
 int otx2_mcam_flow_init(struct otx2_nic *pf)
 {
@@ -108,12 +274,13 @@ int otx2_mcam_flow_init(struct otx2_nic *pf)
 
 	INIT_LIST_HEAD(&pf->flow_cfg->flow_list);
 
-	pf->flow_cfg->ntuple_max_flows = OTX2_MAX_NTUPLE_FLOWS;
-	pf->flow_cfg->tc_max_flows = pf->flow_cfg->ntuple_max_flows;
-
 	err = otx2_alloc_mcam_entries(pf);
 	if (err)
 		return err;
+
+	/* Check if MCAM entries are allocate or not */
+	if (!(pf->flags & OTX2_FLAG_UCAST_FLTR_SUPPORT))
+		return 0;
 
 	pf->mac_table = devm_kzalloc(pf->dev, sizeof(struct otx2_mac_table)
 					* OTX2_MAX_UNICAST_FLOWS, GFP_KERNEL);
@@ -143,6 +310,7 @@ void otx2_mcam_flow_del(struct otx2_nic *pf)
 {
 	otx2_destroy_mcam_flows(pf);
 }
+EXPORT_SYMBOL(otx2_mcam_flow_del);
 
 /*  On success adds mcam entry
  *  On failure enable promisous mode
@@ -174,7 +342,7 @@ static int otx2_do_add_macfilter(struct otx2_nic *pf, const u8 *mac)
 		ether_addr_copy(pf->mac_table[i].addr, mac);
 		pf->mac_table[i].inuse = true;
 		pf->mac_table[i].mcam_entry =
-			flow_cfg->entry[i + flow_cfg->unicast_offset];
+			flow_cfg->def_ent[i + flow_cfg->unicast_offset];
 		req->entry =  pf->mac_table[i].mcam_entry;
 		break;
 	}
@@ -678,9 +846,29 @@ static int otx2_prepare_flow_request(struct ethtool_rx_flow_spec *fsp,
 	}
 	if (fsp->flow_type & FLOW_EXT) {
 		int skip_user_def = false;
+		u16 vlan_etype;
 
-		if (fsp->m_ext.vlan_etype)
-			return -EINVAL;
+		if (fsp->m_ext.vlan_etype) {
+			/* Partial masks not supported */
+			if (fsp->m_ext.vlan_etype != 0xFFFF)
+				return -EINVAL;
+
+			vlan_etype = be16_to_cpu(fsp->h_ext.vlan_etype);
+			/* Only ETH_P_8021Q and ETH_P_802AD types supported */
+			if (vlan_etype != ETH_P_8021Q &&
+			    vlan_etype != ETH_P_8021AD)
+				return -EINVAL;
+
+			memcpy(&pkt->vlan_etype, &fsp->h_ext.vlan_etype,
+			       sizeof(pkt->vlan_etype));
+			memcpy(&pmask->vlan_etype, &fsp->m_ext.vlan_etype,
+			       sizeof(pmask->vlan_etype));
+
+			if (vlan_etype == ETH_P_8021Q)
+				req->features |= BIT_ULL(NPC_VLAN_ETYPE_CTAG);
+			else
+				req->features |= BIT_ULL(NPC_VLAN_ETYPE_STAG);
+		}
 		if (fsp->m_ext.vlan_tci) {
 			if (fsp->m_ext.vlan_tci != cpu_to_be16(VLAN_VID_MASK))
 				return -EINVAL;
@@ -793,6 +981,7 @@ static int otx2_add_flow_msg(struct otx2_nic *pfvf, struct otx2_flow *flow)
 		if (flow->flow_spec.flow_type & FLOW_RSS) {
 			req->op = NIX_RX_ACTIONOP_RSS;
 			req->index = flow->rss_ctx_id;
+			req->flow_key_alg = pfvf->hw.flowkey_alg_idx;
 		} else {
 			req->op = NIX_RX_ACTIONOP_UCAST;
 			req->index = ethtool_get_flow_spec_ring(ring_cookie);
@@ -873,8 +1062,7 @@ int otx2_add_flow(struct otx2_nic *pfvf, struct ethtool_rxnfc *nfc)
 		if (!flow)
 			return -ENOMEM;
 		flow->location = fsp->location;
-		flow->entry = flow_cfg->entry[flow_cfg->ntuple_offset +
-						flow->location];
+		flow->entry = flow_cfg->flow_ent[flow->location];
 		new = true;
 	}
 	/* struct copy */
@@ -929,6 +1117,8 @@ int otx2_add_flow(struct otx2_nic *pfvf, struct ethtool_rxnfc *nfc)
 	}
 
 	if (err) {
+		if (err == 0xFFFEULL)
+			err = -EINVAL;
 		if (new)
 			kfree(flow);
 		return err;
@@ -1072,9 +1262,8 @@ int otx2_destroy_ntuple_flows(struct otx2_nic *pfvf)
 		return -ENOMEM;
 	}
 
-	req->start = flow_cfg->entry[flow_cfg->ntuple_offset];
-	req->end   = flow_cfg->entry[flow_cfg->ntuple_offset +
-				      flow_cfg->ntuple_max_flows - 1];
+	req->start = flow_cfg->flow_ent[0];
+	req->end   = flow_cfg->flow_ent[flow_cfg->ntuple_max_flows - 1];
 	err = otx2_sync_mbox_msg(&pfvf->mbox);
 	mutex_unlock(&pfvf->mbox.lock);
 
@@ -1141,7 +1330,7 @@ int otx2_install_rxvlan_offload_flow(struct otx2_nic *pfvf)
 		return -ENOMEM;
 	}
 
-	req->entry = flow_cfg->entry[flow_cfg->rx_vlan_offset];
+	req->entry = flow_cfg->def_ent[flow_cfg->rx_vlan_offset];
 	req->intf = NIX_INTF_RX;
 	ether_addr_copy(req->packet.dmac, pfvf->netdev->dev_addr);
 	eth_broadcast_addr((u8 *)&req->mask.dmac);
@@ -1170,7 +1359,7 @@ static int otx2_delete_rxvlan_offload_flow(struct otx2_nic *pfvf)
 		return -ENOMEM;
 	}
 
-	req->entry = flow_cfg->entry[flow_cfg->rx_vlan_offset];
+	req->entry = flow_cfg->def_ent[flow_cfg->rx_vlan_offset];
 	/* Send message to AF */
 	err = otx2_sync_mbox_msg(&pfvf->mbox);
 	mutex_unlock(&pfvf->mbox.lock);

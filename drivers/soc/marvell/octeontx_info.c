@@ -14,6 +14,7 @@
 #include <linux/of.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <soc/marvell/octeontx/octeontx_smc.h>
 
 #define OCTTX_NODE	"octeontx_brd"
 #define FW_LAYOUT_NODE	"firmware-layout"
@@ -54,6 +55,10 @@ struct octtx_brd_info {
 	const char *board_model;
 	const char *board_num_of_mac;
 	const char *board_num_of_mac_id;
+	const char *reset_count_cold;
+	const char *reset_count_warm;
+	const char *reset_count_core_wdog;
+	const char *reset_count_scp_wdog;
 	int  dev_tree_parsed;
 	int  use_mac_id;
 	struct octeontx_info_mac_addr mac_addrs[MAX_MACS];
@@ -62,7 +67,7 @@ struct octtx_brd_info {
 
 static struct proc_dir_entry *ent;
 static struct octtx_brd_info brd;
-static char null_string[5] = "NULL";
+static const char null_string[5] = "NULL";
 
 static int oct_brd_proc_show(struct seq_file *seq, void *v)
 {
@@ -100,6 +105,15 @@ static int oct_brd_proc_show(struct seq_file *seq, void *v)
 					   u, mac_addr->s.bytes);
 			}
 		}
+	}
+
+	if (is_soc_cn10kx()) {
+		seq_printf(seq, "cold_reset_count: %s\n", brd.reset_count_cold);
+		seq_printf(seq, "warm_reset_count: %s\n", brd.reset_count_warm);
+		seq_printf(seq, "core_wdog_reset_count: %s\n",
+			   brd.reset_count_core_wdog);
+		seq_printf(seq, "scp_wdog_reset_count: %s\n",
+			   brd.reset_count_scp_wdog);
 	}
 
 	while (fw_info) {
@@ -206,6 +220,48 @@ static int octtx_parse_mac_info(struct device_node *node)
 	}
 
 	return 0;
+}
+
+/** Reads reset counters information and store it in global board structure
+ *
+ * @param np	device tree node to parse
+ *
+ */
+static void octtx_parse_reset_couters(struct device_node *np)
+{
+	int ret;
+
+	ret = of_property_read_string(np, "RESET-COUNT-COLD",
+					&brd.reset_count_cold);
+	if (ret) {
+		pr_warn("Cold reset count not available\n");
+		/* Default name is "NULL" */
+		brd.reset_count_cold = null_string;
+	}
+
+	ret = of_property_read_string(np, "RESET-COUNT-WARM",
+					&brd.reset_count_warm);
+	if (ret) {
+		pr_warn("Warm reset count not available\n");
+		/* Default name is "NULL" */
+		brd.reset_count_warm = null_string;
+	}
+
+	ret = of_property_read_string(np, "RESET-COUNT-CORE-WDOG",
+					&brd.reset_count_core_wdog);
+	if (ret) {
+		pr_warn("Core Watchdog reset count not available\n");
+		/* Default name is "NULL" */
+		brd.reset_count_core_wdog = null_string;
+	}
+
+	ret = of_property_read_string(np, "RESET-COUNT-SCP-WDOG",
+					&brd.reset_count_scp_wdog);
+	if (ret) {
+		pr_warn("SCP Watchdog reset count not available\n");
+		/* Default name is "NULL" */
+		brd.reset_count_scp_wdog = null_string;
+	}
 }
 
 static int octtx_parse_firmware_layout(struct device_node *parent)
@@ -364,11 +420,16 @@ static int __init octtx_info_init(void)
 			pr_warn("Board MAC addess not available\n");
 		}
 
-		np = of_find_node_by_name(np, FW_LAYOUT_NODE);
-		if (np) {
-			ret = octtx_parse_firmware_layout(np);
-			if (ret)
-				pr_err("Error parsing firmware-layout\n");
+		/* Parse elements related to CN10KX */
+		if (is_soc_cn10kx()) {
+			octtx_parse_reset_couters(np);
+
+			np = of_find_node_by_name(np, FW_LAYOUT_NODE);
+			if (np) {
+				ret = octtx_parse_firmware_layout(np);
+				if (ret)
+					pr_err("Error parsing firmware-layout\n");
+			}
 		}
 
 		brd.dev_tree_parsed = 1;

@@ -245,6 +245,7 @@ M(REE_RULE_DB_GET,	0xE05, ree_rule_db_get,				\
 				ree_rule_db_get_rsp_msg)		\
 /* SDP mbox IDs (range 0x1000 - 0x11FF) */				\
 M(SET_SDP_CHAN_INFO, 0x1000, set_sdp_chan_info, sdp_chan_info_msg, msg_rsp) \
+M(GET_SDP_CHAN_INFO, 0x1001, get_sdp_chan_info, msg_req, sdp_get_chan_info_msg) \
 /* NPC mbox IDs (range 0x6000 - 0x7FFF) */				\
 M(NPC_MCAM_ALLOC_ENTRY,	0x6000, npc_mcam_alloc_entry, npc_mcam_alloc_entry_req,\
 				npc_mcam_alloc_entry_rsp)		\
@@ -648,7 +649,7 @@ struct cgx_set_link_mode_args {
 	u32 speed;
 	u8 duplex;
 	u8 an;
-	u8 ports;
+	u8 mode_baseidx;
 	u64 mode;
 };
 
@@ -820,6 +821,8 @@ enum nix_af_status {
 	NIX_AF_ERR_INVALID_BANDPROF = -426,
 	NIX_AF_ERR_IPOLICER_NOTSUPP = -427,
 	NIX_AF_ERR_BANDPROF_INVAL_REQ  = -428,
+	NIX_AF_ERR_CQ_CTX_WRITE_ERR  = -429,
+	NIX_AF_ERR_AQ_CTX_RETRY_WRITE  = -430,
 };
 
 /* For NIX RX vtag action  */
@@ -849,6 +852,7 @@ struct nix_lf_alloc_req {
 	u64 rx_cfg;   /* See NIX_AF_LF(0..127)_RX_CFG */
 	u64 way_mask;
 #define NIX_LF_RSS_TAG_LSB_AS_ADDER BIT_ULL(0)
+#define NIX_LF_LBK_BLK_SEL	    BIT_ULL(1)
 	u64 flags;
 };
 
@@ -948,7 +952,7 @@ struct nix_aq_enq_rsp {
 		struct nix_cq_ctx_s cq;
 		struct nix_rsse_s   rss;
 		struct nix_rx_mce_s mce;
-		u64 prof;
+		struct nix_bandprof_s prof;
 	};
 };
 
@@ -1944,4 +1948,20 @@ struct sdp_chan_info_msg {
 	struct mbox_msghdr hdr;
 	struct sdp_node_info info;
 };
+
+struct sdp_get_chan_info_msg {
+	struct mbox_msghdr hdr;
+	u16 chan_base;
+	u16 num_chan;
+};
+
+/* CGX mailbox error codes
+ * Range 1101 - 1200.
+ */
+enum cgx_af_status {
+	LMAC_AF_ERR_INVALID_PARAM	= -1101,
+	LMAC_AF_ERR_PF_NOT_MAPPED	= -1102,
+	LMAC_AF_ERR_PERM_DENIED		= -1103,
+};
+
 #endif /* MBOX_H */

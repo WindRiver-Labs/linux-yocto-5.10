@@ -693,6 +693,7 @@
 #define MVPP2_PPPOE_HDR_SIZE		8
 #define MVPP2_VLAN_TAG_LEN		4
 #define MVPP2_VLAN_TAG_EDSA_LEN		8
+#define MVPP2_MPLS_HEADER_LEN		4
 
 /* Lbtd 802.3 type */
 #define MVPP2_IP_LBDT_TYPE		0xfffa
@@ -1033,6 +1034,14 @@ struct mvpp2_tai;
 #define MVPP2_PRS_TCAM_SRAM_SIZE        256
 #define MVPP2_N_FLOWS   52
 
+/* Buffer header info bits */
+#define MVPP2_B_HDR_INFO_MC_ID_MASK	0xfff
+#define MVPP2_B_HDR_INFO_MC_ID(info)	((info) & MVPP2_B_HDR_INFO_MC_ID_MASK)
+#define MVPP2_B_HDR_INFO_LAST_OFFS	12
+#define MVPP2_B_HDR_INFO_LAST_MASK	BIT(12)
+#define MVPP2_B_HDR_INFO_IS_LAST(info) \
+	   (((info) & MVPP2_B_HDR_INFO_LAST_MASK) >> MVPP2_B_HDR_INFO_LAST_OFFS)
+
 /* Definitions */
 
 struct mvpp2_buff_hdr {
@@ -1261,10 +1270,13 @@ struct mvpp2_port {
 	struct device_node *of_node;
 
 	phy_interface_t phy_interface;
+	phy_interface_t of_phy_interface;
 	struct phylink *phylink;
 	struct phylink_config phylink_config;
 	struct phylink_pcs phylink_pcs;
 	struct phy *comphy;
+
+	bool phy_exist;
 
 	struct mvpp2_bm_pool *pool_long;
 	struct mvpp2_bm_pool *pool_short;
@@ -1293,8 +1305,10 @@ struct mvpp2_port {
 	/* Indication, whether port is connected to XLG MAC */
 	bool has_xlg_mac;
 
+#if IS_ENABLED(CONFIG_NET_DSA)
 	/* Notifier required when the port is connected to the switch */
 	struct notifier_block dsa_notifier;
+#endif
 
 	bool hwtstamp;
 	bool rx_hwtstamp;
@@ -1335,6 +1349,20 @@ struct mvpp2_port {
 #define MVPP2_RXD_L3_IP4		BIT(28)
 #define MVPP2_RXD_L3_IP6		BIT(30)
 #define MVPP2_RXD_BUF_HDR		BIT(31)
+
+struct mvpp2_buff_hdr {
+	__le32 next_dma_addr;
+	__le32 next_cookie_addr;
+	__le16 byte_count;
+	__le16 info;
+	__le16 reserved1;	/* bm_qset (for future use, BM) */
+	u8 next_dma_addr_high;
+	u8 next_cookie_addr_high;
+	__le16 reserved2;
+	__le16 reserved3;
+	__le16 reserved4;
+	__le16 reserved5;
+};
 
 /* HW TX descriptor for PPv2.1 */
 struct mvpp21_tx_desc {

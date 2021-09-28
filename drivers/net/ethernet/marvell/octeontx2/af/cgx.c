@@ -957,12 +957,6 @@ void cgx_lmac_ptp_config(void *cgxd, int lmac_id, bool enable)
 	struct cgx *cgx = cgxd;
 	u64 cfg;
 
-	/* PTP configuration logic is changed for RPM.
-	 * Will add the support later
-	 */
-	if (is_dev_rpm(cgx))
-		return;
-
 	if (!cgx)
 		return;
 
@@ -1122,6 +1116,9 @@ static int cgx_link_usertable_index_map(int speed)
 static void set_mod_args(struct cgx_set_link_mode_args *args,
 			 u32 speed, u8 duplex, u8 autoneg, u64 mode)
 {
+	int mode_baseidx;
+	u8 cgx_mode;
+
 	/* Fill default values incase of user did not pass
 	 * valid parameters
 	 */
@@ -1131,8 +1128,18 @@ static void set_mod_args(struct cgx_set_link_mode_args *args,
 		args->speed = speed;
 	if (args->an == AUTONEG_UNKNOWN)
 		args->an = autoneg;
+
+	/* Derive mode_base_idx and mode fields based
+	 * on cgx_mode value
+	 */
+	cgx_mode = find_first_bit((unsigned long *)&mode,
+				  CGX_MODE_MAX);
 	args->mode = mode;
-	args->ports = 0;
+	mode_baseidx = cgx_mode - 41;
+	if (mode_baseidx > 0) {
+		args->mode_baseidx = 1;
+		args->mode = BIT_ULL(mode_baseidx);
+	}
 }
 
 static void otx2_map_ethtool_link_modes(u64 bitmask,
@@ -1205,19 +1212,19 @@ static void otx2_map_ethtool_link_modes(u64 bitmask,
 	case  ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT:
 		set_mod_args(args, 40000, 0, 0, BIT_ULL(CGX_MODE_40GAUI_C2C));
 		break;
-	case  ETHTOOL_LINK_MODE_50000baseSR_Full_BIT:
+	case  ETHTOOL_LINK_MODE_50000baseSR2_Full_BIT:
 		set_mod_args(args, 50000, 0, 0, BIT_ULL(CGX_MODE_50G_C2C));
 		break;
 	case  ETHTOOL_LINK_MODE_56000baseKR4_Full_BIT:
 		set_mod_args(args, 50000, 0, 0, BIT_ULL(CGX_MODE_50G_4_C2C));
 		break;
-	case  ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT:
+	case  ETHTOOL_LINK_MODE_50000baseDR_Full_BIT:
 		set_mod_args(args, 50000, 0, 0, BIT_ULL(CGX_MODE_50G_C2M));
 		break;
-	case  ETHTOOL_LINK_MODE_50000baseCR_Full_BIT:
+	case  ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT:
 		set_mod_args(args, 50000, 0, 1, BIT_ULL(CGX_MODE_50G_CR));
 		break;
-	case  ETHTOOL_LINK_MODE_50000baseKR_Full_BIT:
+	case  ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT:
 		set_mod_args(args, 50000, 0, 1, BIT_ULL(CGX_MODE_50G_KR));
 		break;
 	case  ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT:
@@ -1234,6 +1241,50 @@ static void otx2_map_ethtool_link_modes(u64 bitmask,
 		break;
 	case  ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT:
 		set_mod_args(args, 100000, 0, 1, BIT_ULL(CGX_MODE_100G_KR4));
+		break;
+	case  ETHTOOL_LINK_MODE_50000baseSR_Full_BIT:
+		set_mod_args(args, 50000, 0, 0,
+			     BIT_ULL(CGX_MODE_LAUI_2_C2C_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT:
+		set_mod_args(args, 50000, 0, 0,
+			     BIT_ULL(CGX_MODE_LAUI_2_C2M_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_50000baseCR_Full_BIT:
+		set_mod_args(args, 50000, 0, 1,
+			     BIT_ULL(CGX_MODE_50GBASE_CR2_C_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_50000baseKR_Full_BIT:
+		set_mod_args(args, 50000, 0, 1,
+			     BIT_ULL(CGX_MODE_50GBASE_KR2_C_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_100000baseSR2_Full_BIT:
+		set_mod_args(args, 100000, 0, 0,
+			     BIT_ULL(CGX_MODE_100GAUI_2_C2C_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_100000baseLR2_ER2_FR2_Full_BIT:
+		set_mod_args(args, 100000, 0, 0,
+			     BIT_ULL(CGX_MODE_100GAUI_2_C2M_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_100000baseCR2_Full_BIT:
+		set_mod_args(args, 100000, 0, 1,
+			     BIT_ULL(CGX_MODE_100GBASE_CR2_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_100000baseKR2_Full_BIT:
+		set_mod_args(args, 100000, 0, 1,
+			     BIT_ULL(CGX_MODE_100GBASE_KR2_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_1000baseKX_Full_BIT:
+		set_mod_args(args, 1000, 0, 0,
+			     BIT_ULL(CGX_MODE_SFI_1G_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_56000baseCR4_Full_BIT:
+		set_mod_args(args, 25000, 0, 1,
+			     BIT_ULL(CGX_MODE_25GBASE_CR_C_BIT));
+		break;
+	case  ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT:
+		set_mod_args(args, 25000, 0, 1,
+			     BIT_ULL(CGX_MODE_25GBASE_KR_C_BIT));
 		break;
 	default:
 		set_mod_args(args, 0, 1, 0, BIT_ULL(CGX_MODE_MAX));
@@ -1439,8 +1490,7 @@ int cgx_set_link_mode(void *cgxd, struct cgx_set_link_mode_args args,
 	if (!cgx)
 		return -ENODEV;
 
-	if (args.mode)
-		otx2_map_ethtool_link_modes(args.mode, &args);
+	otx2_map_ethtool_link_modes(args.mode, &args);
 	if (!args.speed && args.duplex && !args.an)
 		return -EINVAL;
 
@@ -1449,7 +1499,7 @@ int cgx_set_link_mode(void *cgxd, struct cgx_set_link_mode_args args,
 			cgx_link_usertable_index_map(args.speed), req);
 	req = FIELD_SET(CMDMODECHANGE_DUPLEX, args.duplex, req);
 	req = FIELD_SET(CMDMODECHANGE_AN, args.an, req);
-	req = FIELD_SET(CMDMODECHANGE_PORT, args.ports, req);
+	req = FIELD_SET(CMDMODECHANGE_MODE_BASEIDX, args.mode_baseidx, req);
 	req = FIELD_SET(CMDMODECHANGE_FLAGS, args.mode, req);
 
 	return cgx_fwi_cmd_generic(req, &resp, cgx, lmac_id);
@@ -1575,10 +1625,6 @@ static void cgx_lmac_linkup_work(struct work_struct *work)
 		if (err)
 			dev_info(dev, "cgx port %d:%d Link up command failed\n",
 				 cgx->cgx_id, i);
-		/* Disable packet I/O in CGX in case firmware enabled it
-		 * after Link up sequence.
-		 */
-		cgx_lmac_rx_tx_enable(cgx, i, false);
 	}
 }
 
@@ -1750,8 +1796,6 @@ static int cgx_lmac_init(struct cgx *cgx)
 		cgx->lmac_idmap[lmac->lmac_id] = lmac;
 		set_bit(lmac->lmac_id, &cgx->lmac_bmap);
 		cgx->mac_ops->mac_pause_frm_config(cgx, lmac->lmac_id, true);
-		/* Disable packet I/O for a sane state */
-		cgx_lmac_rx_tx_enable(cgx, lmac->lmac_id, false);
 	}
 
 	return cgx_lmac_verify_fwi_version(cgx);
@@ -1793,7 +1837,7 @@ static void cgx_populate_features(struct cgx *cgx)
 {
 	if (is_dev_rpm(cgx))
 		cgx->hw_features = (RVU_LMAC_FEAT_DMACF | RVU_MAC_RPM |
-				    RVU_LMAC_FEAT_FC);
+				    RVU_LMAC_FEAT_FC | RVU_LMAC_FEAT_PTP);
 	else
 		cgx->hw_features = (RVU_LMAC_FEAT_FC  | RVU_LMAC_FEAT_HIGIG2 |
 				    RVU_LMAC_FEAT_PTP | RVU_LMAC_FEAT_DMACF);
@@ -1820,6 +1864,7 @@ struct mac_ops		cgx_mac_ops    = {
 	.mac_get_pause_frm_status =	cgx_lmac_get_pause_frm_status,
 	.mac_enadis_pause_frm =		cgx_lmac_enadis_pause_frm,
 	.mac_pause_frm_config =		cgx_lmac_pause_frm_config,
+	.mac_enadis_ptp_config =	cgx_lmac_ptp_config,
 };
 
 static int cgx_probe(struct pci_dev *pdev, const struct pci_device_id *id)

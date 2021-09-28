@@ -4,9 +4,11 @@
 #include <linux/etherdevice.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/net_tstamp.h>
 
 #include "otx2_common.h"
 #include "otx2_reg.h"
+#include "otx2_ptp.h"
 #include "cn10k.h"
 
 #define DRV_NAME	"rvu_nicvf"
@@ -470,6 +472,24 @@ static void otx2vf_reset_task(struct work_struct *work)
 	rtnl_unlock();
 }
 
+static int otx2vf_set_features(struct net_device *netdev,
+			       netdev_features_t features)
+{
+	netdev_features_t changed = features ^ netdev->features;
+	bool ntuple_enabled = !!(features & NETIF_F_NTUPLE);
+	struct otx2_nic *vf = netdev_priv(netdev);
+	int err = 0;
+
+	if (changed & NETIF_F_NTUPLE) {
+		if (ntuple_enabled)
+			err = otx2vf_mcam_flow_init(vf);
+		else
+			otx2_mcam_flow_del(vf);
+	}
+
+	return err;
+}
+
 static const struct net_device_ops otx2vf_netdev_ops = {
 	.ndo_open = otx2vf_open,
 	.ndo_stop = otx2vf_stop,
@@ -477,8 +497,10 @@ static const struct net_device_ops otx2vf_netdev_ops = {
 	.ndo_set_rx_mode = otx2vf_set_rx_mode,
 	.ndo_set_mac_address = otx2_set_mac_address,
 	.ndo_change_mtu = otx2vf_change_mtu,
+	.ndo_set_features = otx2vf_set_features,
 	.ndo_get_stats64 = otx2_get_stats64,
 	.ndo_tx_timeout = otx2_tx_timeout,
+	.ndo_do_ioctl	= otx2_ioctl,
 };
 
 static int otx2_wq_init(struct otx2_nic *vf)
@@ -626,6 +648,9 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	else if (err == -EINVAL)
 		goto err_detach_rsrc;
 
+	/* Don't check for error.  Proceed without ptp */
+	otx2_ptp_init(vf);
+
 	/* Assign default mac address */
 	otx2_get_mac_from_af(netdev);
 
@@ -640,6 +665,7 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 				NETIF_F_HW_VLAN_STAG_TX;
 	netdev->features |= netdev->hw_features;
 
+	netdev->hw_features |= NETIF_F_NTUPLE;
 	netdev->hw_features |= NETIF_F_RXALL;
 
 	netdev->gso_max_segs = OTX2_MAX_GSO_SEGS;
@@ -686,8 +712,8 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 err_unreg_netdev:
 	unregister_netdev(netdev);
 err_detach_rsrc:
-	if (hw->lmt_base)
-		iounmap(hw->lmt_base);
+	if (test_bit(CN10K_LMTST, &vf->hw.cap_flag))
+		qmem_free(vf->dev, vf->dync_lmt);
 	otx2_detach_resources(&vf->mbox);
 err_disable_mbox_intr:
 	otx2vf_disable_mbox_intr(vf);

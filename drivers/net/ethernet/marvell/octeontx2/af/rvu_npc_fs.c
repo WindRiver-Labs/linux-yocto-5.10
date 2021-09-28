@@ -20,6 +20,8 @@ static const char * const npc_flow_names[] = {
 	[NPC_DMAC]	= "dmac",
 	[NPC_SMAC]	= "smac",
 	[NPC_ETYPE]	= "ether type",
+	[NPC_VLAN_ETYPE_CTAG] = "vlan ether type ctag",
+	[NPC_VLAN_ETYPE_STAG] = "vlan ether type stag",
 	[NPC_OUTER_VID]	= "outer vlan id",
 	[NPC_TOS]	= "tos",
 	[NPC_SIP_IPV4]	= "ipv4 source ip",
@@ -500,6 +502,11 @@ static void npc_set_features(struct rvu *rvu, int blkaddr, u8 intf)
 			*features &= ~BIT_ULL(NPC_OUTER_VID);
 			*features &= ~BIT_ULL(NPC_FDSA_VAL);
 		}
+
+	/* for vlan ethertypes corresponding layer type should be in the key */
+	if (npc_check_field(rvu, blkaddr, NPC_LB, intf))
+		*features |= BIT_ULL(NPC_VLAN_ETYPE_CTAG) |
+			     BIT_ULL(NPC_VLAN_ETYPE_STAG);
 }
 
 /* Scan key extraction profile and record how fields of our interest
@@ -755,6 +762,28 @@ static void npc_update_ipv6_flow(struct rvu *rvu, struct mcam_entry *entry,
 	}
 }
 
+static void npc_update_vlan_features(struct rvu *rvu, struct mcam_entry *entry,
+				     u64 features, u8 intf)
+{
+	bool ctag = !!(features & BIT_ULL(NPC_VLAN_ETYPE_CTAG));
+	bool stag = !!(features & BIT_ULL(NPC_VLAN_ETYPE_STAG));
+	bool vid = !!(features & BIT_ULL(NPC_OUTER_VID));
+
+	/* If only VLAN id is given then always match outer VLAN id */
+	if (vid && !ctag && !stag) {
+		npc_update_entry(rvu, NPC_LB, entry,
+				 NPC_LT_LB_STAG_QINQ | NPC_LT_LB_CTAG, 0,
+				 NPC_LT_LB_STAG_QINQ & NPC_LT_LB_CTAG, 0, intf);
+		return;
+	}
+	if (ctag)
+		npc_update_entry(rvu, NPC_LB, entry, NPC_LT_LB_CTAG, 0,
+				 ~0ULL, 0, intf);
+	if (stag)
+		npc_update_entry(rvu, NPC_LB, entry, NPC_LT_LB_STAG_QINQ, 0,
+				 ~0ULL, 0, intf);
+}
+
 static void npc_update_flow(struct rvu *rvu, struct mcam_entry *entry,
 			    u64 features, struct flow_msg *pkt,
 			    struct flow_msg *mask,
@@ -786,10 +815,6 @@ static void npc_update_flow(struct rvu *rvu, struct mcam_entry *entry,
 	if (features & BIT_ULL(NPC_IPPROTO_ICMP6))
 		npc_update_entry(rvu, NPC_LD, entry, NPC_LT_LD_ICMP6,
 				 0, ~0ULL, 0, intf);
-	if (features & BIT_ULL(NPC_OUTER_VID))
-		npc_update_entry(rvu, NPC_LB, entry,
-				 NPC_LT_LB_STAG_QINQ | NPC_LT_LB_CTAG, 0,
-				 NPC_LT_LB_STAG_QINQ & NPC_LT_LB_CTAG, 0, intf);
 	if (features & BIT_ULL(NPC_FDSA_VAL))
 		npc_update_entry(rvu, NPC_LB, entry, NPC_LT_LB_FDSA,
 				 0, ~0ULL, 0, intf);
@@ -841,6 +866,7 @@ do {									      \
 		       ntohs(mask->vlan_tci), 0);
 
 	npc_update_ipv6_flow(rvu, entry, features, pkt, mask, output, intf);
+	npc_update_vlan_features(rvu, entry, features, intf);
 }
 
 static struct rvu_npc_mcam_rule *rvu_mcam_find_rule(struct npc_mcam *mcam,
@@ -1007,13 +1033,11 @@ static int npc_install_flow(struct rvu *rvu, int blkaddr, u16 target,
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	struct rvu_npc_mcam_rule dummy = { 0 };
 	struct rvu_npc_mcam_rule *rule;
-	bool new = false, msg_from_vf;
 	u16 owner = req->hdr.pcifunc;
 	struct msg_rsp write_rsp;
 	struct mcam_entry *entry;
 	int entry_index, err;
-
-	msg_from_vf = !!(owner & RVU_PFVF_FUNC_MASK);
+	bool new = false;
 
 	installed_features = req->features;
 	features = req->features;
@@ -1039,7 +1063,7 @@ static int npc_install_flow(struct rvu *rvu, int blkaddr, u16 target,
 	}
 
 	/* update mcam entry with default unicast rule attributes */
-	if (def_ucast_rule && (msg_from_vf || (req->default_rule && req->append))) {
+	if (def_ucast_rule && (req->default_rule && req->append)) {
 		missing_features = (def_ucast_rule->features ^ features) &
 					def_ucast_rule->features;
 		if (missing_features)
@@ -1106,6 +1130,9 @@ find_rule:
 	rule->default_rule = req->default_rule;
 	rule->owner = owner;
 	rule->enable = enable;
+	rule->chan_mask = write_req.entry_data.kw_mask[0] & NPC_KEX_CHAN_MASK;
+	rule->chan = write_req.entry_data.kw[0] & NPC_KEX_CHAN_MASK;
+	rule->chan &= rule->chan_mask;
 	if (is_npc_intf_tx(req->intf))
 		rule->intf = pfvf->nix_tx_intf;
 	else
@@ -1149,7 +1176,7 @@ int rvu_mbox_handler_npc_install_flow(struct rvu *rvu,
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0) {
 		dev_err(rvu->dev, "%s: NPC block not implemented\n", __func__);
-		return -ENODEV;
+		return NPC_MCAM_INVALID_REQ;
 	}
 
 	if (!is_npc_interface_valid(rvu, req->intf))
@@ -1231,13 +1258,6 @@ int rvu_mbox_handler_npc_install_flow(struct rvu *rvu,
 		set_bit(PF_SET_VF_MAC, &pfvf->flags);
 		return 0;
 	}
-
-	/* If message is from VF then its flow should not overlap with
-	 * reserved unicast flow.
-	 */
-	if (from_vf && pfvf->def_ucast_rule && is_npc_intf_rx(req->intf) &&
-	    pfvf->def_ucast_rule->features & req->features)
-		return NPC_FLOW_VF_OVERLAP;
 
 	mutex_lock(&rswitch->switch_lock);
 	err = npc_install_flow(rvu, blkaddr, target, nixlf, pfvf,
