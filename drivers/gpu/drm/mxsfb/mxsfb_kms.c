@@ -219,7 +219,7 @@ static void mxsfb_enable_controller(struct mxsfb_drm_private *mxsfb)
 	 * Enable this bit to mitigate the sporadic underflows.
 	 */
 	reg = readl(mxsfb->base + LCDC_CTRL1);
-	reg |= CTRL1_RECOVER_ON_UNDERFLOW;
+	reg |= CTRL1_RECOVERY_ON_UNDERFLOW;
 	writel(reg, mxsfb->base + LCDC_CTRL1);
 
 	writel(CTRL_RUN, mxsfb->base + LCDC_CTRL + REG_SET);
