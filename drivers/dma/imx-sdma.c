@@ -1489,22 +1489,6 @@ static int sdma_config_channel(struct dma_chan *chan)
 	return 0;
 }
 
-static int sdma_set_channel_priority(struct sdma_channel *sdmac,
-		unsigned int priority)
-{
-	struct sdma_engine *sdma = sdmac->sdma;
-	int channel = sdmac->channel;
-
-	if (priority < MXC_SDMA_MIN_PRIORITY
-	    || priority > MXC_SDMA_MAX_PRIORITY) {
-		return -EINVAL;
-	}
-
-	writel_relaxed(priority, sdma->regs + SDMA_CHNPRI_0 + 4 * channel);
-
-	return 0;
-}
-
 static int sdma_request_channel0(struct sdma_engine *sdma)
 {
 	int ret = -EBUSY;
