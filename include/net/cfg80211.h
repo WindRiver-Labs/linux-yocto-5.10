@@ -1008,6 +1008,14 @@ struct survey_info {
  * @sae_pwd: password for SAE authentication (for devices supporting SAE
  *	offload)
  * @sae_pwd_len: length of SAE password (for devices supporting SAE offload)
+ * @sae_pwe: The mechanisms allowed for SAE PWE derivation
+ *	NL80211_SAE_PWE_UNSPECIFIED: Not-specified, used to indicate userspace
+ *		did not specify any preference. The driver should follow its
+ *		internal policy in such a scenario.
+ *	NL80211_SAE_PWE_HUNT_AND_PECK: Allow hunting-and-pecking loop only
+ *	NL80211_SAE_PWE_HASH_TO_ELEMENT: Allow hash-to-element only
+ *	NL80211_SAE_PWE_BOTH: Allow either hunting-and-pecking loop
+ *		or hash-to-element
  */
 struct cfg80211_crypto_settings {
 	u32 wpa_versions;
@@ -1026,6 +1034,7 @@ struct cfg80211_crypto_settings {
 	const u8 *psk;
 	const u8 *sae_pwd;
 	u8 sae_pwd_len;
+	enum nl80211_sae_pwe_mechanism sae_pwe;
 };
 
 /**
@@ -6406,13 +6415,15 @@ void cfg80211_abandon_assoc(struct net_device *dev, struct cfg80211_bss *bss);
  * @dev: network device
  * @buf: 802.11 frame (header + body)
  * @len: length of the frame data
+ * @reconnect: immediate reconnect is desired (include the nl80211 attribute)
  *
  * This function is called whenever deauthentication has been processed in
  * station mode. This includes both received deauthentication frames and
  * locally generated ones. This function may sleep. The caller must hold the
  * corresponding wdev's mutex.
  */
-void cfg80211_tx_mlme_mgmt(struct net_device *dev, const u8 *buf, size_t len);
+void cfg80211_tx_mlme_mgmt(struct net_device *dev, const u8 *buf, size_t len,
+			   bool reconnect);
 
 /**
  * cfg80211_rx_unprot_mlme_mgmt - notification of unprotected mlme mgmt frame
