@@ -67,6 +67,7 @@ static int cs_etm_set_context_id(struct auxtrace_record *itr,
 	char path[PATH_MAX];
 	int err = -EINVAL;
 	u32 val;
+	u64 contextid;
 
 	ptr = container_of(itr, struct cs_etm_recording, itr);
 	cs_etm_pmu = ptr->cs_etm_pmu;
@@ -86,25 +87,59 @@ static int cs_etm_set_context_id(struct auxtrace_record *itr,
 		goto out;
 	}
 
+	/* User has configured for PID tracing, respects it. */
+	contextid = evsel->core.attr.config &
+			(BIT(ETM_OPT_CTXTID) | BIT(ETM_OPT_CTXTID2));
+
 	/*
-	 * TRCIDR2.CIDSIZE, bit [9-5], indicates whether contextID tracing
-	 * is supported:
-	 *  0b00000 Context ID tracing is not supported.
-	 *  0b00100 Maximum of 32-bit Context ID size.
-	 *  All other values are reserved.
+	 * If user doesn't configure the contextid format, parse PMU format and
+	 * enable PID tracing according to the "contextid" format bits:
+	 *
+	 *   If bit ETM_OPT_CTXTID is set, trace CONTEXTIDR_EL1;
+	 *   If bit ETM_OPT_CTXTID2 is set, trace CONTEXTIDR_EL2.
 	 */
-	val = BMVAL(val, 5, 9);
-	if (!val || val != 0x4) {
-		err = -EINVAL;
-		goto out;
+	if (!contextid)
+		contextid = perf_pmu__format_bits(&cs_etm_pmu->format,
+						  "contextid");
+
+	if (contextid & BIT(ETM_OPT_CTXTID)) {
+		/*
+		 * TRCIDR2.CIDSIZE, bit [9-5], indicates whether contextID
+		 * tracing is supported:
+		 *  0b00000 Context ID tracing is not supported.
+		 *  0b00100 Maximum of 32-bit Context ID size.
+		 *  All other values are reserved.
+		 */
+		val = BMVAL(val, 5, 9);
+		if (!val || val != 0x4) {
+			pr_err("%s: CONTEXTIDR_EL1 isn't supported\n",
+			       CORESIGHT_ETM_PMU_NAME);
+			err = -EINVAL;
+			goto out;
+		}
+	}
+
+	if (contextid & BIT(ETM_OPT_CTXTID2)) {
+		/*
+		 * TRCIDR2.VMIDOPT[30:29] != 0 and
+		 * TRCIDR2.VMIDSIZE[14:10] == 0b00100 (32bit virtual contextid)
+		 * We can't support CONTEXTIDR in VMID if the size of the
+		 * virtual context id is < 32bit.
+		 * Any value of VMIDSIZE >= 4 (i.e, > 32bit) is fine for us.
+		 */
+		if (!BMVAL(val, 29, 30) || BMVAL(val, 10, 14) < 4) {
+			pr_err("%s: CONTEXTIDR_EL2 isn't supported\n",
+			       CORESIGHT_ETM_PMU_NAME);
+			err = -EINVAL;
+			goto out;
+		}
 	}
 
 	/* All good, let the kernel know */
-	evsel->core.attr.config |= (1 << ETM_OPT_CTXTID);
+	evsel->core.attr.config |= contextid;
 	err = 0;
 
 out:
-
 	return err;
 }
 
@@ -156,6 +191,10 @@ out:
 	return err;
 }
 
+#define ETM_SET_OPT_CTXTID	(1 << 0)
+#define ETM_SET_OPT_TS		(1 << 1)
+#define ETM_SET_OPT_MASK	(ETM_SET_OPT_CTXTID | ETM_SET_OPT_TS)
+
 static int cs_etm_set_option(struct auxtrace_record *itr,
 			     struct evsel *evsel, u32 option)
 {
@@ -169,17 +208,17 @@ static int cs_etm_set_option(struct auxtrace_record *itr,
 		    !cpu_map__has(online_cpus, i))
 			continue;
 
-		if (option & ETM_OPT_CTXTID) {
+		if (option & ETM_SET_OPT_CTXTID) {
 			err = cs_etm_set_context_id(itr, evsel, i);
 			if (err)
 				goto out;
 		}
-		if (option & ETM_OPT_TS) {
+		if (option & ETM_SET_OPT_TS) {
 			err = cs_etm_set_timestamp(itr, evsel, i);
 			if (err)
 				goto out;
 		}
-		if (option & ~(ETM_OPT_CTXTID | ETM_OPT_TS))
+		if (option & ~(ETM_SET_OPT_MASK))
 			/* Nothing else is currently supported */
 			goto out;
 	}
@@ -406,7 +445,7 @@ static int cs_etm_recording_options(struct auxtrace_record *itr,
 		evsel__set_sample_bit(cs_etm_evsel, CPU);
 
 		err = cs_etm_set_option(itr, cs_etm_evsel,
-					ETM_OPT_CTXTID | ETM_OPT_TS);
+					ETM_SET_OPT_CTXTID | ETM_SET_OPT_TS);
 		if (err)
 			goto out;
 	}
@@ -485,7 +524,9 @@ static u64 cs_etmv4_get_config(struct auxtrace_record *itr)
 		config |= BIT(ETM4_CFG_BIT_TS);
 	if (config_opts & BIT(ETM_OPT_RETSTK))
 		config |= BIT(ETM4_CFG_BIT_RETSTK);
-
+	if (config_opts & BIT(ETM_OPT_CTXTID2))
+		config |= BIT(ETM4_CFG_BIT_VMID) |
+			  BIT(ETM4_CFG_BIT_VMID_OPT);
 	return config;
 }
 
@@ -572,7 +613,7 @@ static void cs_etm_get_metadata(int cpu, u32 *offset,
 				struct auxtrace_record *itr,
 				struct perf_record_auxtrace_info *info)
 {
-	u32 increment;
+	u32 increment, nr_trc_params;
 	u64 magic;
 	struct cs_etm_recording *ptr =
 			container_of(itr, struct cs_etm_recording, itr);
@@ -607,6 +648,7 @@ static void cs_etm_get_metadata(int cpu, u32 *offset,
 
 		/* How much space was used */
 		increment = CS_ETMV4_PRIV_MAX;
+		nr_trc_params = CS_ETMV4_PRIV_MAX - CS_ETMV4_TRCCONFIGR;
 	} else {
 		magic = __perf_cs_etmv3_magic;
 		/* Get configuration register */
@@ -624,11 +666,13 @@ static void cs_etm_get_metadata(int cpu, u32 *offset,
 
 		/* How much space was used */
 		increment = CS_ETM_PRIV_MAX;
+		nr_trc_params = CS_ETM_PRIV_MAX - CS_ETM_ETMCR;
 	}
 
 	/* Build generic header portion */
 	info->priv[*offset + CS_ETM_MAGIC] = magic;
 	info->priv[*offset + CS_ETM_CPU] = cpu;
+	info->priv[*offset + CS_ETM_NR_TRC_PARAMS] = nr_trc_params;
 	/* Where the next CPU entry should start from */
 	*offset += increment;
 }
@@ -643,6 +687,8 @@ static int cs_etm_info_fill(struct auxtrace_record *itr,
 	u64 nr_cpu, type;
 	struct perf_cpu_map *cpu_map;
 	struct perf_cpu_map *event_cpus = session->evlist->core.cpus;
+	struct evlist *evlist = session->evlist;
+	struct evsel *evsel, *cs_etm_evsel = NULL;
 	struct perf_cpu_map *online_cpus = perf_cpu_map__new(NULL);
 	struct cs_etm_recording *ptr =
 			container_of(itr, struct cs_etm_recording, itr);
@@ -674,10 +720,44 @@ static int cs_etm_info_fill(struct auxtrace_record *itr,
 
 	/* First fill out the session header */
 	info->type = PERF_AUXTRACE_CS_ETM;
-	info->priv[CS_HEADER_VERSION_0] = 0;
+	info->priv[CS_HEADER_VERSION] = CS_HEADER_CURRENT_VERSION;
 	info->priv[CS_PMU_TYPE_CPUS] = type << 32;
 	info->priv[CS_PMU_TYPE_CPUS] |= nr_cpu;
 	info->priv[CS_ETM_SNAPSHOT] = ptr->snapshot_mode;
+
+	/* Find the etm_pmu event from the event list */
+	evlist__for_each_entry(evlist, evsel) {
+		if (evsel->core.attr.type == cs_etm_pmu->type) {
+			cs_etm_evsel = evsel;
+			break;
+		}
+	}
+
+	/* From the etm_pmu event determine if the sink supports
+	 * formatted trace by reading the sink's FFSR register
+	 * exposed through SysFS
+	 */
+	if (cs_etm_evsel) {
+		struct evsel_config_term *term;
+		char path[PATH_MAX], *sink;
+		int ret;
+		u32 val;
+
+		list_for_each_entry(term, &cs_etm_evsel->config_terms, list) {
+			if (term->type != EVSEL__CONFIG_TERM_DRV_CFG)
+				continue;
+
+			sink = term->val.str;
+			snprintf(path, PATH_MAX, "sink_%s/mgmt/ffsr", sink);
+			ret = perf_pmu__scan_file(cs_etm_pmu, path, "%x", &val);
+			if (ret != 1) {
+				pr_err("%s: can't read file %s\n",
+				       CORESIGHT_ETM_PMU_NAME, path);
+				break;
+			}
+			info->priv[CS_SINK_FORMATTED] = val & (1 << 4) ? 0 : 1;
+		}
+	}
 
 	offset = CS_ETM_SNAPSHOT + 1;
 

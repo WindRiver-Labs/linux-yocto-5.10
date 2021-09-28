@@ -223,7 +223,8 @@ static void otx2_free_rcv_seg(struct otx2_nic *pfvf, struct nix_cqe_rx_s *cqe,
 		sg = (struct nix_rx_sg_s *)start;
 		seg_addr = &sg->seg_addr;
 		for (seg = 0; seg < sg->segs; seg++, seg_addr++)
-			pfvf->hw_ops->aura_freeptr(pfvf, qidx, *seg_addr & ~0x07ULL);
+			pfvf->hw_ops->aura_freeptr(pfvf, qidx,
+						   *seg_addr & ~0x07ULL);
 		start += sizeof(*sg);
 	}
 }
@@ -325,7 +326,8 @@ static void otx2_rcv_pkt_handler(struct otx2_nic *pfvf,
 		seg_addr = &sg->seg_addr;
 		seg_size = (void *)sg;
 		for (seg = 0; seg < sg->segs; seg++, seg_addr++) {
-			otx2_skb_add_frag(pfvf, skb, *seg_addr, seg_size[seg], parse);
+			otx2_skb_add_frag(pfvf, skb, *seg_addr, seg_size[seg],
+					  parse);
 			cq->pool_ptrs++;
 		}
 		start += sizeof(*sg);
@@ -384,35 +386,14 @@ static int otx2_rx_napi_handler(struct otx2_nic *pfvf,
 	return processed_cqe;
 }
 
-s64 otx2_alloc_buffer(struct otx2_nic *pfvf, struct otx2_cq_queue *cq)
-{
-	s64 bufptr;
-
-	bufptr = __otx2_alloc_rbuf(pfvf, cq->rbpool);
-	if (unlikely(bufptr <= 0)) {
-		struct refill_work *work;
-		struct delayed_work *dwork;
-
-		work = &pfvf->refill_wrk[cq->cq_idx];
-		dwork = &work->pool_refill_work;
-		/* Schedule a task if no other task is running */
-		if (!cq->refill_task_sched) {
-			cq->refill_task_sched = true;
-			schedule_delayed_work(dwork, msecs_to_jiffies(100));
-		}
-	}
-	return bufptr;
-}
-
 void otx2_refill_pool_ptrs(void *dev, struct otx2_cq_queue *cq)
 {
 	struct otx2_nic *pfvf = dev;
-	s64 bufptr;
+	dma_addr_t bufptr;
 
 	/* Refill pool with new buffers */
 	while (cq->pool_ptrs) {
-		bufptr = otx2_alloc_buffer(pfvf, cq);
-		if (unlikely(bufptr <= 0))
+		if (otx2_alloc_buffer(pfvf, cq, &bufptr))
 			break;
 		otx2_aura_freeptr(pfvf, cq->cq_idx, bufptr + OTX2_HEAD_ROOM);
 		cq->pool_ptrs--;

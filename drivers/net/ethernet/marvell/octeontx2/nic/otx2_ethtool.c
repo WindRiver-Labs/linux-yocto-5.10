@@ -663,6 +663,7 @@ static int otx2_set_rss_hash_opts(struct otx2_nic *pfvf,
 static int otx2_get_rxnfc(struct net_device *dev,
 			  struct ethtool_rxnfc *nfc, u32 *rules)
 {
+	bool ntuple = !!(dev->features & NETIF_F_NTUPLE);
 	struct otx2_nic *pfvf = netdev_priv(dev);
 	int ret = -EOPNOTSUPP;
 
@@ -672,14 +673,18 @@ static int otx2_get_rxnfc(struct net_device *dev,
 		ret = 0;
 		break;
 	case ETHTOOL_GRXCLSRLCNT:
-		nfc->rule_cnt = pfvf->flow_cfg->nr_flows;
-		ret = 0;
+		if (netif_running(dev) && ntuple) {
+			nfc->rule_cnt = pfvf->flow_cfg->nr_flows;
+			ret = 0;
+		}
 		break;
 	case ETHTOOL_GRXCLSRULE:
-		ret = otx2_get_flow(pfvf, nfc,  nfc->fs.location);
+		if (netif_running(dev) && ntuple)
+			ret = otx2_get_flow(pfvf, nfc,  nfc->fs.location);
 		break;
 	case ETHTOOL_GRXCLSRLALL:
-		ret = otx2_get_all_flows(pfvf, nfc, rules);
+		if (netif_running(dev) && ntuple)
+			ret = otx2_get_all_flows(pfvf, nfc, rules);
 		break;
 	case ETHTOOL_GRXFH:
 		return otx2_get_rss_hash_opts(pfvf, nfc);
@@ -706,41 +711,6 @@ static int otx2_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *nfc)
 	case ETHTOOL_SRXCLSRLDEL:
 		if (netif_running(dev) && ntuple)
 			ret = otx2_remove_flow(pfvf, nfc->fs.location);
-		break;
-	default:
-		break;
-	}
-
-	return ret;
-}
-
-static int otx2vf_get_rxnfc(struct net_device *dev,
-			    struct ethtool_rxnfc *nfc, u32 *rules)
-{
-	struct otx2_nic *pfvf = netdev_priv(dev);
-	int ret = -EOPNOTSUPP;
-
-	switch (nfc->cmd) {
-	case ETHTOOL_GRXRINGS:
-		nfc->data = pfvf->hw.rx_queues;
-		ret = 0;
-		break;
-	case ETHTOOL_GRXFH:
-		return otx2_get_rss_hash_opts(pfvf, nfc);
-	default:
-		break;
-	}
-	return ret;
-}
-
-static int otx2vf_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *nfc)
-{
-	struct otx2_nic *pfvf = netdev_priv(dev);
-	int ret = -EOPNOTSUPP;
-
-	switch (nfc->cmd) {
-	case ETHTOOL_SRXFH:
-		ret = otx2_set_rss_hash_opts(pfvf, nfc);
 		break;
 	default:
 		break;
@@ -808,6 +778,10 @@ static int otx2_set_rxfh_context(struct net_device *dev, const u32 *indir,
 
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
 		return -EOPNOTSUPP;
+
+	if (*rss_context != ETH_RXFH_CONTEXT_ALLOC &&
+	    *rss_context >= MAX_RSS_GROUPS)
+		return -EINVAL;
 
 	rss = &pfvf->hw.rss_info;
 
@@ -1098,7 +1072,7 @@ static void otx2_get_link_mode_info(u64 link_mode_bmap,
 		ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
 	};
 	/* CGX link modes to Ethtool link mode mapping */
-	const int cgx_link_mode[27] = {
+	const int cgx_link_mode[38] = {
 		0, /*SGMII Mode */
 		ETHTOOL_LINK_MODE_1000baseX_Full_BIT,
 		ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
@@ -1116,20 +1090,32 @@ static void otx2_get_link_mode_info(u64 link_mode_bmap,
 		ETHTOOL_LINK_MODE_40000baseCR4_Full_BIT,
 		ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT,
 		ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT,
-		ETHTOOL_LINK_MODE_50000baseSR_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseSR2_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseDR_Full_BIT,
 		ETHTOOL_LINK_MODE_56000baseKR4_Full_BIT,
-		ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT,
-		ETHTOOL_LINK_MODE_50000baseCR_Full_BIT,
-		ETHTOOL_LINK_MODE_50000baseKR_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT,
 		ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT,
 		ETHTOOL_LINK_MODE_100000baseSR4_Full_BIT,
 		ETHTOOL_LINK_MODE_100000baseLR4_ER4_Full_BIT,
 		ETHTOOL_LINK_MODE_100000baseCR4_Full_BIT,
-		ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT
+		ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseSR_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseCR_Full_BIT,
+		ETHTOOL_LINK_MODE_50000baseKR_Full_BIT,
+		ETHTOOL_LINK_MODE_100000baseSR2_Full_BIT,
+		ETHTOOL_LINK_MODE_100000baseLR2_ER2_FR2_Full_BIT,
+		ETHTOOL_LINK_MODE_100000baseCR2_Full_BIT,
+		ETHTOOL_LINK_MODE_100000baseKR2_Full_BIT,
+		ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,
+		ETHTOOL_LINK_MODE_56000baseCR4_Full_BIT,
+		ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT
 	};
 	u8 bit;
 
-	for_each_set_bit(bit, (unsigned long *)&link_mode_bmap, 27) {
+	for_each_set_bit(bit, (unsigned long *)&link_mode_bmap,
+			 ARRAY_SIZE(cgx_link_mode)) {
 		/* SGMII mode is set */
 		if (bit == 0)
 			linkmode_set_bit_array(otx2_sgmii_features,
@@ -1140,11 +1126,13 @@ static void otx2_get_link_mode_info(u64 link_mode_bmap,
 	}
 
 	if (req_mode == OTX2_MODE_ADVERTISED)
-		linkmode_copy(link_ksettings->link_modes.advertising,
-			      otx2_link_modes);
+		linkmode_or(link_ksettings->link_modes.advertising,
+			    link_ksettings->link_modes.advertising,
+			    otx2_link_modes);
 	else
-		linkmode_copy(link_ksettings->link_modes.supported,
-			      otx2_link_modes);
+		linkmode_or(link_ksettings->link_modes.supported,
+			    link_ksettings->link_modes.supported,
+			    otx2_link_modes);
 }
 
 static int otx2_get_module_info(struct net_device *netdev,
@@ -1432,8 +1420,6 @@ static void otx2_endis_vfvlan_rules(struct otx2_nic *pfvf, bool enable)
 	}
 }
 
-#define OTX2_IS_INTFMOD_SET(flags) hweight32((flags) & OTX2_INTF_MOD_MASK)
-
 static int otx2_set_priv_flags(struct net_device *netdev, u32 new_flags)
 {
 	struct otx2_nic *pfvf = netdev_priv(netdev);
@@ -1455,6 +1441,11 @@ static int otx2_set_priv_flags(struct net_device *netdev, u32 new_flags)
 	bitnr = ffs(chg_flags) - 1;
 	if (new_flags & BIT(bitnr))
 		enable = true;
+
+	if ((BIT(bitnr) != OTX2_PRIV_FLAG_PAM4) && (pfvf->flags & OTX2_FLAG_RX_TSTAMP_ENABLED)) {
+		netdev_info(netdev, "Can't enable requested mode when PTP HW timestamping is ON\n");
+		return -EINVAL;
+	}
 
 	switch (BIT(bitnr)) {
 	case OTX2_PRIV_FLAG_PAM4:
@@ -1644,8 +1635,8 @@ static const struct ethtool_ops otx2vf_ethtool_ops = {
 	.get_sset_count		= otx2vf_get_sset_count,
 	.set_channels		= otx2_set_channels,
 	.get_channels		= otx2_get_channels,
-	.get_rxnfc		= otx2vf_get_rxnfc,
-	.set_rxnfc              = otx2vf_set_rxnfc,
+	.get_rxnfc		= otx2_get_rxnfc,
+	.set_rxnfc              = otx2_set_rxnfc,
 	.get_rxfh_key_size	= otx2_get_rxfh_key_size,
 	.get_rxfh_indir_size	= otx2_get_rxfh_indir_size,
 	.get_rxfh		= otx2_get_rxfh,
@@ -1661,6 +1652,7 @@ static const struct ethtool_ops otx2vf_ethtool_ops = {
 	.get_pauseparam		= otx2_get_pauseparam,
 	.set_pauseparam		= otx2_set_pauseparam,
 	.get_link_ksettings     = otx2vf_get_link_ksettings,
+	.get_ts_info		= otx2_get_ts_info,
 };
 
 void otx2vf_set_ethtool_ops(struct net_device *netdev)

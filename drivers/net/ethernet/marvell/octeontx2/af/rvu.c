@@ -713,7 +713,7 @@ setup_vfmsix:
 	}
 
 	/* HW interprets RVU_AF_MSIXTR_BASE address as an IOVA, hence
-	 * create a IOMMU mapping for the physcial address configured by
+	 * create an IOMMU mapping for the physical address configured by
 	 * firmware and reconfig RVU_AF_MSIXTR_BASE with IOVA.
 	 */
 	cfg = rvu_read64(rvu, BLKADDR_RVUM, RVU_PRIV_CONST);
@@ -764,7 +764,7 @@ static void rvu_free_hw_resources(struct rvu *rvu)
 		kfree(block->lf.bmap);
 	}
 
-	/* Free MSIX and TIM bitmaps */
+	/* Free MSIX bitmaps */
 	for (id = 0; id < hw->total_pfs; id++) {
 		pfvf = &rvu->pf[id];
 		kfree(pfvf->msix.bmap);
@@ -796,7 +796,7 @@ static void rvu_setup_pfvf_macaddress(struct rvu *rvu)
 	u64 *mac;
 
 	for (pf = 0; pf < hw->total_pfs; pf++) {
-		/* For PF0 (AF) get mac address only for AFVFs (LBKVFs) */
+		/* For PF0(AF), Assign MAC address to only VFs (LBKVFs) */
 		if (!pf)
 			goto lbkvf;
 
@@ -829,7 +829,7 @@ lbkvf:
 			} else {
 				eth_random_addr(pfvf->mac_addr);
 			}
-		ether_addr_copy(pfvf->default_mac, pfvf->mac_addr);
+			ether_addr_copy(pfvf->default_mac, pfvf->mac_addr);
 		}
 	}
 }
@@ -2102,9 +2102,9 @@ int rvu_mbox_handler_set_vf_perm(struct rvu *rvu, struct set_vf_perm *req,
 	target = (pcifunc & ~RVU_PFVF_FUNC_MASK) | (req->vf + 1);
 	pfvf = rvu_get_pfvf(rvu, target);
 
-	if (req->flags & RESET_VF_PERM)
+	if (req->flags & RESET_VF_PERM) {
 		pfvf->flags &= RVU_CLEAR_VF_PERM;
-	else if (test_bit(PF_SET_VF_TRUSTED, &pfvf->flags) ^
+	} else if (test_bit(PF_SET_VF_TRUSTED, &pfvf->flags) ^
 		 (req->flags & VF_TRUSTED)) {
 		change_bit(PF_SET_VF_TRUSTED, &pfvf->flags);
 		/* disable multicast and promisc entries */
@@ -2368,7 +2368,7 @@ static int rvu_get_mbox_regions(struct rvu *rvu, void **mbox_addr,
 				bar4 = rvupf_read64(rvu, RVU_PF_VF_BAR4_ADDR);
 				bar4 += region * MBOX_SIZE;
 			}
-			mbox_addr[region] = ioremap_wc(bar4, MBOX_SIZE);
+			mbox_addr[region] = (void *)ioremap_wc(bar4, MBOX_SIZE);
 			if (!mbox_addr[region])
 				goto error;
 		}
@@ -2388,7 +2388,7 @@ static int rvu_get_mbox_regions(struct rvu *rvu, void **mbox_addr,
 					  RVU_AF_PF_BAR4_ADDR);
 			bar4 += region * MBOX_SIZE;
 		}
-		mbox_addr[region] = ioremap_wc(bar4, MBOX_SIZE);
+		mbox_addr[region] = (void *)ioremap_wc(bar4, MBOX_SIZE);
 		if (!mbox_addr[region])
 			goto error;
 	}
@@ -2396,7 +2396,7 @@ static int rvu_get_mbox_regions(struct rvu *rvu, void **mbox_addr,
 
 error:
 	while (region--)
-		iounmap(mbox_addr[region]);
+		iounmap((void __iomem *)mbox_addr[region]);
 	return -ENOMEM;
 }
 
@@ -2486,7 +2486,7 @@ exit:
 	destroy_workqueue(mw->mbox_wq);
 unmap_regions:
 	while (num--)
-		iounmap(mbox_regions[num]);
+		iounmap((void __iomem *)mbox_regions[num]);
 free_regions:
 	kfree(mbox_regions);
 	return err;
@@ -2765,7 +2765,8 @@ static void rvu_blklf_teardown(struct rvu *rvu, u16 pcifunc, u8 blkaddr)
 			rvu_tim_lf_teardown(rvu, pcifunc, lf, slot);
 		else if ((block->addr == BLKADDR_CPT0) ||
 			 (block->addr == BLKADDR_CPT1))
-			rvu_cpt_lf_teardown(rvu, pcifunc, lf, slot);
+			rvu_cpt_lf_teardown(rvu, pcifunc, block->addr, lf,
+					    slot);
 
 		err = rvu_lf_reset(rvu, block, lf);
 		if (err) {

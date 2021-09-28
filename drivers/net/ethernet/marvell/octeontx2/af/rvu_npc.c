@@ -25,7 +25,6 @@
 #define RSVD_MCAM_ENTRIES_PER_NIXLF	1 /* Ucast for LFs */
 
 #define NPC_HW_TSTAMP_OFFSET	8ULL
-#define NPC_KEX_CHAN_MASK	0xFFFULL
 #define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
 
 #define ALIGN_8B_CEIL(__a)	(((__a) + 7) & (-8))
@@ -1521,7 +1520,7 @@ static int npc_apply_custom_kpu(struct rvu *rvu,
 	if (NPC_KPU_VER_MIN(profile->version) <
 	    NPC_KPU_VER_MIN(NPC_KPU_PROFILE_VER)) {
 		dev_warn(rvu->dev,
-			 "Invalid KPU profile version: %d.%d.%d expected vesion <= %d.%d.%d\n",
+			 "Invalid KPU profile version: %d.%d.%d expected version <= %d.%d.%d\n",
 			 NPC_KPU_VER_MAJ(profile->version),
 			 NPC_KPU_VER_MIN(profile->version),
 			 NPC_KPU_VER_PATCH(profile->version),
@@ -1597,7 +1596,7 @@ static int npc_fwdb_detect_load_prfl_img(struct rvu *rvu, uint64_t prfl_sz,
 {
 	struct npc_coalesced_kpu_prfl *img_data = NULL;
 	int i = 0, rc = -EINVAL;
-	void *kpu_prfl_addr;
+	void __iomem *kpu_prfl_addr;
 	u16 offset;
 
 	img_data = (struct npc_coalesced_kpu_prfl __force *)rvu->kpu_prfl_addr;
@@ -1616,7 +1615,7 @@ static int npc_fwdb_detect_load_prfl_img(struct rvu *rvu, uint64_t prfl_sz,
 	while (i < img_data->num_prfl) {
 		/* Profile image offsets are rounded up to next 8 multiple.*/
 		offset = ALIGN_8B_CEIL(offset);
-		kpu_prfl_addr = (void *)((uintptr_t)rvu->kpu_prfl_addr +
+		kpu_prfl_addr = (void __iomem *)((uintptr_t)rvu->kpu_prfl_addr +
 					 offset);
 		rc = npc_load_kpu_prfl_img(rvu, kpu_prfl_addr,
 					   img_data->prfl_sz[i], kpu_profile);
@@ -2622,8 +2621,11 @@ int rvu_mbox_handler_npc_mcam_alloc_entry(struct rvu *rvu,
 	rsp->free_count = 0;
 
 	/* Check if ref_entry is within range */
-	if (req->priority && req->ref_entry >= mcam->bmap_entries)
+	if (req->priority && req->ref_entry >= mcam->bmap_entries) {
+		dev_err(rvu->dev, "%s: reference entry %d is out of range\n",
+			__func__, req->ref_entry);
 		return NPC_MCAM_INVALID_REQ;
+	}
 
 	/* ref_entry can't be '0' if requested priority is high.
 	 * Can't be last entry if requested priority is low.
@@ -2636,8 +2638,12 @@ int rvu_mbox_handler_npc_mcam_alloc_entry(struct rvu *rvu,
 	/* Since list of allocated indices needs to be sent to requester,
 	 * max number of non-contiguous entries per mbox msg is limited.
 	 */
-	if (!req->contig && req->count > NPC_MAX_NONCONTIG_ENTRIES)
+	if (!req->contig && req->count > NPC_MAX_NONCONTIG_ENTRIES) {
+		dev_err(rvu->dev,
+			"%s: %d Non-contiguous MCAM entries requested is morethan max (%d) allowed\n",
+			__func__, req->count, NPC_MAX_NONCONTIG_ENTRIES);
 		return NPC_MCAM_INVALID_REQ;
+	}
 
 	/* Alloc request from PFFUNC with no NIXLF attached should be denied */
 	if (!is_pffunc_af(pcifunc) && !is_nixlf_attached(rvu, pcifunc))

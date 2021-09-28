@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Physcial Function ethernet driver
+/* Marvell OcteonTx2 RVU Physical Function ethernet driver
  *
  * Copyright (C) 2020 Marvell International Ltd.
  *
@@ -1406,9 +1406,8 @@ static int otx2_init_hw_resources(struct otx2_nic *pf)
 	hw->sqpool_cnt = hw->tot_tx_queues;
 	hw->pool_cnt = hw->rqpool_cnt + hw->sqpool_cnt;
 
-	/* Add EDSA/HIGIG2 header length and timestamp length to maxlen */
-	pf->max_frs = pf->netdev->mtu + OTX2_ETH_HLEN + pf->addl_mtu +
-		      OTX2_HW_TIMESTAMP_LEN + pf->xtra_hdr;
+	/* Maximum hardware supported transmit length */
+	pf->tx_max_pktlen = pf->netdev->max_mtu + OTX2_ETH_HLEN;
 
 	pf->rbsize = otx2_get_rbuf_size(pf, pf->netdev->mtu);
 
@@ -1563,6 +1562,44 @@ static void otx2_free_hw_resources(struct otx2_nic *pf)
 			dev_err(pf->dev, "%s failed to free npalf\n", __func__);
 	}
 	mutex_unlock(&mbox->lock);
+}
+
+static void otx2_do_set_rx_mode(struct otx2_nic *pf)
+{
+	struct net_device *netdev = pf->netdev;
+	struct nix_rx_mode *req;
+	bool promisc = false;
+
+	if (!(netdev->flags & IFF_UP))
+		return;
+
+	if ((netdev->flags & IFF_PROMISC) ||
+	    (netdev_uc_count(netdev) > OTX2_MAX_UNICAST_FLOWS)) {
+		promisc = true;
+	}
+
+	/* Write unicast address to mcam entries or del from mcam */
+	if (!promisc && netdev->priv_flags & IFF_UNICAST_FLT)
+		__dev_uc_sync(netdev, otx2_add_macfilter, otx2_del_macfilter);
+
+	mutex_lock(&pf->mbox.lock);
+	req = otx2_mbox_alloc_msg_nix_set_rx_mode(&pf->mbox);
+	if (!req) {
+		mutex_unlock(&pf->mbox.lock);
+		return;
+	}
+
+	req->mode = NIX_RX_MODE_UCAST;
+
+	if (promisc)
+		req->mode |= NIX_RX_MODE_PROMISC;
+	if (netdev->flags & (IFF_ALLMULTI | IFF_MULTICAST))
+		req->mode |= NIX_RX_MODE_ALLMULTI;
+
+	req->mode |= NIX_RX_MODE_USE_MCE;
+
+	otx2_sync_mbox_msg(&pf->mbox);
+	mutex_unlock(&pf->mbox.lock);
 }
 
 int otx2_open(struct net_device *netdev)
@@ -1738,6 +1775,8 @@ int otx2_open(struct net_device *netdev)
 	if (err)
 		goto err_tx_stop_queues;
 
+	otx2_do_set_rx_mode(pf);
+
 	return 0;
 
 err_tx_stop_queues:
@@ -1842,7 +1881,7 @@ static netdev_tx_t otx2_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	/* Check for minimum and maximum packet length */
 	if (skb->len <= ETH_HLEN ||
-	    (!skb_shinfo(skb)->gso_size && skb->len > pf->max_frs)) {
+	    (!skb_shinfo(skb)->gso_size && skb->len > pf->tx_max_pktlen)) {
 		dev_kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}
@@ -1895,43 +1934,11 @@ static void otx2_set_rx_mode(struct net_device *netdev)
 	queue_work(pf->otx2_wq, &pf->rx_mode_work);
 }
 
-void otx2_do_set_rx_mode(struct work_struct *work)
+static void otx2_rx_mode_wrk_handler(struct work_struct *work)
 {
 	struct otx2_nic *pf = container_of(work, struct otx2_nic, rx_mode_work);
-	struct net_device *netdev = pf->netdev;
-	struct nix_rx_mode *req;
-	bool promisc = false;
 
-	if (!(netdev->flags & IFF_UP))
-		return;
-
-	if ((netdev->flags & IFF_PROMISC) ||
-	    (netdev_uc_count(netdev) > OTX2_MAX_UNICAST_FLOWS)) {
-		promisc = true;
-	}
-
-	/* Write unicast address to mcam entries or del from mcam */
-	if (!promisc && netdev->priv_flags & IFF_UNICAST_FLT)
-		__dev_uc_sync(netdev, otx2_add_macfilter, otx2_del_macfilter);
-
-	mutex_lock(&pf->mbox.lock);
-	req = otx2_mbox_alloc_msg_nix_set_rx_mode(&pf->mbox);
-	if (!req) {
-		mutex_unlock(&pf->mbox.lock);
-		return;
-	}
-
-	req->mode = NIX_RX_MODE_UCAST;
-
-	if (promisc)
-		req->mode |= NIX_RX_MODE_PROMISC;
-	if (netdev->flags & (IFF_ALLMULTI | IFF_MULTICAST))
-		req->mode |= NIX_RX_MODE_ALLMULTI;
-
-	req->mode |= NIX_RX_MODE_USE_MCE;
-
-	otx2_sync_mbox_msg(&pf->mbox);
-	mutex_unlock(&pf->mbox.lock);
+	otx2_do_set_rx_mode(pf);
 }
 
 static int otx2_set_features(struct net_device *netdev,
@@ -2040,7 +2047,7 @@ static int otx2_config_hw_tx_tstamp(struct otx2_nic *pfvf, bool enable)
 	return 0;
 }
 
-static int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
+int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
 {
 	struct otx2_nic *pfvf = netdev_priv(netdev);
 	struct hwtstamp_config config;
@@ -2054,6 +2061,11 @@ static int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
 	/* reserved for future extensions */
 	if (config.flags)
 		return -EINVAL;
+
+	if (OTX2_IS_INTFMOD_SET(pfvf->ethtool_flags)) {
+		netdev_info(netdev, "Can't support PTP HW timestamping when switch features are enabled\n");
+		return -EOPNOTSUPP;
+	}
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
@@ -2096,8 +2108,9 @@ static int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
 	return copy_to_user(ifr->ifr_data, &config,
 			    sizeof(config)) ? -EFAULT : 0;
 }
+EXPORT_SYMBOL(otx2_config_hwtstamp);
 
-static int otx2_ioctl(struct net_device *netdev, struct ifreq *req, int cmd)
+int otx2_ioctl(struct net_device *netdev, struct ifreq *req, int cmd)
 {
 	struct otx2_nic *pfvf = netdev_priv(netdev);
 	struct hwtstamp_config *cfg = &pfvf->tstamp;
@@ -2112,6 +2125,7 @@ static int otx2_ioctl(struct net_device *netdev, struct ifreq *req, int cmd)
 		return -EOPNOTSUPP;
 	}
 }
+EXPORT_SYMBOL(otx2_ioctl);
 
 static int otx2_do_set_vf_mac(struct otx2_nic *pf, int vf, const u8 *mac)
 {
@@ -2212,7 +2226,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 		}
 		idx = ((vf * OTX2_PER_VF_VLAN_FLOWS) + OTX2_VF_VLAN_RX_INDEX);
 		del_req->entry =
-			flow_cfg->entry[flow_cfg->vf_vlan_offset + idx];
+			flow_cfg->def_ent[flow_cfg->vf_vlan_offset + idx];
 		err = otx2_sync_mbox_msg(&pf->mbox);
 		if (err)
 			goto out;
@@ -2225,7 +2239,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 		}
 		idx = ((vf * OTX2_PER_VF_VLAN_FLOWS) + OTX2_VF_VLAN_TX_INDEX);
 		del_req->entry =
-			flow_cfg->entry[flow_cfg->vf_vlan_offset + idx];
+			flow_cfg->def_ent[flow_cfg->vf_vlan_offset + idx];
 		err = otx2_sync_mbox_msg(&pf->mbox);
 
 		if (!(pf->ethtool_flags & OTX2_PRIV_FLAG_FDSA_HDR))
@@ -2241,7 +2255,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 	}
 
 	idx = ((vf * OTX2_PER_VF_VLAN_FLOWS) + OTX2_VF_VLAN_RX_INDEX);
-	req->entry = flow_cfg->entry[flow_cfg->vf_vlan_offset + idx];
+	req->entry = flow_cfg->def_ent[flow_cfg->vf_vlan_offset + idx];
 	req->packet.vlan_tci = htons(vlan);
 	req->mask.vlan_tci = htons(VLAN_VID_MASK);
 	/* af fills the destination mac addr */
@@ -2292,7 +2306,7 @@ int otx2_do_set_vf_vlan(struct otx2_nic *pf, int vf, u16 vlan, u8 qos,
 
 	eth_zero_addr((u8 *)&req->mask.dmac);
 	idx = ((vf * OTX2_PER_VF_VLAN_FLOWS) + OTX2_VF_VLAN_TX_INDEX);
-	req->entry = flow_cfg->entry[flow_cfg->vf_vlan_offset + idx];
+	req->entry = flow_cfg->def_ent[flow_cfg->vf_vlan_offset + idx];
 	req->features = BIT_ULL(NPC_DMAC);
 	req->channel = pf->hw.tx_chan_base;
 	req->intf = NIX_INTF_TX;
@@ -2347,6 +2361,9 @@ static int otx2_get_vf_config(struct net_device *netdev, int vf,
 	struct otx2_nic *pf = netdev_priv(netdev);
 	struct pci_dev *pdev = pf->pdev;
 	struct otx2_vf_config *config;
+
+	if (!netif_running(netdev))
+		return -EAGAIN;
 
 	if (vf >= pci_num_vf(pdev))
 		return -EINVAL;
@@ -2541,7 +2558,7 @@ static int otx2_wq_init(struct otx2_nic *pf)
 	if (!pf->otx2_wq)
 		return -ENOMEM;
 
-	INIT_WORK(&pf->rx_mode_work, otx2_do_set_rx_mode);
+	INIT_WORK(&pf->rx_mode_work, otx2_rx_mode_wrk_handler);
 	INIT_WORK(&pf->reset_task, otx2_reset_task);
 	return 0;
 }
@@ -2849,8 +2866,8 @@ err_del_mcam_entries:
 err_ptp_destroy:
 	otx2_ptp_destroy(pf);
 err_detach_rsrc:
-	if (hw->lmt_base)
-		iounmap(hw->lmt_base);
+	if (test_bit(CN10K_LMTST, &pf->hw.cap_flag))
+		qmem_free(pf->dev, pf->dync_lmt);
 	otx2_detach_resources(&pf->mbox);
 err_disable_mbox_intr:
 	otx2_disable_mbox_intr(pf);

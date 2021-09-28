@@ -138,12 +138,22 @@ config MRVL_PHY_DIAGNOSTICS
 	  extended diagnostics functions for the PHY. This complements
 	  functionality offered by ethtool. Requires PHY driver support in ATF.
 
+config MARVELL_CN10K_SERDES_DIAGNOSTICS
+	tristate "Marvell SerDes diagnostics debugfs driver"
+	default m
+	depends on DEBUG_FS
+	help
+	  Select this option if you want to enable SerDes diagnostics
+	  interface for performing PRBS, setting Loopback mode or
+	  reading/writing Tx/Rx tuning parameters.
+
 config HW_CSR_ACCESS
-       tristate "Access HW Device Config Space Registers"
+	tristate "Access HW Device Config Space"
         default m
+	depends on OCTEONTX2_AF
 	help
 	  provides an interface which enables user space utility to read from or to write
-	  to HW Device Config Space Registers.
+	  to HW Device Config Space Registers, Contexts, Memory.
 
 config OCTEONTX_SERDES
 	tristate "OcteonTX2 serdes debug commands"
@@ -184,5 +194,38 @@ config MARVELL_CN10K_SWUP
 	  Currently supported operations:
 	    -> TIM Version check
 	    -> TIM Hash verification
+
+config OCTEONTX2_SDEI_GHES
+	bool "OcteonTX2 Generic Hardware Error Source (GHES) support"
+	select ARM_SDE_INTERFACE
+	select ACPI_APEI
+	select ACPI_APEI_GHES
+	select CRASH_DUMP
+	help
+	  Select this option to enable support for RAS Generic Hardware Error
+	  Source (GHES) reporting.
+	  This will allow RAS errors that are detected by the Marvell to
+	  be reported using kernel logging.
+
+config OCTEONTX2_SDEI_GHES_DEBUG
+	bool "OcteonTX2 Generic Hardware Error Source (GHES) verbose debug msgs"
+	depends on OCTEONTX2_SDEI_GHES
+	default n
+	help
+	  Say Y here if you want the Marvell GHES support to
+	  write verbose debug messages to the system log.  Select this
+	  if you are having a problem with the Marvell GHES support
+	  and want to see more details.
+	  If you are unsure about this, say N here.
+
+config OCTEONTX2_GHES_BERT
+	bool "OcteonTX2 GHES Boot Error Record Table (BERT) support"
+	depends on OCTEONTX2_SDEI_GHES
+	default y
+	help
+	  Select this option to enable reporting of fatal Marvell GHES
+	  errors on subsequent Linux boot.  Normally, fatal errors will
+	  reset the system.  Enabling support here will allow such errors
+	  to be reported when Linux is started again.
 
 endmenu
