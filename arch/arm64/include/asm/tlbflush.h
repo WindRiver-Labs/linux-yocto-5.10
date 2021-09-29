@@ -256,6 +256,7 @@ static inline void flush_tlb_mm(struct mm_struct *mm)
 		dsb(ish);
 		isb();
 	} else {
+		asid = __TLBI_VADDR(0, ASID(mm));
 		__tlbi(aside1is, asid);
 		__tlbi_user(aside1is, asid);
 		dsb(ish);
@@ -274,6 +275,7 @@ static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
 		dsb(ish);
 		isb();
 	} else {
+		addr = __TLBI_VADDR(uaddr, ASID(vma->vm_mm));
 		__tlbi(vale1is, addr);
 		__tlbi_user(vale1is, addr);
 	}
