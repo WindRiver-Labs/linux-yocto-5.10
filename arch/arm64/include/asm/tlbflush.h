@@ -272,6 +272,7 @@ static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
 	unsigned long addr;
 
 	dsb(ishst);
+	addr = __TLBI_VADDR(uaddr, ASID(vma->vm_mm));
 #if IS_ENABLED(CONFIG_NXP_S32GEN1_ERRATUM_ERR050481)
 	if (S32_IS_KERN_ADDR(addr)) {
 		__tlbi(vmalle1is);
@@ -281,6 +282,7 @@ static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
 		__tlbi(vale1is, addr);
 		__tlbi_user(vale1is, addr);
 	}
+
 }
 
 static inline void flush_tlb_page(struct vm_area_struct *vma,
