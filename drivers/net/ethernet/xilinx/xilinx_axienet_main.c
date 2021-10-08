@@ -719,10 +719,10 @@ static int axienet_free_tx_chain(struct net_device *ndev, u32 first_bd,
 
 	for (i = 0; i < max_bds; i++) {
 #ifdef CONFIG_AXIENET_HAS_MCDMA
-		cur_p = &q->txq_bd_v[q->tx_bd_ci];
+		cur_p = &q->txq_bd_v[(first_bd + i) % lp->tx_bd_num];
 		status = cur_p->sband_stats;
 #else
-		cur_p = &q->tx_bd_v[q->tx_bd_ci];
+		cur_p = &q->tx_bd_v[(first_bd + i) % lp->tx_bd_num];
 		status = cur_p->status;
 #endif
 		/* If no number is given, clean up *all* descriptors that have
