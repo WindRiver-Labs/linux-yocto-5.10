@@ -1108,63 +1108,6 @@ static int nwl_dsi_get_dphy_params(struct nwl_dsi *dsi,
 	return 0;
 }
 
-static bool nwl_dsi_bridge_mode_fixup(struct drm_bridge *bridge,
-				      const struct drm_display_mode *mode,
-				      struct drm_display_mode *adjusted)
-{
-	struct nwl_dsi *dsi = bridge_to_dsi(bridge);
-	struct mode_config *config;
-	unsigned long pll_rate;
-
-	DRM_DEV_DEBUG_DRIVER(dsi->dev, "Fixup mode:\n");
-	drm_mode_debug_printmodeline(adjusted);
-
-	config = nwl_dsi_mode_probe(dsi, adjusted);
-	if (!config)
-		return false;
-
-	DRM_DEV_DEBUG_DRIVER(dsi->dev, "lanes=%u, data_rate=%lu\n",
-			     config->lanes, config->bitclock);
-	if (config->lanes < 2 || config->lanes > 4)
-		return false;
-
-	/* Max data rate for this controller is 1.5Gbps */
-	if (config->bitclock > 1500000000)
-		return false;
-
-	pll_rate = config->pll_rates[config->phy_rate_idx];
-	if (dsi->pll_clk && pll_rate) {
-		clk_set_rate(dsi->pll_clk, pll_rate);
-		DRM_DEV_DEBUG_DRIVER(dsi->dev,
-				     "Video pll rate: %lu (actual: %lu)",
-				     pll_rate, clk_get_rate(dsi->pll_clk));
-	}
-	/* Update the crtc_clock to be used by display controller */
-	if (config->crtc_clock)
-		adjusted->crtc_clock = config->crtc_clock / 1000;
-	else if (dsi->clk_drop_lvl) {
-		int div;
-		unsigned long phy_ref_rate;
-
-		phy_ref_rate = config->phy_rates[config->phy_rate_idx];
-		pll_rate = config->bitclock;
-		div = DIV_ROUND_CLOSEST(pll_rate, config->clock);
-		pll_rate -= phy_ref_rate * dsi->clk_drop_lvl;
-		adjusted->crtc_clock = (pll_rate / div) / 1000;
-	}
-
-	if (!dsi->use_dcss) {
-		/* At least LCDIF + NWL needs active high sync */
-		adjusted->flags |= (DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
-		adjusted->flags &= ~(DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
-	} else {
-		adjusted->flags &= ~(DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
-		adjusted->flags |= (DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
-	}
-
-	return true;
-}
-
 static enum drm_mode_status
 nwl_dsi_bridge_mode_valid(struct drm_bridge *bridge,
 			  const struct drm_display_info *info,
@@ -1203,10 +1146,55 @@ static int nwl_dsi_bridge_atomic_check(struct drm_bridge *bridge,
 				       struct drm_connector_state *conn_state)
 {
 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
+	struct nwl_dsi *dsi = bridge_to_dsi(bridge);
+	struct mode_config *config;
+	unsigned long pll_rate;
 
-	/* At least LCDIF + NWL needs active high sync */
-	adjusted_mode->flags |= (DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
-	adjusted_mode->flags &= ~(DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
+	DRM_DEV_DEBUG_DRIVER(dsi->dev, "Fixup mode:\n");
+	drm_mode_debug_printmodeline(adjusted_mode);
+
+	config = nwl_dsi_mode_probe(dsi, adjusted_mode);
+	if (!config)
+		return false;
+
+	DRM_DEV_DEBUG_DRIVER(dsi->dev, "lanes=%u, data_rate=%lu\n",
+			config->lanes, config->bitclock);
+	if (config->lanes < 2 || config->lanes > 4)
+		return false;
+
+	/* Max data rate for this controller is 1.5Gbps */
+	if (config->bitclock > 1500000000)
+		return false;
+
+	pll_rate = config->pll_rates[config->phy_rate_idx];
+	if (dsi->pll_clk && pll_rate) {
+		clk_set_rate(dsi->pll_clk, pll_rate);
+		DRM_DEV_DEBUG_DRIVER(dsi->dev,
+					"Video pll rate: %lu (actual: %lu)",
+					pll_rate, clk_get_rate(dsi->pll_clk));
+	}
+	/* Update the crtc_clock to be used by display controller */
+	if (config->crtc_clock)
+		adjusted_mode->crtc_clock = config->crtc_clock / 1000;
+	else if (dsi->clk_drop_lvl) {
+		int div;
+		unsigned long phy_ref_rate;
+
+		phy_ref_rate = config->phy_rates[config->phy_rate_idx];
+		pll_rate = config->bitclock;
+		div = DIV_ROUND_CLOSEST(pll_rate, config->clock);
+		pll_rate -= phy_ref_rate * dsi->clk_drop_lvl;
+		adjusted_mode->crtc_clock = (pll_rate / div) / 1000;
+	}
+
+	if (!dsi->use_dcss) {
+		/* At least LCDIF + NWL needs active high sync */
+		adjusted_mode->flags |= (DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
+		adjusted_mode->flags &= ~(DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
+	} else {
+		adjusted_mode->flags &= ~(DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
+		adjusted_mode->flags |= (DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
+	}
 
 	/* Do a full modeset if crtc_state->active is changed to be true. */
 	if (crtc_state->active_changed && crtc_state->active)
@@ -1395,7 +1383,6 @@ static const struct drm_bridge_funcs nwl_dsi_bridge_funcs = {
 	.atomic_pre_enable	= nwl_dsi_bridge_atomic_pre_enable,
 	.atomic_enable		= nwl_dsi_bridge_atomic_enable,
 	.atomic_disable		= nwl_dsi_bridge_atomic_disable,
-	.mode_fixup 		= nwl_dsi_bridge_mode_fixup,
 	.mode_set		= nwl_dsi_bridge_mode_set,
 	.mode_valid		= nwl_dsi_bridge_mode_valid,
 	.attach			= nwl_dsi_bridge_attach,
