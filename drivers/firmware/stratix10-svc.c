@@ -117,7 +117,7 @@ struct stratix10_svc_data {
 	size_t size_output;
 	u32 command;
 	u32 flag;
-	u64 arg[3];
+	u64 arg[6];
 };
 
 /**
@@ -329,6 +329,21 @@ static void svc_thread_recv_status_ok(struct stratix10_svc_data *p_data,
 	case COMMAND_FCS_SEND_CERTIFICATE:
 	case COMMAND_FCS_DATA_ENCRYPTION:
 	case COMMAND_FCS_DATA_DECRYPTION:
+	case COMMAND_FCS_PSGSIGMA_TEARDOWN:
+	case COMMAND_FCS_COUNTER_SET_PREAUTHORIZED:
+	case COMMAND_FCS_ATTESTATION_CERTIFICATE_RELOAD:
+	case COMMAND_FCS_CRYPTO_CLOSE_SESSION:
+	case COMMAND_FCS_CRYPTO_IMPORT_KEY:
+	case COMMAND_FCS_CRYPTO_REMOVE_KEY:
+	case COMMAND_FCS_CRYPTO_AES_CRYPT_INIT:
+	case COMMAND_FCS_CRYPTO_GET_DIGEST_INIT:
+	case COMMAND_FCS_CRYPTO_MAC_VERIFY_INIT:
+	case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_INIT:
+	case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_INIT:
+	case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_INIT:
+	case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_INIT:
+	case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_INIT:
+	case COMMAND_FCS_CRYPTO_ECDH_REQUEST_INIT:
 		cb_data->status = BIT(SVC_STATUS_OK);
 		break;
 	case COMMAND_RECONFIG_DATA_SUBMIT:
@@ -341,6 +356,8 @@ static void svc_thread_recv_status_ok(struct stratix10_svc_data *p_data,
 	case COMMAND_RSU_MAX_RETRY:
 	case COMMAND_RSU_DCMF_STATUS:
 	case COMMAND_FIRMWARE_VERSION:
+	case COMMAND_HWMON_READTEMP:
+	case COMMAND_HWMON_READVOLT:
 		cb_data->status = BIT(SVC_STATUS_OK);
 		cb_data->kaddr1 = &res.a1;
 		break;
@@ -352,10 +369,41 @@ static void svc_thread_recv_status_ok(struct stratix10_svc_data *p_data,
 	case COMMAND_FCS_RANDOM_NUMBER_GEN:
 	case COMMAND_FCS_GET_PROVISION_DATA:
 	case COMMAND_POLL_SERVICE_STATUS:
+	case COMMAND_POLL_SERVICE_STATUS_ASYNC:
+	case COMMAND_FCS_GET_ROM_PATCH_SHA384:
 		cb_data->status = BIT(SVC_STATUS_OK);
 		cb_data->kaddr1 = &res.a1;
 		cb_data->kaddr2 = svc_pa_to_va(res.a2);
 		cb_data->kaddr3 = &res.a3;
+		break;
+	case COMMAND_FCS_GET_CHIP_ID:
+		cb_data->status = BIT(SVC_STATUS_OK);
+		cb_data->kaddr2 = &res.a2;
+		cb_data->kaddr3 = &res.a3;
+		break;
+	case COMMAND_FCS_ATTESTATION_SUBKEY:
+	case COMMAND_FCS_ATTESTATION_MEASUREMENTS:
+	case COMMAND_FCS_ATTESTATION_CERTIFICATE:
+	case COMMAND_FCS_CRYPTO_EXPORT_KEY:
+	case COMMAND_FCS_CRYPTO_GET_KEY_INFO:
+	case COMMAND_FCS_CRYPTO_AES_CRYPT_FINALIZE:
+	case COMMAND_FCS_CRYPTO_GET_DIGEST_FINALIZE:
+	case COMMAND_FCS_CRYPTO_MAC_VERIFY_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_FINALIZE:
+	case COMMAND_FCS_CRYPTO_ECDH_REQUEST_FINALIZE:
+	case COMMAND_FCS_RANDOM_NUMBER_GEN_EXT:
+	case COMMAND_FCS_SDOS_DATA_EXT:
+		cb_data->status = BIT(SVC_STATUS_OK);
+		cb_data->kaddr2 = svc_pa_to_va(res.a2);
+		cb_data->kaddr3 = &res.a3;
+		break;
+	case COMMAND_FCS_CRYPTO_OPEN_SESSION:
+		cb_data->status = BIT(SVC_STATUS_OK);
+		cb_data->kaddr2 = &res.a2;
 		break;
 	default:
 		pr_warn("it shouldn't happen\n");
@@ -383,7 +431,7 @@ static int svc_normal_to_secure_thread(void *data)
 	struct stratix10_svc_data *pdata;
 	struct stratix10_svc_cb_data *cbdata;
 	struct arm_smccc_res res;
-	unsigned long a0, a1, a2, a3, a4, a5;
+	unsigned long a0, a1, a2, a3, a4, a5, a6, a7;
 	int ret_fifo = 0;
 
 	pdata =  kmalloc(sizeof(*pdata), GFP_KERNEL);
@@ -403,6 +451,8 @@ static int svc_normal_to_secure_thread(void *data)
 	a3 = 0;
 	a4 = 0;
 	a5 = 0;
+	a6 = 0;
+	a7 = 0;
 
 	pr_debug("smc_hvc_shm_thread is running\n");
 
@@ -508,21 +558,285 @@ static int svc_normal_to_secure_thread(void *data)
 			a1 = (unsigned long)pdata->paddr;
 			a2 = (unsigned long)pdata->size;
 			break;
+		case COMMAND_FCS_COUNTER_SET_PREAUTHORIZED:
+			a0 = INTEL_SIP_SMC_FCS_COUNTER_SET_PREAUTHORIZED;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			break;
 		case COMMAND_FCS_GET_PROVISION_DATA:
 			a0 = INTEL_SIP_SMC_FCS_GET_PROVISION_DATA;
 			a1 = (unsigned long)pdata->paddr;
 			a2 = 0;
 			break;
+		case COMMAND_FCS_PSGSIGMA_TEARDOWN:
+			a0 = INTEL_SIP_SMC_FCS_PSGSIGMA_TEARDOWN;
+			a1 = pdata->arg[0];
+			a2 = 0;
+			break;
+		case COMMAND_FCS_GET_CHIP_ID:
+			a0 = INTEL_SIP_SMC_FCS_CHIP_ID;
+			a1 = 0;
+			a2 = 0;
+			break;
+		case COMMAND_FCS_ATTESTATION_SUBKEY:
+			a0 = INTEL_SIP_SMC_FCS_ATTESTATION_SUBKEY;
+			a1 = (unsigned long)pdata->paddr;
+			a2 = (unsigned long)pdata->size;
+			a3 = (unsigned long)pdata->paddr_output;
+			a4 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_ATTESTATION_MEASUREMENTS:
+			a0 = INTEL_SIP_SMC_FCS_ATTESTATION_MEASUREMENTS;
+			a1 = (unsigned long)pdata->paddr;
+			a2 = (unsigned long)pdata->size;
+			a3 = (unsigned long)pdata->paddr_output;
+			a4 = (unsigned long)pdata->size_output;
+			break;
+		/* for HWMON */
+		case COMMAND_HWMON_READTEMP:
+			a0 = INTEL_SIP_SMC_HWMON_READTEMP;
+			a1 = pdata->arg[0];
+			a2 = 0;
+			break;
+		case COMMAND_HWMON_READVOLT:
+			a0 = INTEL_SIP_SMC_HWMON_READVOLT;
+			a1 = pdata->arg[0];
+			a2 = 0;
+			break;
+		case COMMAND_FCS_ATTESTATION_CERTIFICATE:
+			a0 = INTEL_SIP_SMC_FCS_GET_ATTESTATION_CERTIFICATE;
+			a1 = pdata->arg[0];
+			a2 = (unsigned long)pdata->paddr_output;
+			a3 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_ATTESTATION_CERTIFICATE_RELOAD:
+			a0 = INTEL_SIP_SMC_FCS_CREATE_CERTIFICATE_ON_RELOAD;
+			a1 = pdata->arg[0];
+			a2 = 0;
+			break;
+		/* for crypto service */
+		case COMMAND_FCS_CRYPTO_OPEN_SESSION:
+			a0 = INTEL_SIP_SMC_FCS_OPEN_CRYPTO_SERVICE_SESSION;
+			a1 = 0;
+			a2 = 0;
+			break;
+		case COMMAND_FCS_CRYPTO_CLOSE_SESSION:
+			a0 = INTEL_SIP_SMC_FCS_CLOSE_CRYPTO_SERVICE_SESSION;
+			a1 = pdata->arg[0];
+			a2 = 0;
+			break;
 
+		/* for service key management */
+		case COMMAND_FCS_CRYPTO_IMPORT_KEY:
+			a0 = INTEL_SIP_SMC_FCS_IMPORT_CRYPTO_SERVICE_KEY;
+			a1 = (unsigned long)pdata->paddr;
+			a2 = (unsigned long)pdata->size;
+			break;
+		case COMMAND_FCS_CRYPTO_EXPORT_KEY:
+			a0 = INTEL_SIP_SMC_FCS_EXPORT_CRYPTO_SERVICE_KEY;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr_output;
+			a4 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_REMOVE_KEY:
+			a0 = INTEL_SIP_SMC_FCS_REMOVE_CRYPTO_SERVICE_KEY;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			break;
+		case COMMAND_FCS_CRYPTO_GET_KEY_INFO:
+			a0 = INTEL_SIP_SMC_FCS_GET_CRYPTO_SERVICE_KEY_INFO;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr_output;
+                        a4 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_AES_CRYPT_INIT:
+			a0 = INTEL_SIP_SMC_FCS_AES_CRYPTO_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = (unsigned long)pdata->paddr;
+			a5 = (unsigned long)pdata->size;
+			break;
+		case COMMAND_FCS_CRYPTO_AES_CRYPT_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_AES_CRYPTO_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_GET_DIGEST_INIT:
+			a0 = INTEL_SIP_SMC_FCS_GET_DIGEST_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_GET_DIGEST_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_GET_DIGEST_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_MAC_VERIFY_INIT:
+			a0 = INTEL_SIP_SMC_FCS_MAC_VERIFY_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_MAC_VERIFY_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_MAC_VERIFY_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			a7 = pdata->arg[2];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			a7 = pdata->arg[2];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr_output;
+			a4 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_CRYPTO_ECDH_REQUEST_INIT:
+			a0 = INTEL_SIP_SMC_FCS_ECDH_INIT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = pdata->arg[3];
+			a5 = pdata->arg[4];
+			break;
+		case COMMAND_FCS_CRYPTO_ECDH_REQUEST_FINALIZE:
+			a0 = INTEL_SIP_SMC_FCS_ECDH_FINALIZE;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = (unsigned long)pdata->paddr;
+			a4 = (unsigned long)pdata->size;
+			a5 = (unsigned long)pdata->paddr_output;
+			a6 = (unsigned long)pdata->size_output;
+			break;
+		case COMMAND_FCS_RANDOM_NUMBER_GEN_EXT:
+			a0 = INTEL_SIP_SMC_FCS_RANDOM_NUMBER_EXT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			break;
+		case COMMAND_FCS_SDOS_DATA_EXT:
+			a0 = INTEL_SIP_SMC_FCS_CRYPTION_EXT;
+			a1 = pdata->arg[0];
+			a2 = pdata->arg[1];
+			a3 = pdata->arg[2];
+			a4 = (unsigned long)pdata->paddr;
+			a5 = (unsigned long)pdata->size;
+			a6 = (unsigned long)pdata->paddr_output;
+			a7 = (unsigned long)pdata->size_output;
+			break;
 		/* for polling */
 		case COMMAND_POLL_SERVICE_STATUS:
+		case COMMAND_POLL_SERVICE_STATUS_ASYNC:
 			a0 = INTEL_SIP_SMC_SERVICE_COMPLETED;
 			a1 = (unsigned long)pdata->paddr;
 			a2 = (unsigned long)pdata->size;
+			a3 = pdata->arg[0];
 			break;
 		case COMMAND_FIRMWARE_VERSION:
 			a0 = INTEL_SIP_SMC_FIRMWARE_VERSION;
 			a1 = 0;
+			a2 = 0;
+			break;
+		case COMMAND_FCS_GET_ROM_PATCH_SHA384:
+			a0 = INTEL_SIP_SMC_FCS_GET_ROM_PATCH_SHA384;
+			a1 = (unsigned long)pdata->paddr;
 			a2 = 0;
 			break;
 		default:
@@ -532,15 +846,10 @@ static int svc_normal_to_secure_thread(void *data)
 		pr_debug("%s: before SMC call -- a0=0x%016x a1=0x%016x",
 			 __func__, (unsigned int)a0, (unsigned int)a1);
 		pr_debug(" a2=0x%016x\n", (unsigned int)a2);
-
-		if (a0 == INTEL_SIP_SMC_FCS_CRYPTION) {
-			pr_debug(" a3=0x%016x\n", (unsigned int)a3);
-			pr_debug(" a4=0x%016x\n", (unsigned int)a4);
-			pr_debug(" a5=0x%016x\n", (unsigned int)a5);
-			ctrl->invoke_fn(a0, a1, a2, a3, a4, a5, 0, 0, &res);
-		} else {
-			ctrl->invoke_fn(a0, a1, a2, 0, 0, 0, 0, 0, &res);
-		}
+		pr_debug(" a3=0x%016x\n", (unsigned int)a3);
+		pr_debug(" a4=0x%016x\n", (unsigned int)a4);
+		pr_debug(" a5=0x%016x\n", (unsigned int)a5);
+		ctrl->invoke_fn(a0, a1, a2, a3, a4, a5, a6, a7, &res);
 
 		pr_debug("%s: after SMC call -- res.a0=0x%016x",
 			 __func__, (unsigned int)res.a0);
@@ -576,6 +885,14 @@ static int svc_normal_to_secure_thread(void *data)
 				svc_thread_cmd_config_status(ctrl,
 							     pdata, cbdata);
 				break;
+			case COMMAND_POLL_SERVICE_STATUS_ASYNC:
+				cbdata->status = BIT(SVC_STATUS_BUSY);
+				cbdata->kaddr1 = NULL;
+				cbdata->kaddr2 = NULL;
+				cbdata->kaddr3 = NULL;
+				pdata->chan->scl->receive_cb(pdata->chan->scl,
+							     cbdata);
+				break;
 			default:
 				pr_warn("it shouldn't happen\n");
 				break;
@@ -591,6 +908,40 @@ static int svc_normal_to_secure_thread(void *data)
 			case COMMAND_FCS_DATA_ENCRYPTION:
 			case COMMAND_FCS_DATA_DECRYPTION:
 			case COMMAND_FCS_RANDOM_NUMBER_GEN:
+			case COMMAND_FCS_PSGSIGMA_TEARDOWN:
+			case COMMAND_FCS_GET_CHIP_ID:
+			case COMMAND_FCS_ATTESTATION_SUBKEY:
+			case COMMAND_FCS_ATTESTATION_MEASUREMENTS:
+			case COMMAND_FCS_COUNTER_SET_PREAUTHORIZED:
+			case COMMAND_FCS_ATTESTATION_CERTIFICATE:
+			case COMMAND_FCS_ATTESTATION_CERTIFICATE_RELOAD:
+			case COMMAND_FCS_GET_ROM_PATCH_SHA384:
+			case COMMAND_FCS_CRYPTO_OPEN_SESSION:
+			case COMMAND_FCS_CRYPTO_CLOSE_SESSION:
+			case COMMAND_FCS_CRYPTO_IMPORT_KEY:
+			case COMMAND_FCS_CRYPTO_EXPORT_KEY:
+			case COMMAND_FCS_CRYPTO_REMOVE_KEY:
+			case COMMAND_FCS_CRYPTO_GET_KEY_INFO:
+			case COMMAND_FCS_CRYPTO_AES_CRYPT_INIT:
+			case COMMAND_FCS_CRYPTO_AES_CRYPT_FINALIZE:
+			case COMMAND_FCS_CRYPTO_GET_DIGEST_INIT:
+			case COMMAND_FCS_CRYPTO_GET_DIGEST_FINALIZE:
+			case COMMAND_FCS_CRYPTO_MAC_VERIFY_INIT:
+			case COMMAND_FCS_CRYPTO_MAC_VERIFY_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_INIT:
+			case COMMAND_FCS_CRYPTO_ECDSA_HASH_SIGNING_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_INIT:
+			case COMMAND_FCS_CRYPTO_ECDSA_SHA2_DATA_SIGNING_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_INIT:
+			case COMMAND_FCS_CRYPTO_ECDSA_HASH_VERIFY_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_INIT:
+			case COMMAND_FCS_CRYPTO_ECDSA_SHA2_VERIFY_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_INIT:
+			case COMMAND_FCS_CRYPTO_ECDSA_GET_PUBLIC_KEY_FINALIZE:
+			case COMMAND_FCS_CRYPTO_ECDH_REQUEST_INIT:
+			case COMMAND_FCS_CRYPTO_ECDH_REQUEST_FINALIZE:
+			case COMMAND_FCS_RANDOM_NUMBER_GEN_EXT:
+			case COMMAND_FCS_SDOS_DATA_EXT:
 				cbdata->status = BIT(SVC_STATUS_INVALID_PARAM);
 				cbdata->kaddr1 = NULL;
 				cbdata->kaddr2 = NULL;
@@ -609,6 +960,21 @@ static int svc_normal_to_secure_thread(void *data)
 				svc_pa_to_va(res.a2) : NULL;
 			cbdata->kaddr3 = (res.a3) ? &res.a3 : NULL;
 			pdata->chan->scl->receive_cb(pdata->chan->scl, cbdata);
+			break;
+		case INTEL_SIP_SMC_STATUS_NO_RESPONSE:
+			switch (pdata->command) {
+			case COMMAND_POLL_SERVICE_STATUS_ASYNC:
+				cbdata->status = BIT(SVC_STATUS_NO_RESPONSE);
+				cbdata->kaddr1 = NULL;
+				cbdata->kaddr2 = NULL;
+				cbdata->kaddr3 = NULL;
+				pdata->chan->scl->receive_cb(pdata->chan->scl,
+							     cbdata);
+				break;
+			default:
+				pr_warn("it shouldn't receive no response\n");
+				break;
+			}
 			break;
 		default:
 			pr_warn("Secure firmware doesn't support...\n");
@@ -982,6 +1348,9 @@ int stratix10_svc_send(struct stratix10_svc_chan *chan, void *msg)
 	p_data->arg[0] = p_msg->arg[0];
 	p_data->arg[1] = p_msg->arg[1];
 	p_data->arg[2] = p_msg->arg[2];
+	p_data->arg[3] = p_msg->arg[3];
+	p_data->arg[4] = p_msg->arg[4];
+	p_data->arg[5] = p_msg->arg[5];
 	p_data->chan = chan;
 	pr_debug("%s: put to FIFO pa=0x%016x, cmd=%x, size=%u\n", __func__,
 	       (unsigned int)p_data->paddr, p_data->command,
@@ -1163,6 +1532,11 @@ static int stratix10_svc_drv_probe(struct platform_device *pdev)
 	chans[2].ctrl = controller;
 	chans[2].name = SVC_CLIENT_FCS;
 	spin_lock_init(&chans[2].lock);
+
+	chans[3].scl = NULL;
+	chans[3].ctrl = controller;
+	chans[3].name = SVC_CLIENT_HWMON;
+	spin_lock_init(&chans[3].lock);
 
 	list_add_tail(&controller->node, &svc_ctrl);
 	platform_set_drvdata(pdev, controller);
