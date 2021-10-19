@@ -975,16 +975,16 @@
 			reg = <0x0 0x100000>;
 		};
 		partition@100000 { /* for testing purpose */
-			label = "qspi-linux";
-			reg = <0x100000 0x500000>;
-		};
-		partition@600000 { /* for testing purpose */
 			label = "qspi-device-tree";
-			reg = <0x600000 0x20000>;
+			reg = <0x100000 0x100000>;
 		};
-		partition@620000 { /* for testing purpose */
+		partition@200000 { /* for testing purpose */
+			label = "qspi-linux";
+			reg = <0x200000 0x600000>;
+		};
+		partition@800000 { /* for testing purpose */
 			label = "qspi-rootfs";
-			reg = <0x620000 0x5E0000>;
+			reg = <0x800000 0x1800000>;
 		};
 	};
 };
