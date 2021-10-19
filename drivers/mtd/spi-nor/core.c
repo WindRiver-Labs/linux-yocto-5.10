@@ -2151,9 +2151,6 @@ static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	if (ret)
 		return ret;
 
-	if (nor->isparallel == 1)
-		ofs = ofs >> nor->shift;
-
 	if (nor->isstacked == 1) {
 		if (ofs >= (mtd->size / 2)) {
 			ofs = ofs - (mtd->size / 2);
@@ -2193,9 +2190,6 @@ static int spi_nor_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	ret = spi_nor_lock_and_prep(nor);
 	if (ret)
 		return ret;
-
-	if (nor->isparallel == 1)
-		ofs = ofs >> nor->shift;
 
 	if (nor->isstacked == 1) {
 		if (ofs >= (mtd->size / 2)) {
