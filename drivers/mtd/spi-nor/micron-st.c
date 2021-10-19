@@ -54,7 +54,8 @@ static struct flash_info st_parts[] = {
 	{ "mt25qu512a",  INFO6(0x20bb20, 0x104400, 64 * 1024, 1024,
 			       SECT_4K | USE_FSR | SPI_NOR_DUAL_READ |
 			       SPI_NOR_QUAD_READ | SPI_NOR_4B_OPCODES |
-				   SPI_NOR_HAS_LOCK) },
+			       SPI_NOR_HAS_LOCK | SPI_NOR_4BIT_BP |
+			       SPI_NOR_BP3_SR_BIT6 | SPI_NOR_HAS_TB) },
 	{ "n25q512a",    INFO(0x20bb20, 0, 64 * 1024, 1024,
 			      SECT_4K | USE_FSR | SPI_NOR_QUAD_READ |
 			      SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB |
