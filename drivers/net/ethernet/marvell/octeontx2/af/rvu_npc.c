@@ -24,10 +24,6 @@
 #define RSVD_MCAM_ENTRIES_PER_PF	3 /* Broadcast, Promisc and AllMulticast */
 #define RSVD_MCAM_ENTRIES_PER_NIXLF	1 /* Ucast for LFs */
 
-#define NIXLF_UCAST_ENTRY	0
-#define NIXLF_BCAST_ENTRY	1
-#define NIXLF_PROMISC_ENTRY	2
-
 #define NPC_PARSE_RESULT_DMAC_OFFSET	8
 #define NPC_HW_TSTAMP_OFFSET		8ULL
 
