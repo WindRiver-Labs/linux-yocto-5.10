@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Physcial Function ethernet driver
+/* Marvell RVU Ethernet driver
  *
  * Copyright (C) 2021 Marvell.
+ *
  */
 
 #include "otx2_common.h"
@@ -61,7 +62,7 @@ int otx2_dmacflt_add(struct otx2_nic *pf, const u8 *mac, u8 bit_pos)
 	/* Store dmacindex returned by CGX/RPM driver which will
 	 * be used for macaddr update/remove
 	 */
-	dmacindex =  &pf->flow_cfg->bmap_to_dmacindex[bit_pos];
+	dmacindex = &pf->flow_cfg->bmap_to_dmacindex[bit_pos];
 
 	if (ether_addr_equal(mac, pf->netdev->dev_addr))
 		return otx2_dmacflt_add_pfmac(pf);
@@ -161,7 +162,7 @@ int otx2_dmacflt_update(struct otx2_nic *pf, u8 *mac, u8 bit_pos)
 
 	if (!req) {
 		mutex_unlock(&pf->mbox.lock);
-		rc = -ENOMEM;
+		return -ENOMEM;
 	}
 
 	ether_addr_copy(req->mac_addr, mac);

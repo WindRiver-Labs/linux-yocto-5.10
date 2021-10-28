@@ -19,6 +19,7 @@
 #include "otx2_rfoe.h"
 #include "otx2_cpri.h"
 #include "otx2_bphy_debugfs.h"
+#include "cnf10k_rfoe.h"
 
 MODULE_AUTHOR("Marvell International Ltd.");
 MODULE_DESCRIPTION(DRV_STRING);
@@ -40,14 +41,20 @@ void __iomem *bcn_reg_base;
 void __iomem *ptp_reg_base;
 void __iomem *cpri_reg_base;
 
+/* check if cpri block is available */
+#define cpri_available()		((cpri_reg_base) ? 1 : 0)
+
 /* GPINT(1) interrupt handler routine */
 static irqreturn_t otx2_bphy_intr_handler(int irq, void *dev_id)
 {
+	struct otx2_bphy_cdev_priv *cdev_priv;
 	struct otx2_rfoe_drv_ctx *drv_ctx;
 	struct otx2_rfoe_ndev_priv *priv;
 	struct net_device *netdev;
 	int rfoe_num, cpri_num, i;
 	u32 intr_mask, status;
+
+	cdev_priv = (struct otx2_bphy_cdev_priv *)dev_id;
 
 	/* clear interrupt status */
 	status = readq(bphy_reg_base + PSM_INT_GP_SUM_W1C(1)) & 0xFFFFFFFF;
@@ -55,6 +62,13 @@ static irqreturn_t otx2_bphy_intr_handler(int irq, void *dev_id)
 
 	pr_debug("gpint status = 0x%x\n", status);
 
+	/* CNF10K intr processing */
+	if (CHIP_CNF10K(cdev_priv->hw_version)) {
+		cnf10k_bphy_intr_handler(cdev_priv, status);
+		return IRQ_HANDLED;
+	}
+
+	/* CNF95 intr processing */
 	for (rfoe_num = 0; rfoe_num < MAX_RFOE_INTF; rfoe_num++) {
 		intr_mask = RFOE_RX_INTR_MASK(rfoe_num);
 		if (status & intr_mask)
@@ -145,10 +159,12 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 			goto out;
 		}
 
-		ret = otx2_cpri_parse_and_init_intf(cdev, intf_cfg);
-		if (ret < 0) {
-			dev_err(cdev->dev, "odp <-> netdev parse error\n");
-			goto out;
+		if (cpri_available()) {
+			ret = otx2_cpri_parse_and_init_intf(cdev, intf_cfg);
+			if (ret < 0) {
+				dev_err(cdev->dev, "odp <-> netdev parse error\n");
+				goto out;
+			}
 		}
 
 		/* The MSIXEN bit is getting cleared when ODP BPHY driver
@@ -194,7 +210,8 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 		writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(1));
 
 		otx2_bphy_rfoe_cleanup();
-		otx2_bphy_cpri_cleanup();
+		if (cpri_available())
+			otx2_bphy_cpri_cleanup();
 
 		cdev->odp_intf_cfg = 0;
 
@@ -467,6 +484,65 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 		ret = 0;
 		goto out;
 	}
+	case OTX2_IOCTL_RFOE_10x_CFG:
+	{
+		struct cnf10k_rfoe_ndev_comm_intf_cfg *intf_cfg;
+		struct pci_dev *bphy_pdev;
+		int idx;
+
+		if (cdev->odp_intf_cfg) {
+			dev_info(cdev->dev, "odp interface cfg already done\n");
+			ret = -EBUSY;
+			goto out;
+		}
+
+		intf_cfg = kzalloc(BPHY_MAX_RFOE_MHAB * sizeof(*intf_cfg),
+				   GFP_KERNEL);
+		if (!intf_cfg) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		if (copy_from_user(intf_cfg, (void __user *)arg,
+				   (BPHY_MAX_RFOE_MHAB *
+				    sizeof(*intf_cfg)))) {
+			dev_err(cdev->dev, "copy from user fault\n");
+			ret = -EFAULT;
+			goto out;
+		}
+
+		for (idx = 0; idx < BPHY_MAX_RFOE_MHAB; idx++)
+			cdev->mhab_mode[idx] = IF_TYPE_ETHERNET;
+
+		ret = cnf10k_rfoe_parse_and_init_intf(cdev, intf_cfg);
+		if (ret < 0) {
+			dev_err(cdev->dev, "odp <-> netdev parse error\n");
+			goto out;
+		}
+
+		/* The MSIXEN bit is getting cleared when ODP BPHY driver
+		 * resets BPHY. So enabling it back in IOCTL.
+		 */
+		bphy_pdev = pci_get_device(OTX2_BPHY_PCI_VENDOR_ID,
+					   OTX2_BPHY_PCI_DEVICE_ID, NULL);
+		if (!bphy_pdev) {
+			dev_err(cdev->dev, "Couldn't find BPHY PCI device %x\n",
+				OTX2_BPHY_PCI_DEVICE_ID);
+			ret = -ENODEV;
+			goto out;
+		}
+		msix_enable_ctrl(bphy_pdev);
+
+		/* Enable GPINT Rx and Tx interrupts */
+		writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1S(1));
+
+		cdev->odp_intf_cfg = 1;
+
+		kfree(intf_cfg);
+
+		ret = 0;
+		goto out;
+	}
 	default:
 	{
 		dev_info(cdev->dev, "ioctl: no match\n");
@@ -520,7 +596,8 @@ static int otx2_bphy_cdev_release(struct inode *inode, struct file *filp)
 	writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(1));
 
 	otx2_bphy_rfoe_cleanup();
-	otx2_bphy_cpri_cleanup();
+	if (cpri_available())
+		otx2_bphy_cpri_cleanup();
 
 	cdev->odp_intf_cfg = 0;
 
@@ -634,15 +711,15 @@ static int otx2_bphy_probe(struct platform_device *pdev)
 	/* cpri registers ioremap */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 5);
 	if (!res) {
-		dev_err(&pdev->dev, "failed to get cpri resource\n");
-		err = -ENXIO;
-		goto out_unmap_ptp_reg;
-	}
-	cpri_reg_base = ioremap(res->start, resource_size(res));
-	if (IS_ERR(cpri_reg_base)) {
-		dev_err(&pdev->dev, "failed to ioremap cpri registers\n");
-		err = PTR_ERR(cpri_reg_base);
-		goto out_unmap_ptp_reg;
+		cpri_reg_base = NULL;
+	} else {
+		dev_info(&pdev->dev, "cpri mem resource found\n");
+		cpri_reg_base = ioremap(res->start, resource_size(res));
+		if (IS_ERR(cpri_reg_base)) {
+			dev_err(&pdev->dev, "failed to ioremap cpri registers\n");
+			err = PTR_ERR(cpri_reg_base);
+			goto out_unmap_ptp_reg;
+		}
 	}
 	/* get irq */
 	cdev_priv->irq = platform_get_irq(pdev, 0);

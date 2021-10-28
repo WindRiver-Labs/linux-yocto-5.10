@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell OcteonTx2 RVU Ethernet driver
+/* Marvell RVU Ethernet driver
  *
- * Copyright (C) 2020 Marvell International Ltd.
+ * Copyright (C) 2020 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef OTX2_COMMON_H
@@ -18,16 +15,19 @@
 #include <linux/timecounter.h>
 #include <linux/soc/marvell/octeontx2/asm.h>
 #include <net/pkt_cls.h>
+#include <net/devlink.h>
 
 #include <mbox.h>
 #include <npc.h>
 #include "otx2_reg.h"
 #include "otx2_txrx.h"
+#include "otx2_devlink.h"
 #include <rvu_trace.h>
 
 /* PCI device IDs */
 #define PCI_DEVID_OCTEONTX2_RVU_PF              0xA063
 #define PCI_DEVID_OCTEONTX2_RVU_VF		0xA064
+#define PCI_DEVID_OCTEONTX2_SDP_VF		0xA0F7
 #define PCI_DEVID_OCTEONTX2_RVU_AFVF		0xA0F8
 
 #define PCI_SUBSYS_DEVID_96XX_RVU_PFVF		0xB200
@@ -183,10 +183,13 @@ struct otx2_hw {
 	/* NIX */
 	u16		txschq_list[NIX_TXSCH_LVL_CNT][MAX_TXSCHQ_PER_FUNC];
 	u16			matchall_ipolicer;
+	u32			dwrr_mtu;
 
 	/* HW settings, coalescing etc */
 	u16			rx_chan_base;
 	u16			tx_chan_base;
+	u8			rx_chan_cnt;
+	u8			tx_chan_cnt;
 	u16			cq_qcount_wait;
 	u16			cq_ecount_wait;
 	u16			rq_skid;
@@ -274,6 +277,12 @@ struct otx2_ptp {
 
 	struct cyclecounter cycle_counter;
 	struct timecounter time_counter;
+
+	struct delayed_work extts_work;
+	u64 last_extts;
+	u64 thresh;
+
+	struct ptp_pin_desc extts_config;
 	bool ptp_en;
 };
 
@@ -284,7 +293,6 @@ struct otx2_mac_table {
 };
 
 struct otx2_flow_config {
-	u16			entry[NPC_MAX_NONCONTIG_ENTRIES];
 	u16			*flow_ent;
 	u16			*def_ent;
 	u16			nr_flows;
@@ -295,16 +303,13 @@ struct otx2_flow_config {
 #define OTX2_MCAM_COUNT		(OTX2_DEFAULT_FLOWCOUNT + \
 				 OTX2_MAX_UNICAST_FLOWS + \
 				 OTX2_MAX_VLAN_FLOWS)
-	u16			vf_vlan_offset;
-	u16			ntuple_offset;
 	u16			unicast_offset;
 	u16			rx_vlan_offset;
+	u16			vf_vlan_offset;
 #define OTX2_PER_VF_VLAN_FLOWS	2 /* Rx + Tx per VF */
 #define OTX2_VF_VLAN_RX_INDEX	0
 #define OTX2_VF_VLAN_TX_INDEX	1
-	u16			tc_flower_offset;
-	u16                     ntuple_max_flows;
-	u16			tc_max_flows;
+	u16                     max_flows;
 	u8			dmacflt_max_flows;
 	u8			*bmap_to_dmacindex;
 	unsigned long		dmacflt_bmap;
@@ -317,12 +322,11 @@ struct otx2_tc_info {
 	/* hash table to store TC offloaded flows */
 	struct rhashtable		flow_table;
 	struct rhashtable_params	flow_ht_params;
-	DECLARE_BITMAP(tc_entries_bitmap, OTX2_MAX_TC_FLOWS);
-	unsigned long			num_entries;
+	unsigned long			*tc_entries_bitmap;
 };
 
 struct dev_hw_ops {
-	int	(*sq_aq_init)(void *dev, u16 qidx, u16 sqb_aura);
+	int	(*sq_aq_init)(void *dev, u16 qidx, u8 chan_offset, u16 sqb_aura);
 	void	(*sqe_flush)(void *dev, struct otx2_snd_queue *sq,
 			     int size, int qidx);
 	void	(*refill_pool_ptrs)(void *dev, struct otx2_cq_queue *cq);
@@ -394,12 +398,12 @@ struct otx2_nic {
 	u16			tot_lmt_lines;
 	u16			npa_lmt_lines;
 	u32			nix_lmt_size;
-	struct otx2_tc_info	tc_info;
 	unsigned long		rq_bmap;
 
 	struct otx2_ptp		*ptp;
 	struct hwtstamp_config	tstamp;
 	struct otx2_mac_table	*mac_table;
+	struct otx2_tc_info	tc_info;
 	struct workqueue_struct	*otx2_ndo_wq;
 	struct work_struct	otx2_rx_mode_work;
 
@@ -426,11 +430,19 @@ struct otx2_nic {
 #define OTX2_HIGIG2_HDR_LEN			16
 #define OTX2_FDSA_HDR_LEN			4
 	u32			addl_mtu;
+
+	/* Devlink */
+	struct otx2_devlink	*dl;
 };
 
 static inline bool is_otx2_lbkvf(struct pci_dev *pdev)
 {
 	return pdev->device == PCI_DEVID_OCTEONTX2_RVU_AFVF;
+}
+
+static inline bool is_otx2_sdpvf(struct pci_dev *pdev)
+{
+	return pdev->device == PCI_DEVID_OCTEONTX2_SDP_VF;
 }
 
 static inline bool is_96xx_A0(struct pci_dev *pdev)
@@ -770,6 +782,11 @@ MBOX_UP_CGX_MESSAGES
 #define	RVU_PFVF_FUNC_SHIFT	0
 #define	RVU_PFVF_FUNC_MASK	0x3FF
 
+static inline bool is_otx2_vf(u16 pcifunc)
+{
+	return !!(pcifunc & RVU_PFVF_FUNC_MASK);
+}
+
 static inline int rvu_get_pf(u16 pcifunc)
 {
 	return (pcifunc >> RVU_PFVF_PF_SHIFT) & RVU_PFVF_PF_MASK;
@@ -830,8 +847,8 @@ void otx2_ctx_disable(struct mbox *mbox, int type, bool npa);
 int otx2_nix_config_bp(struct otx2_nic *pfvf, bool enable);
 void otx2_cleanup_rx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq);
 void otx2_cleanup_tx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq);
-int otx2_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
-int cn10k_sq_aq_init(void *dev, u16 qidx, u16 sqb_aura);
+int otx2_sq_aq_init(void *dev, u16 qidx, u8 chan_offset, u16 sqb_aura);
+int cn10k_sq_aq_init(void *dev, u16 qidx, u8 chan_offset, u16 sqb_aura);
 int otx2_alloc_buffer(struct otx2_nic *pfvf, struct otx2_cq_queue *cq,
 		      dma_addr_t *dma);
 
@@ -882,7 +899,7 @@ int otx2_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr);
 /* MCAM filter related APIs */
 int otx2_mcam_flow_init(struct otx2_nic *pf);
 int otx2vf_mcam_flow_init(struct otx2_nic *pfvf);
-int otx2_alloc_mcam_entries(struct otx2_nic *pfvf);
+int otx2_alloc_mcam_entries(struct otx2_nic *pfvf, u16 count);
 void otx2_mcam_flow_del(struct otx2_nic *pf);
 int otx2_destroy_ntuple_flows(struct otx2_nic *pf);
 int otx2_destroy_mcam_flows(struct otx2_nic *pfvf);
@@ -893,6 +910,7 @@ int otx2_get_all_flows(struct otx2_nic *pfvf,
 int otx2_add_flow(struct otx2_nic *pfvf,
 		  struct ethtool_rxnfc *nfc);
 int otx2_remove_flow(struct otx2_nic *pfvf, u32 location);
+int otx2_get_maxflows(struct otx2_flow_config *flow_cfg);
 void otx2_rss_ctx_flow_del(struct otx2_nic *pfvf, int ctx_id);
 int otx2_del_macfilter(struct net_device *netdev, const u8 *mac);
 int otx2_add_macfilter(struct net_device *netdev, const u8 *mac);
@@ -912,6 +930,7 @@ int otx2_init_tc(struct otx2_nic *nic);
 void otx2_shutdown_tc(struct otx2_nic *nic);
 int otx2_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		  void *type_data);
+int otx2_tc_alloc_ent_bitmap(struct otx2_nic *nic);
 /* CGX/RPM DMAC filters support */
 int otx2_dmacflt_get_max_cnt(struct otx2_nic *pf);
 int otx2_dmacflt_add(struct otx2_nic *pf, const u8 *mac, u8 bit_pos);

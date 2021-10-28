@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*  Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2018 Marvell International Ltd.
+ * Copyright (C) 2018 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef RVU_H
@@ -201,6 +198,18 @@ struct sso_rsrc {
 	struct rsrc_bmap pfvf_ident;
 };
 
+enum tim_ring_interval {
+	TIM_INTERVAL_1US = 0,
+	TIM_INTERVAL_10US,
+	TIM_INTERVAL_1MS,
+	TIM_INTERVAL_INVAL,
+};
+
+struct tim_rsrc {
+	u16 rings_per_intvl[TIM_INTERVAL_INVAL];
+	enum tim_ring_interval *ring_intvls;
+};
+
 struct ree_rsrc {
 	struct qmem	*graph_ctx;	/* Graph base address - used by HW */
 	struct qmem	*prefix_ctx;	/* Prefix blocks - used by HW */
@@ -373,6 +382,7 @@ struct hw_cap {
 	bool    nix_shaper_toggle_wait; /* Shaping toggle needs poll/wait */
 	bool	nix_tx_link_bp;		 /* Can link backpressure TL queues ? */
 	bool	nix_rx_multicast;	 /* Rx packet replication support */
+	bool	nix_common_dwrr_mtu;	 /* Common DWRR MTU for quantum config */
 	bool	per_pf_mbox_regs; /* PF mbox specified in per PF registers ? */
 	bool	programmable_chans; /* Channels programmable ? */
 	bool	ipolicer;
@@ -408,6 +418,7 @@ struct rvu_hwinfo {
 	struct npc_pkind pkind;
 	struct npc_mcam  mcam;
 	struct sso_rsrc  sso;
+	struct tim_rsrc  tim;
 	struct ree_rsrc *ree;
 };
 
@@ -437,7 +448,9 @@ struct rvu_fwdata {
 	u64 mcam_addr;
 	u64 mcam_sz;
 	u64 msixtr_base;
-#define FWDATA_RESERVED_MEM 1023
+	u32 ptp_ext_clk_rate;
+	u32 ptp_ext_tstamp;
+#define FWDATA_RESERVED_MEM 1022
 	u64 reserved[FWDATA_RESERVED_MEM];
 #define CGX_MAX         5
 #define CGX_LMACS_MAX   4
@@ -824,6 +837,8 @@ int nix_aq_context_read(struct rvu *rvu, struct nix_hw *nix_hw,
 			struct nix_cn10k_aq_enq_rsp *aq_rsp,
 			u16 pcifunc, u8 ctype, u32 qidx);
 int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc);
+u32 convert_dwrr_mtu_to_bytes(u8 dwrr_mtu);
+u32 convert_bytes_to_dwrr_mtu(u32 bytes);
 
 /* NPC APIs */
 int rvu_npc_init(struct rvu *rvu);
@@ -862,7 +877,6 @@ void rvu_npc_get_mcam_counter_alloc_info(struct rvu *rvu, u16 pcifunc,
 bool is_npc_intf_tx(u8 intf);
 bool is_npc_intf_rx(u8 intf);
 bool is_npc_interface_valid(struct rvu *rvu, u8 intf);
-int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel);
 int npc_flow_steering_init(struct rvu *rvu, int blkaddr);
 const char *npc_get_field_name(u8 hdr);
 int npc_get_bank(struct npc_mcam *mcam, int index);

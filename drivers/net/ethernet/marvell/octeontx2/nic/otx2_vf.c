@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Virtual Function ethernet driver */
+/* Marvell RVU Virtual Function ethernet driver
+ *
+ * Copyright (C) 2020 Marvell.
+ *
+ */
 
 #include <linux/etherdevice.h>
 #include <linux/module.h>
@@ -17,6 +21,7 @@
 static const struct pci_device_id otx2_vf_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_RVU_AFVF) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_RVU_VF) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, PCI_DEVID_OCTEONTX2_SDP_VF) },
 	{ }
 };
 
@@ -364,7 +369,7 @@ static int otx2vf_open(struct net_device *netdev)
 
 	/* LBKs do not receive link events so tell everyone we are up here */
 	vf = netdev_priv(netdev);
-	if (is_otx2_lbkvf(vf->pdev)) {
+	if (is_otx2_lbkvf(vf->pdev) || is_otx2_sdpvf(vf->pdev)) {
 		pr_info("%s NIC Link is UP\n", netdev->name);
 		netif_carrier_on(netdev);
 		netif_tx_start_all_queues(netdev);
@@ -478,16 +483,20 @@ static int otx2vf_set_features(struct net_device *netdev,
 	netdev_features_t changed = features ^ netdev->features;
 	bool ntuple_enabled = !!(features & NETIF_F_NTUPLE);
 	struct otx2_nic *vf = netdev_priv(netdev);
-	int err = 0;
 
 	if (changed & NETIF_F_NTUPLE) {
-		if (ntuple_enabled)
-			err = otx2vf_mcam_flow_init(vf);
-		else
+		if (!ntuple_enabled) {
 			otx2_mcam_flow_del(vf);
-	}
+			return 0;
+		}
 
-	return err;
+		if (!otx2_get_maxflows(vf->flow_cfg)) {
+			netdev_err(netdev,
+				   "Can't enable NTUPLE, MCAM entries not allocated\n");
+			return -EINVAL;
+		}
+	}
+	return 0;
 }
 
 static const struct net_device_ops otx2vf_netdev_ops = {
@@ -686,6 +695,16 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		snprintf(netdev->name, sizeof(netdev->name), "lbk%d", n);
 	}
 
+	/* To distinguish, for SDP VFs set netdev name explicitly */
+	if (is_otx2_sdpvf(vf->pdev)) {
+		int n;
+
+		n = (vf->pcifunc >> RVU_PFVF_FUNC_SHIFT) & RVU_PFVF_FUNC_MASK;
+		/* Need to subtract 1 to get proper VF number */
+		n -= 1;
+		snprintf(netdev->name, sizeof(netdev->name), "sdp%d-%d", pdev->bus->number, n);
+	}
+
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(dev, "Failed to register netdevice\n");
@@ -699,6 +718,14 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	otx2vf_set_ethtool_ops(netdev);
 
 	otx2_cgx_features_get(vf);
+
+	err = otx2vf_mcam_flow_init(vf);
+	if (err)
+		goto err_unreg_netdev;
+
+	err = otx2_register_dl(vf);
+	if (err)
+		goto err_unreg_netdev;
 
 	/* Enable pause frames by default */
 	vf->flags |= OTX2_FLAG_RX_PAUSE_ENABLED;
@@ -741,8 +768,10 @@ static void otx2vf_remove(struct pci_dev *pdev)
 
 	cancel_work_sync(&vf->reset_task);
 
-	if (otx2smqvf_remove(vf))
+	if (otx2smqvf_remove(vf)) {
+		otx2_unregister_dl(vf);
 		unregister_netdev(netdev);
+	}
 
 	if (vf->otx2_wq)
 		destroy_workqueue(vf->otx2_wq);

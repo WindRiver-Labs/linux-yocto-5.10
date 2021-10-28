@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/*  Marvell RPM CN10K driver
+/* Marvell RPM CN10K driver
  *
  * Copyright (C) 2020 Marvell.
  */
@@ -82,10 +82,10 @@ static int rvu_get_lmtaddr(struct rvu *rvu, u16 pcifunc,
 		dev_err(rvu->dev, "%s LMTLINE iova transulation failed err:%llx\n", __func__, val);
 		return -EIO;
 	}
-	/* PA[51:12] = RVU_AF_SMMU_TLN_FLIT1[60:21]
+	/* PA[51:12] = RVU_AF_SMMU_TLN_FLIT0[57:18]
 	 * PA[11:0] = IOVA[11:0]
 	 */
-	pa = rvu_read64(rvu, BLKADDR_RVUM, RVU_AF_SMMU_TLN_FLIT1) >> 21;
+	pa = rvu_read64(rvu, BLKADDR_RVUM, RVU_AF_SMMU_TLN_FLIT0) >> 18;
 	pa &= GENMASK_ULL(39, 0);
 	*lmt_addr = (pa << 12) | (iova  & 0xFFF);
 

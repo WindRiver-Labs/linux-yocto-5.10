@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2018 Marvell International Ltd.
+ * Copyright (C) 2018 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -192,6 +189,47 @@ struct nix_hw *get_nix_hw(struct rvu_hwinfo *hw, int blkaddr)
 		i++;
 	}
 	return NULL;
+}
+
+u32 convert_dwrr_mtu_to_bytes(u8 dwrr_mtu)
+{
+	dwrr_mtu &= 0x1FULL;
+
+	/* MTU used for DWRR calculation is in power of 2 up until 64K bytes.
+	 * Value of 4 is reserved for MTU value of 9728 bytes.
+	 * Value of 5 is reserved for MTU value of 10240 bytes.
+	 */
+	switch (dwrr_mtu) {
+	case 4:
+		return 9728;
+	case 5:
+		return 10240;
+	default:
+		return BIT_ULL(dwrr_mtu);
+	}
+
+	return 0;
+}
+
+u32 convert_bytes_to_dwrr_mtu(u32 bytes)
+{
+	/* MTU used for DWRR calculation is in power of 2 up until 64K bytes.
+	 * Value of 4 is reserved for MTU value of 9728 bytes.
+	 * Value of 5 is reserved for MTU value of 10240 bytes.
+	 */
+	if (bytes > BIT_ULL(16))
+		return 0;
+
+	switch (bytes) {
+	case 9728:
+		return 4;
+	case 10240:
+		return 5;
+	default:
+		return ilog2(bytes);
+	}
+
+	return 0;
 }
 
 static void nix_rx_sync(struct rvu *rvu, int blkaddr)
@@ -2337,8 +2375,17 @@ static void nix_tl1_default_cfg(struct rvu *rvu, struct nix_hw *nix_hw,
 		return;
 	rvu_write64(rvu, blkaddr, NIX_AF_TL1X_TOPOLOGY(schq),
 		    (TXSCH_TL1_DFLT_RR_PRIO << 1));
-	rvu_write64(rvu, blkaddr, NIX_AF_TL1X_SCHEDULE(schq),
-		    TXSCH_TL1_DFLT_RR_QTM);
+
+	/* On OcteonTx2 the config was in bytes and newer silcons
+	 * it's changed to weight.
+	 */
+	if (!rvu->hw->cap.nix_common_dwrr_mtu)
+		rvu_write64(rvu, blkaddr, NIX_AF_TL1X_SCHEDULE(schq),
+			    TXSCH_TL1_DFLT_RR_QTM);
+	else
+		rvu_write64(rvu, blkaddr, NIX_AF_TL1X_SCHEDULE(schq),
+			    CN10K_MAX_DWRR_WEIGHT);
+
 	rvu_write64(rvu, blkaddr, NIX_AF_TL1X_CIR(schq), 0x00);
 	pfvf_map[schq] = TXSCH_SET_FLAG(pfvf_map[schq], NIX_TXSCHQ_CFG_DONE);
 }
@@ -3120,6 +3167,15 @@ static int nix_setup_txschq(struct rvu *rvu, struct nix_hw *nix_hw, int blkaddr)
 		for (schq = 0; schq < txsch->schq.max; schq++)
 			txsch->pfvf_map[schq] = TXSCH_MAP(0, NIX_TXSCHQ_FREE);
 	}
+
+	/* Setup a default value of 8192 as DWRR MTU */
+	if (rvu->hw->cap.nix_common_dwrr_mtu) {
+		rvu_write64(rvu, blkaddr, NIX_AF_DWRR_RPM_MTU,
+			    convert_bytes_to_dwrr_mtu(8192));
+		rvu_write64(rvu, blkaddr, NIX_AF_DWRR_SDP_MTU,
+			    convert_bytes_to_dwrr_mtu(8192));
+	}
+
 	return 0;
 }
 
@@ -3196,6 +3252,7 @@ int rvu_mbox_handler_nix_get_hw_info(struct rvu *rvu, struct msg_req *req,
 				     struct nix_hw_info *rsp)
 {
 	u16 pcifunc = req->hdr.pcifunc;
+	u64 dwrr_mtu;
 	int blkaddr;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, pcifunc);
@@ -3213,6 +3270,20 @@ int rvu_mbox_handler_nix_get_hw_info(struct rvu *rvu, struct msg_req *req,
 		rvu_get_lmac_link_max_frs(rvu, &rsp->max_mtu);
 
 	rsp->min_mtu = NIC_HW_MIN_FRS;
+
+	if (!rvu->hw->cap.nix_common_dwrr_mtu) {
+		/* Return '1' on OTx2 */
+		rsp->rpm_dwrr_mtu = 1;
+		rsp->sdp_dwrr_mtu = 1;
+		return 0;
+	}
+
+	dwrr_mtu = rvu_read64(rvu, BLKADDR_NIX0, NIX_AF_DWRR_RPM_MTU);
+	rsp->rpm_dwrr_mtu = convert_dwrr_mtu_to_bytes(dwrr_mtu);
+
+	dwrr_mtu = rvu_read64(rvu, BLKADDR_NIX0, NIX_AF_DWRR_SDP_MTU);
+	rsp->sdp_dwrr_mtu = convert_dwrr_mtu_to_bytes(dwrr_mtu);
+
 	return 0;
 }
 
@@ -3261,8 +3332,8 @@ static int set_flowkey_fields(struct nix_rx_flowkey_alg *alg, u32 flow_cfg)
 	struct nix_rx_flowkey_alg *field;
 	struct nix_rx_flowkey_alg tmp;
 	u32 key_type, valid_key;
+	int l4_key_offset = 0;
 	u32 l3_l4_src_dst;
-	int l4_key_offset;
 
 	if (!alg)
 		return -EINVAL;
@@ -4254,6 +4325,28 @@ static int nix_aq_init(struct rvu *rvu, struct rvu_block *block)
 	return 0;
 }
 
+static void rvu_nix_setup_capabilities(struct rvu *rvu, int blkaddr)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	u64 hw_const;
+
+	hw_const = rvu_read64(rvu, blkaddr, NIX_AF_CONST1);
+
+	/* On OcteonTx2 DWRR quantum is directly configured into each of
+	 * the transmit scheduler queues. And PF/VF drivers were free to
+	 * config any value upto 2^24.
+	 * On CN10K, HW is modified, the quantum configuration at scheduler
+	 * queues is in terms of weight. And SW needs to setup a base DWRR MTU
+	 * at NIX_AF_DWRR_RPM_MTU / NIX_AF_DWRR_SDP_MTU. HW will do
+	 * 'DWRR MTU * weight' to get the quantum.
+	 *
+	 * Check if HW uses a common MTU for all DWRR quantum configs.
+	 * On OcteonTx2 this register field is '0'.
+	 */
+	if (((hw_const >> 56) & 0x10) == 0x10)
+		hw->cap.nix_common_dwrr_mtu = true;
+}
+
 static int rvu_nix_block_init(struct rvu *rvu, struct nix_hw *nix_hw)
 {
 	const struct npc_lt_def_cfg *ltdefs;
@@ -4290,6 +4383,9 @@ static int rvu_nix_block_init(struct rvu *rvu, struct nix_hw *nix_hw)
 	err = nix_calibrate_x2p(rvu, blkaddr);
 	if (err)
 		return err;
+
+	/* Setup capabilities of the NIX block */
+	rvu_nix_setup_capabilities(rvu, blkaddr);
 
 	/* Initialize admin queue */
 	err = nix_aq_init(rvu, block);
@@ -4900,9 +4996,10 @@ bool rvu_nix_is_ptp_tx_enabled(struct rvu *rvu, u16 pcifunc)
 /* NIX ingress policers or bandwidth profiles APIs */
 static void nix_config_rx_pkt_policer_precolor(struct rvu *rvu, int blkaddr)
 {
-	const struct npc_lt_def_cfg *ltdefs;
+	struct npc_lt_def_cfg defs, *ltdefs;
 
-	ltdefs = rvu->kpu.lt_def;
+	ltdefs = &defs;
+	memcpy(ltdefs, rvu->kpu.lt_def, sizeof(struct npc_lt_def_cfg));
 
 	/* Extract PCP and DEI fields from outer VLAN from byte offset
 	 * 2 from the start of LB_PTR (ie TAG).
@@ -5480,4 +5577,37 @@ static void nix_clear_ratelimit_aggr(struct rvu *rvu, struct nix_hw *nix_hw,
 		ipolicer->pfvf_map[mid_prof] = 0x00;
 		rvu_free_rsrc(&ipolicer->band_prof, mid_prof);
 	}
+}
+
+int rvu_mbox_handler_nix_bandprof_get_hwinfo(struct rvu *rvu, struct msg_req *req,
+					     struct nix_bandprof_get_hwinfo_rsp *rsp)
+{
+	struct nix_ipolicer *ipolicer;
+	int blkaddr, layer, err;
+	struct nix_hw *nix_hw;
+	u64 tu;
+
+	if (!rvu->hw->cap.ipolicer)
+		return NIX_AF_ERR_IPOLICER_NOTSUPP;
+
+	err = nix_get_struct_ptrs(rvu, req->hdr.pcifunc, &nix_hw, &blkaddr);
+	if (err)
+		return err;
+
+	/* Return number of bandwidth profiles free at each layer */
+	mutex_lock(&rvu->rsrc_lock);
+	for (layer = 0; layer < BAND_PROF_NUM_LAYERS; layer++) {
+		if (layer == BAND_PROF_INVAL_LAYER)
+			continue;
+
+		ipolicer = &nix_hw->ipolicer[layer];
+		rsp->prof_count[layer] = rvu_rsrc_free_count(&ipolicer->band_prof);
+	}
+	mutex_unlock(&rvu->rsrc_lock);
+
+	/* Set the policer timeunit in nanosec */
+	tu = rvu_read64(rvu, blkaddr, NIX_AF_PL_TS) & GENMASK_ULL(9, 0);
+	rsp->policer_timeunit = (tu + 1) * 100;
+
+	return 0;
 }

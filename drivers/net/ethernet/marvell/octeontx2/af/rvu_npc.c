@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2018 Marvell International Ltd.
+ * Copyright (C) 2018 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bitfield.h>
@@ -24,8 +21,8 @@
 #define RSVD_MCAM_ENTRIES_PER_PF	3 /* Broadcast, Promisc and AllMulticast */
 #define RSVD_MCAM_ENTRIES_PER_NIXLF	1 /* Ucast for LFs */
 
-#define NPC_HW_TSTAMP_OFFSET	8ULL
-#define NPC_KEX_PF_FUNC_MASK    0xFFFFULL
+#define NPC_HW_TSTAMP_OFFSET		8ULL
+#define NPC_KEX_PF_FUNC_MASK		0xFFFFULL
 
 #define ALIGN_8B_CEIL(__a)	(((__a) + 7) & (-8))
 #define NPC_PARSE_RESULT_DMAC_OFFSET	8
@@ -55,8 +52,8 @@ bool is_npc_interface_valid(struct rvu *rvu, u8 intf)
 }
 
 static int npc_mcam_verify_pf_func(struct rvu *rvu,
-				   struct mcam_entry *entry_data,
-				   u8 intf, u16 pcifunc)
+				   struct mcam_entry *entry_data, u8 intf,
+				   u16 pcifunc)
 {
 	u16 pf_func, pf_func_mask;
 
@@ -71,41 +68,6 @@ static int npc_mcam_verify_pf_func(struct rvu *rvu,
 	if (pf_func_mask != NPC_KEX_PF_FUNC_MASK ||
 	    ((pf_func & ~RVU_PFVF_FUNC_MASK) !=
 	     (pcifunc & ~RVU_PFVF_FUNC_MASK)))
-		return -EINVAL;
-
-	return 0;
-}
-
-int npc_mcam_verify_channel(struct rvu *rvu, u16 pcifunc, u8 intf, u16 channel)
-{
-	int max_lbkid = rvu->hw->lbk_links - 1;
-	int pf = rvu_get_pf(pcifunc);
-	u8 cgx_id, lmac_id;
-	int base = 0, end;
-
-	if (is_npc_intf_tx(intf))
-		return 0;
-
-	/* return in case of AF installed rules */
-	if (is_pffunc_af(pcifunc))
-		return 0;
-
-	if (is_afvf(pcifunc)) {
-		end = rvu_get_num_lbk_chans();
-		if (end < 0)
-			return -EINVAL;
-		end = rvu_nix_chan_lbk(rvu, max_lbkid, end);
-	} else if (is_sdp_pfvf(pcifunc)) {
-		base = rvu_nix_chan_sdp(rvu, 0);
-		end = rvu_nix_chan_sdp(rvu, (NIX_CHAN_SDP_NUM_CHANS - 1));
-	} else {
-		rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-		base = rvu_nix_chan_cgx(rvu, cgx_id, lmac_id, 0x0);
-		/* CGX mapped functions has maximum of 16 channels */
-		end = rvu_nix_chan_cgx(rvu, cgx_id, lmac_id, 0xF);
-	}
-
-	if (channel < base || channel > end)
 		return -EINVAL;
 
 	return 0;
@@ -719,7 +681,7 @@ void rvu_npc_install_promisc_entry(struct rvu *rvu, u16 pcifunc,
 		action.index = pfvf->promisc_mce_idx;
 	}
 
-	/* For cn10k the upper two bits bits of the channel number are
+	/* For cn10k the upper two bits of the channel number are
 	 * cpt channel number. with masking out these bits in the
 	 * mcam entry, same entry used for NIX will allow packets
 	 * received from cpt for parsing.
@@ -775,7 +737,7 @@ void rvu_npc_enable_promisc_entry(struct rvu *rvu, u16 pcifunc,
 void rvu_npc_install_bcast_match_entry(struct rvu *rvu, u16 pcifunc,
 				       int nixlf, u64 chan)
 {
-	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
+	struct rvu_pfvf *pfvf;
 	struct npc_install_flow_req req = { 0 };
 	struct npc_install_flow_rsp rsp = { 0 };
 	struct npc_mcam *mcam = &rvu->hw->mcam;
@@ -899,7 +861,7 @@ void rvu_npc_install_allmulti_entry(struct rvu *rvu, u16 pcifunc, int nixlf,
 	ether_addr_copy(req.mask.dmac, mac_addr);
 	req.features = BIT_ULL(NPC_DMAC);
 
-	/* For cn10k the upper two bits bits of the channel number are
+	/* For cn10k the upper two bits of the channel number are
 	 * cpt channel number. with masking out these bits in the
 	 * mcam entry, same entry used for NIX will allow packets
 	 * received from cpt for parsing.
@@ -1112,6 +1074,9 @@ static void npc_enadis_default_entries(struct rvu *rvu, u16 pcifunc,
 
 void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
+	if (nixlf < 0)
+		return;
+
 	npc_enadis_default_entries(rvu, pcifunc, nixlf, false);
 
 	/* Delete multicast and promisc MCAM entries */
@@ -1123,6 +1088,9 @@ void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 
 void rvu_npc_enable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
+	if (nixlf < 0)
+		return;
+
 	/* Enables only broadcast match entry. Promisc/Allmulti are enabled
 	 * in set_rx_mode mbox handler.
 	 */
@@ -1178,13 +1146,13 @@ void rvu_npc_free_mcam_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 
 	mutex_lock(&mcam->lock);
 
-	/* Disable and free all MCAM entries owned by this 'pcifunc' */
+	/* Free all MCAM entries owned by this 'pcifunc' */
 	npc_mcam_free_all_entries(rvu, mcam, blkaddr, pcifunc);
 
 	/* Free all MCAM counters owned by this 'pcifunc' */
 	npc_mcam_free_all_counters(rvu, mcam, pcifunc);
 
-	/* Delete MCAM entries owned by this 'pcifunc' from list */
+	/* Delete MCAM entries owned by this 'pcifunc' */
 	list_for_each_entry_safe(rule, tmp, &mcam->mcam_rules, list) {
 		if (rule->owner == pcifunc && !rule->default_rule) {
 			list_del(&rule->list);
@@ -1968,7 +1936,7 @@ static void rvu_npc_setup_interfaces(struct rvu *rvu, int blkaddr)
 			continue;
 
 		/* Set RX MCAM search key size. LA..LE (ltype only) + Channel */
-		rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX),
+		rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(intf),
 			    rx_kex);
 
 		/* If MCAM lookup doesn't result in a match, drop the received
@@ -1993,7 +1961,7 @@ static void rvu_npc_setup_interfaces(struct rvu *rvu, int blkaddr)
 			continue;
 
 		/* Extract Ltypes LID_LA to LID_LE */
-		rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX),
+		rvu_write64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(intf),
 			    tx_kex);
 
 		/* Set TX miss action to UCAST_DEFAULT i.e
@@ -2623,7 +2591,7 @@ int rvu_mbox_handler_npc_mcam_alloc_entry(struct rvu *rvu,
 	 */
 	if (!req->contig && req->count > NPC_MAX_NONCONTIG_ENTRIES) {
 		dev_err(rvu->dev,
-			"%s: %d Non-contiguous MCAM entries requested is morethan max (%d) allowed\n",
+			"%s: %d Non-contiguous MCAM entries requested is more than max (%d) allowed\n",
 			__func__, req->count, NPC_MAX_NONCONTIG_ENTRIES);
 		return NPC_MCAM_INVALID_REQ;
 	}
@@ -2713,17 +2681,12 @@ int rvu_mbox_handler_npc_mcam_write_entry(struct rvu *rvu,
 	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, req->hdr.pcifunc);
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	u16 pcifunc = req->hdr.pcifunc;
-	u16 channel, chan_mask;
 	int blkaddr, rc;
 	u8 nix_intf;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0)
 		return NPC_MCAM_INVALID_REQ;
-
-	chan_mask = req->entry_data.kw_mask[0] & NPC_KEX_CHAN_MASK;
-	channel = req->entry_data.kw[0] & NPC_KEX_CHAN_MASK;
-	channel &= chan_mask;
 
 	mutex_lock(&mcam->lock);
 	rc = npc_mcam_verify_entry(mcam, pcifunc, req->entry);
@@ -2741,22 +2704,16 @@ int rvu_mbox_handler_npc_mcam_write_entry(struct rvu *rvu,
 		goto exit;
 	}
 
-	if (!is_pffunc_af(pcifunc) &&
-	    npc_mcam_verify_channel(rvu, pcifunc, req->intf, channel)) {
-		rc = NPC_MCAM_INVALID_REQ;
-		goto exit;
-	}
+	if (is_npc_intf_tx(req->intf))
+		nix_intf = pfvf->nix_tx_intf;
+	else
+		nix_intf = pfvf->nix_rx_intf;
 
 	if (!is_pffunc_af(pcifunc) &&
 	    npc_mcam_verify_pf_func(rvu, &req->entry_data, req->intf, pcifunc)) {
 		rc = NPC_MCAM_INVALID_REQ;
 		goto exit;
 	}
-
-	if (is_npc_intf_tx(req->intf))
-		nix_intf = pfvf->nix_tx_intf;
-	else
-		nix_intf = pfvf->nix_rx_intf;
 
 	/* For AF installed rules, the nix_intf should be set to target NIX */
 	if (is_pffunc_af(req->hdr.pcifunc))
@@ -3099,7 +3056,6 @@ int rvu_mbox_handler_npc_mcam_alloc_and_write_entry(struct rvu *rvu,
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	u16 entry = NPC_MCAM_ENTRY_INVALID;
 	u16 cntr = NPC_MCAM_ENTRY_INVALID;
-	u16 channel, chan_mask;
 	int blkaddr, rc;
 	u8 nix_intf;
 
@@ -3108,13 +3064,6 @@ int rvu_mbox_handler_npc_mcam_alloc_and_write_entry(struct rvu *rvu,
 		return NPC_MCAM_INVALID_REQ;
 
 	if (!is_npc_interface_valid(rvu, req->intf))
-		return NPC_MCAM_INVALID_REQ;
-
-	chan_mask = req->entry_data.kw_mask[0] & NPC_KEX_CHAN_MASK;
-	channel = req->entry_data.kw[0] & NPC_KEX_CHAN_MASK;
-	channel &= chan_mask;
-
-	if (npc_mcam_verify_channel(rvu, req->hdr.pcifunc, req->intf, channel))
 		return NPC_MCAM_INVALID_REQ;
 
 	if (npc_mcam_verify_pf_func(rvu, &req->entry_data, req->intf,
