@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*  Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2018 Marvell International Ltd.
+ * Copyright (C) 2018 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef MBOX_H
@@ -219,6 +216,8 @@ M(TIM_LF_FREE,		0x801, tim_lf_free, tim_ring_req, msg_rsp)	\
 M(TIM_CONFIG_RING,	0x802, tim_config_ring, tim_config_req, msg_rsp)\
 M(TIM_ENABLE_RING,	0x803, tim_enable_ring, tim_ring_req, tim_enable_rsp)\
 M(TIM_DISABLE_RING,	0x804, tim_disable_ring, tim_ring_req, msg_rsp)	\
+M(TIM_GET_MIN_INTVL,	0x805, tim_get_min_intvl, tim_intvl_req,	\
+			       tim_intvl_rsp)				\
 /* CPT mbox IDs (range 0xA00 - 0xBFF) */				\
 M(CPT_LF_ALLOC,		0xA00, cpt_lf_alloc, cpt_lf_alloc_req_msg,	\
 			       msg_rsp)			\
@@ -337,7 +336,9 @@ M(NIX_GET_HW_INFO,	0x801c, nix_get_hw_info, msg_req, nix_hw_info)	\
 M(NIX_BANDPROF_ALLOC,	0x801d, nix_bandprof_alloc, nix_bandprof_alloc_req, \
 				nix_bandprof_alloc_rsp)			    \
 M(NIX_BANDPROF_FREE,	0x801e, nix_bandprof_free, nix_bandprof_free_req,   \
-				msg_rsp)
+				msg_rsp)				    \
+M(NIX_BANDPROF_GET_HWINFO, 0x801f, nix_bandprof_get_hwinfo, msg_req,		\
+				nix_bandprof_get_hwinfo_rsp)
 
 /* Messages initiated by AF (range 0xC00 - 0xDFF) */
 #define MBOX_UP_CGX_MESSAGES						\
@@ -1246,7 +1247,9 @@ struct nix_hw_info {
 	u16 vwqe_delay;
 	u16 max_mtu;
 	u16 min_mtu;
-	u16 rsvd[13];
+	u32 rpm_dwrr_mtu;
+	u32 sdp_dwrr_mtu;
+	u64 rsvd[16]; /* Add reserved fields for future expansion */
 };
 
 struct nix_bandprof_alloc_req {
@@ -1272,6 +1275,12 @@ struct nix_bandprof_free_req {
 	u8 free_all;
 	u16 prof_count[BAND_PROF_NUM_LAYERS];
 	u16 prof_idx[BAND_PROF_NUM_LAYERS][MAX_BANDPROF_PER_PFFUNC];
+};
+
+struct nix_bandprof_get_hwinfo_rsp {
+	struct mbox_msghdr hdr;
+	u16 prof_count[BAND_PROF_NUM_LAYERS];
+	u32 policer_timeunit;
 };
 
 /* SSO mailbox error codes
@@ -1671,6 +1680,8 @@ enum tim_clk_srcs {
 	TIM_CLK_SRCS_GPIO	= 1,
 	TIM_CLK_SRCS_GTI	= 2,
 	TIM_CLK_SRCS_PTP	= 3,
+	TIM_CLK_SRCS_SYNCE	= 4,
+	TIM_CLK_SRCS_BTS	= 5,
 	TIM_CLK_SRSC_INVALID,
 };
 
@@ -1703,8 +1714,11 @@ struct tim_config_req {
 	u8	enabledontfreebuffer;
 	u32	bucketsize;
 	u32	chunksize;
-	u32	interval;
+	u32	interval;   /* Cycles between traversal */
 	u8	gpioedge;
+	u8	rsvd[7];
+	u64	intervalns; /* Nanoseconds between traversal */
+	u64	clockfreq;
 };
 
 struct tim_lf_alloc_rsp {
@@ -1716,6 +1730,18 @@ struct tim_enable_rsp {
 	struct mbox_msghdr hdr;
 	u64	timestarted;
 	u32	currentbucket;
+};
+
+struct tim_intvl_req {
+	struct mbox_msghdr hdr;
+	u8	clocksource;
+	u64	clockfreq;
+};
+
+struct tim_intvl_rsp {
+	struct mbox_msghdr hdr;
+	u64	intvl_cyc;
+	u64	intvl_ns;
 };
 
 /* CPT mailbox error codes
@@ -1919,6 +1945,8 @@ struct ree_rule_db_get_rsp_msg {
 enum ptp_op {
 	PTP_OP_ADJFINE = 0,
 	PTP_OP_GET_CLOCK = 1,
+	PTP_OP_GET_TSTMP = 2,
+	PTP_OP_SET_THRESH = 3,
 };
 
 struct ptp_req {
@@ -1926,6 +1954,7 @@ struct ptp_req {
 	u8 op;
 	s64 scaled_ppm;
 	u8 is_pmu;
+	u64 thresh;
 };
 
 struct ptp_rsp {

@@ -1,123 +1,54 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 BPHY RFOE/CPRI Ethernet Driver
+/* Marvell CNF10K BPHY RFOE Netdev Driver
  *
- * Copyright (C) 2020 Marvell International Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2021 Marvell.
  */
 
-#include "otx2_rfoe.h"
-#include "otx2_bphy_hw.h"
-#include "otx2_bphy_debugfs.h"
-
-/*	                      Theory of Operation
- *
- *	I.   General
- *
- *	The BPHY RFOE netdev driver handles packets such as eCPRI control,
- *	PTP and other ethernet packets received from/sent to BPHY RFOE MHAB
- *	in Linux kernel. All other packets such as ROE and eCPRI non-control
- *	are handled by ODP application in user space. The ODP application
- *	initializes the JDT/MBT/PSM-queues to process the Rx/Tx packets in
- *	netdev and shares the information through driver ioctl. The Rx/TX
- *	notification will be sent to netdev using one of the PSM GPINT.
- *
- *	II.  Driver Operation
- *
- *	This driver register's a character device and provides ioctl for
- *	ODP application to initialize the netdev(s) to process eCPRI and
- *	other Ethernet packets. Each netdev corresponds to a unique RFOE
- *	index and LMAC id. The ODP application initializes the flow tables,
- *	Rx JDT and RX MBT to process Rx packets. There will be a unique
- *	Flow Table, JDT, MBT for processing eCPRI, PTP and other Ethernet
- *	packets separately. The Rx packet memory (DDR) is also allocated
- *	by ODP and configured in MBT. All LMAC's in a single RFOE MHAB share
- *	the Rx configuration tuple {Flow Id, JDT and MBT}. The Rx event is
- *	notified to the netdev via PSM GPINT1. Each PSM GPINT supports 32-bits
- *	and can be used as interrupt status bits. For each Rx packet type
- *	per RFOE, one PSM GPINT bit is reserved to notify the Rx event for
- *	that packet type. The ODP application configures PSM_CMD_GPINT_S
- *	in the JCE section of JD for each packet. There are total 32 JDT
- *	and MBT entries per packet type. These entries will be reused when
- *	the JDT/MBT circular entries wraps around.
- *
- *	On Tx side, the ODP application creates preconfigured job commands
- *	for the driver use. Each job command contains information such as
- *	PSM cmd (ADDJOB) info, JD iova address. The packet memory is also
- *	allocated by ODP app. The JD rd dma cfg section contains the memory
- *	addr for packet DMA. There are two PSM queues/RFOE reserved for Tx
- *	puropose. One queue handles PTP traffic and other queue is used for
- *	eCPRI and regular Ethernet traffic. The PTP job descriptor's (JD) are
- *	configured to generate Tx completion event through GPINT mechanism.
- *	For each LMAC/RFOE there will be one GPINT bit reserved for this
- *	purpose. For eCPRI and other Ethernet traffic there is no GPINT	event
- *	to signal Tx completion to the driver. The driver Tx interrupt handler
- *	reads RFOE(0..2)_TX_PTP_TSTMP_W0 and RFOE(0..2)_TX_PTP_TSTMP_W1
- *	registers for PTP timestamp and fills the time stamp in PTP skb. The
- *	number of preconfigured job commands are 64 for non-ptp shared by all
- *	LMAC's in RFOE and 4 for PTP per each LMAC in RFOE. The PTP job cmds
- *	are not shared because the timestamp registers are unique per LMAC.
- *
- *	III. Transmit
- *
- *	The driver xmit routine selects the PSM queue based on whether the
- *	packet needs to be timestamped in HW by checking SKBTX_HW_TSTAMP flag.
- *	In case of PTP packet, if there is pending PTP packet in progress then
- *	the drivers adds this skb to a list and returns success. This list
- *	is processed after the previous PTP packet is sent and timestamp is
- *	copied to the skb successfully in the Tx interrupt handler.
- *
- *	Once the PSM queue is selected, the driver checks whether there is
- *	enough space in that PSM queue by reading PSM_QUEUE(0..127)_SPACE
- *	reister. If the PSM queue is not full, then the driver get's the
- *	corresponding job entries associated with that queue and updates the
- *	length in JD DMA cfg word0 and copied the packet data to JD DMA
- *	cfg word1. For eCPRI/non-PTP packets, the driver also updates JD CFG
- *	RFOE_MODE.
- *
- *	IV.  Receive
- *
- *	The driver receives an interrupt per pkt_type and invokes NAPI handler.
- *	The NAPI handler reads the corresponding MBT cfg (nxt_buf) to see the
- *	number of packets to be processed. For each successful mbt_entry, the
- *	packet handler get's corresponding mbt entry buffer address and based
- *	on packet type, the PSW0/ECPRI_PSW0 is read to get the JD iova addr
- *	corresponding to that MBT entry. The DMA block size is read from the
- *	JDT entry to know the number of bytes DMA'd including PSW bytes. The
- *	MBT entry buffer address is moved by pkt_offset bytes and length is
- *	decremented by pkt_offset to get actual pkt data and length. For each
- *	pkt, skb is allocated and packet data is copied to skb->data. In case
- *	of PTP packets, the PSW1 contains the PTP timestamp value and will be
- *	copied to the skb.
- *
- *	V.   Miscellaneous
- *
- *	Ethtool:
- *	The ethtool stats shows packet stats for each packet type.
- *
- */
+#include "cnf10k_rfoe.h"
+#include "cnf10k_bphy_hw.h"
 
 /* global driver ctx */
-struct otx2_rfoe_drv_ctx rfoe_drv_ctx[RFOE_MAX_INTF];
+struct cnf10k_rfoe_drv_ctx cnf10k_rfoe_drv_ctx[CNF10K_RFOE_MAX_INTF];
 
-/* debugfs */
-static void otx2_rfoe_debugfs_reader(char *buffer, size_t count, void *priv);
-static const char *otx2_rfoe_debugfs_get_formatter(void);
-static size_t otx2_rfoe_debugfs_get_buffer_size(void);
-static void otx2_rfoe_debugfs_create(struct otx2_rfoe_drv_ctx *ctx);
-static void otx2_rfoe_debugfs_remove(struct otx2_rfoe_drv_ctx *ctx);
-
-void otx2_rfoe_disable_intf(int rfoe_num)
+void cnf10k_bphy_intr_handler(struct otx2_bphy_cdev_priv *cdev_priv, u32 status)
 {
-	struct otx2_rfoe_drv_ctx *drv_ctx;
-	struct otx2_rfoe_ndev_priv *priv;
+	struct cnf10k_rfoe_drv_ctx *cnf10k_drv_ctx;
+	struct cnf10k_rfoe_ndev_priv *priv;
+	struct net_device *netdev;
+	int rfoe_num, i;
+	u32 intr_mask;
+
+	/* rx intr processing */
+	for (rfoe_num = 0; rfoe_num < cdev_priv->num_rfoe_mhab; rfoe_num++) {
+		intr_mask = CNF10K_RFOE_RX_INTR_MASK(rfoe_num);
+		if (status & intr_mask)
+			cnf10k_rfoe_rx_napi_schedule(rfoe_num, status);
+	}
+
+	/* tx intr processing */
+	for (i = 0; i < CNF10K_RFOE_MAX_INTF; i++) {
+		cnf10k_drv_ctx = &cnf10k_rfoe_drv_ctx[i];
+		if (cnf10k_drv_ctx->valid) {
+			netdev = cnf10k_drv_ctx->netdev;
+			priv = netdev_priv(netdev);
+			intr_mask = CNF10K_RFOE_TX_PTP_INTR_MASK(priv->rfoe_num,
+								 priv->lmac_id,
+						cdev_priv->num_rfoe_lmac);
+			if ((status & intr_mask) && priv->ptp_tx_skb)
+				schedule_work(&priv->ptp_tx_work);
+		}
+	}
+}
+
+void cnf10k_rfoe_disable_intf(int rfoe_num)
+{
+	struct cnf10k_rfoe_drv_ctx *drv_ctx;
+	struct cnf10k_rfoe_ndev_priv *priv;
 	struct net_device *netdev;
 	int idx;
 
-	for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
-		drv_ctx = &rfoe_drv_ctx[idx];
+	for (idx = 0; idx < CNF10K_RFOE_MAX_INTF; idx++) {
+		drv_ctx = &cnf10k_rfoe_drv_ctx[idx];
 		if (drv_ctx->rfoe_num == rfoe_num && drv_ctx->valid) {
 			netdev = drv_ctx->netdev;
 			priv = netdev_priv(netdev);
@@ -126,26 +57,20 @@ void otx2_rfoe_disable_intf(int rfoe_num)
 	}
 }
 
-void otx2_bphy_rfoe_cleanup(void)
+void cnf10k_bphy_rfoe_cleanup(void)
 {
-	struct otx2_rfoe_drv_ctx *drv_ctx = NULL;
-	struct otx2_rfoe_ndev_priv *priv;
+	struct cnf10k_rfoe_drv_ctx *drv_ctx = NULL;
+	struct cnf10k_rfoe_ndev_priv *priv;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	struct net_device *netdev;
-	struct rx_ft_cfg *ft_cfg;
 	int i, idx;
 
-	for (i = 0; i < RFOE_MAX_INTF; i++) {
-		drv_ctx = &rfoe_drv_ctx[i];
+	for (i = 0; i < CNF10K_RFOE_MAX_INTF; i++) {
+		drv_ctx = &cnf10k_rfoe_drv_ctx[i];
 		if (drv_ctx->valid) {
-			otx2_rfoe_debugfs_remove(drv_ctx);
 			netdev = drv_ctx->netdev;
 			priv = netdev_priv(netdev);
-			--(priv->ptp_cfg->refcnt);
-			if (!priv->ptp_cfg->refcnt) {
-				del_timer_sync(&priv->ptp_cfg->ptp_timer);
-				kfree(priv->ptp_cfg);
-			}
-			otx2_rfoe_ptp_destroy(priv);
+			cnf10k_rfoe_ptp_destroy(priv);
 			unregister_netdev(netdev);
 			for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
 				if (!(priv->pkt_type_mask & (1U << idx)))
@@ -162,76 +87,16 @@ void otx2_bphy_rfoe_cleanup(void)
 	}
 }
 
-void otx2_rfoe_calc_ptp_ts(struct otx2_rfoe_ndev_priv *priv, u64 *ts)
-{
-	u64 ptp_diff_nsec, ptp_diff_psec;
-	struct ptp_bcn_off_cfg *ptp_cfg;
-	struct ptp_clk_cfg *clk_cfg;
-	struct ptp_bcn_ref *ref;
-	unsigned long flags;
-	u64 timestamp = *ts;
-
-	ptp_cfg = priv->ptp_cfg;
-	if (!ptp_cfg->use_ptp_alg)
-		return;
-	clk_cfg = &ptp_cfg->clk_cfg;
-
-	spin_lock_irqsave(&ptp_cfg->lock, flags);
-
-	if (likely(timestamp > ptp_cfg->new_ref.ptp0_ns))
-		ref = &ptp_cfg->new_ref;
-	else
-		ref = &ptp_cfg->old_ref;
-
-	/* calculate ptp timestamp diff in pico sec */
-	ptp_diff_psec = ((timestamp - ref->ptp0_ns) * PICO_SEC_PER_NSEC *
-			 clk_cfg->clk_freq_div) / clk_cfg->clk_freq_ghz;
-	ptp_diff_nsec = (ptp_diff_psec + ref->bcn0_n2_ps + 500) /
-			PICO_SEC_PER_NSEC;
-	timestamp = ref->bcn0_n1_ns - priv->sec_bcn_offset + ptp_diff_nsec;
-
-	spin_unlock_irqrestore(&ptp_cfg->lock, flags);
-
-	*ts = timestamp;
-}
-
-static void otx2_rfoe_ptp_offset_timer(struct timer_list *t)
-{
-	struct ptp_bcn_off_cfg *ptp_cfg = from_timer(ptp_cfg, t, ptp_timer);
-	u64 mio_ptp_ts, ptp_ts_diff, ptp_diff_nsec, ptp_diff_psec;
-	struct ptp_clk_cfg *clk_cfg = &ptp_cfg->clk_cfg;
-	unsigned long expires, flags;
-
-	spin_lock_irqsave(&ptp_cfg->lock, flags);
-
-	memcpy(&ptp_cfg->old_ref, &ptp_cfg->new_ref,
-	       sizeof(struct ptp_bcn_ref));
-
-	mio_ptp_ts = readq(ptp_reg_base + MIO_PTP_CLOCK_HI);
-	ptp_ts_diff = mio_ptp_ts - ptp_cfg->new_ref.ptp0_ns;
-	ptp_diff_psec = (ptp_ts_diff * PICO_SEC_PER_NSEC *
-			 clk_cfg->clk_freq_div) / clk_cfg->clk_freq_ghz;
-	ptp_diff_nsec = ptp_diff_psec / PICO_SEC_PER_NSEC;
-	ptp_cfg->new_ref.ptp0_ns += ptp_ts_diff;
-	ptp_cfg->new_ref.bcn0_n1_ns += ptp_diff_nsec;
-	ptp_cfg->new_ref.bcn0_n2_ps += ptp_diff_psec -
-				       (ptp_diff_nsec * PICO_SEC_PER_NSEC);
-
-	spin_unlock_irqrestore(&ptp_cfg->lock, flags);
-
-	expires = jiffies + PTP_OFF_RESAMPLE_THRESH * HZ;
-	mod_timer(&ptp_cfg->ptp_timer, expires);
-}
-
 /* submit pending ptp tx requests */
-static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
+static void cnf10k_rfoe_ptp_submit_work(struct work_struct *work)
 {
-	struct otx2_rfoe_ndev_priv *priv = container_of(work,
-						struct otx2_rfoe_ndev_priv,
+	struct cnf10k_rfoe_ndev_priv *priv = container_of(work,
+						struct cnf10k_rfoe_ndev_priv,
 						ptp_queue_work);
 	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
 	struct mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
 	struct mhab_job_desc_cfg *jd_cfg_ptr;
+	struct rfoe_tx_ptp_tstmp_s *tx_tstmp;
 	struct psm_cmd_addjob_s *psm_cmd_lo;
 	struct tx_job_queue_cfg *job_cfg;
 	struct tx_job_entry *job_entry;
@@ -249,7 +114,8 @@ static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
 
 	/* check pending ptp requests */
 	if (list_empty(&priv->ptp_skb_list.list)) {
-		netif_dbg(priv, tx_queued, priv->netdev, "no pending ptp tx requests\n");
+		netif_dbg(priv, tx_queued, priv->netdev,
+			  "no pending ptp tx requests\n");
 		spin_unlock_irqrestore(&job_cfg->lock, flags);
 		return;
 	}
@@ -259,7 +125,8 @@ static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
 	regval = readq(priv->psm_reg_base + PSM_QUEUE_SPACE(psm_queue_id));
 	queue_space = regval & 0x7FFF;
 	if (queue_space < 1) {
-		netif_dbg(priv, tx_queued, priv->netdev, "ptp tx psm queue %d full\n",
+		netif_dbg(priv, tx_queued, priv->netdev,
+			  "ptp tx psm queue %d full\n",
 			  psm_queue_id);
 		/* reschedule to check later */
 		spin_unlock_irqrestore(&job_cfg->lock, flags);
@@ -285,6 +152,11 @@ static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
 
 	priv->last_tx_ptp_jiffies = jiffies;
 
+	tx_tstmp = (struct rfoe_tx_ptp_tstmp_s *)
+			((u8 *)priv->ptp_ring_cfg.ptp_ring_base +
+			(128 * priv->ptp_ring_cfg.ptp_ring_idx));
+	tx_tstmp->valid = 0;
+
 	/* get the tx job entry */
 	job_entry = (struct tx_job_entry *)
 				&job_cfg->job_entries[job_cfg->q_idx];
@@ -302,7 +174,7 @@ static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
 	/* update length and block size in jd dma cfg word */
 	jd_cfg_ptr_iova = *(u64 *)((u8 *)job_entry->jd_ptr + 8);
 	jd_cfg_ptr = otx2_iova_to_virt(priv->iommu_domain, jd_cfg_ptr_iova);
-	jd_cfg_ptr->cfg1.pkt_len = skb->len;
+	jd_cfg_ptr->cfg3.pkt_len = skb->len;
 	jd_dma_cfg_word_0 = (struct mhbw_jd_dma_cfg_word_0_s *)
 				job_entry->rd_dma_ptr;
 	jd_dma_cfg_word_0->block_size = (((skb->len + 15) >> 4) * 4);
@@ -334,13 +206,14 @@ static void otx2_rfoe_ptp_submit_work(struct work_struct *work)
 #define OTX2_RFOE_PTP_TSTMP_POLL_CNT	100
 
 /* ptp interrupt processing bottom half */
-static void otx2_rfoe_ptp_tx_work(struct work_struct *work)
+static void cnf10k_rfoe_ptp_tx_work(struct work_struct *work)
 {
-	struct otx2_rfoe_ndev_priv *priv = container_of(work,
-						struct otx2_rfoe_ndev_priv,
-						ptp_tx_work);
+	struct cnf10k_rfoe_ndev_priv *priv = container_of(work,
+						 struct cnf10k_rfoe_ndev_priv,
+						 ptp_tx_work);
+	struct rfoe_tx_ptp_tstmp_s *tx_tstmp;
 	struct skb_shared_hwtstamps ts;
-	u64 timestamp, tstmp_w1;
+	u64 timestamp;
 	u16 jobid;
 	int cnt;
 
@@ -350,14 +223,14 @@ static void otx2_rfoe_ptp_tx_work(struct work_struct *work)
 		goto submit_next_req;
 	}
 
+	tx_tstmp = (struct rfoe_tx_ptp_tstmp_s *)
+			((u8 *)priv->ptp_ring_cfg.ptp_ring_base +
+			(128 * priv->ptp_ring_cfg.ptp_ring_idx));
+
 	/* poll for timestamp valid bit to go high */
 	for (cnt = 0; cnt < OTX2_RFOE_PTP_TSTMP_POLL_CNT; cnt++) {
-		/* read RFOE(0..2)_TX_PTP_TSTMP_W1(0..3) */
-		tstmp_w1 = readq(priv->rfoe_reg_base +
-				 RFOEX_TX_PTP_TSTMP_W1(priv->rfoe_num,
-						       priv->lmac_id));
 		/* check valid bit */
-		if (tstmp_w1 & (1ULL << 63))
+		if (tx_tstmp->valid)
 			break;
 		usleep_range(5, 10);
 	}
@@ -370,31 +243,32 @@ static void otx2_rfoe_ptp_tx_work(struct work_struct *work)
 		goto submit_next_req;
 	}
 
-	/* check err or drop condition */
-	if ((tstmp_w1 & (1ULL << 21)) || (tstmp_w1 & (1ULL << 20))) {
+	if (tx_tstmp->drop || tx_tstmp->tx_err) {
 		netif_err(priv, tx_done, priv->netdev,
-			  "ptp timestamp error tstmp_w1=0x%llx\n",
-			  tstmp_w1);
+			  "ptp tx timstamp error\n");
 		goto submit_next_req;
 	}
+
 	/* match job id */
-	jobid = (tstmp_w1 >> 4) & 0xffff;
+	jobid = tx_tstmp->jobid;
 	if (jobid != priv->ptp_job_tag) {
 		netif_err(priv, tx_done, priv->netdev,
-			  "ptp job id doesn't match, tstmp_w1->job_id=0x%x skb->job_tag=0x%x\n",
+			  "ptp job id doesn't match, job_id=0x%x skb->job_tag=0x%x\n",
 			  jobid, priv->ptp_job_tag);
 		goto submit_next_req;
 	}
+
 	/* update timestamp value in skb */
-	timestamp = readq(priv->rfoe_reg_base +
-			  RFOEX_TX_PTP_TSTMP_W0(priv->rfoe_num,
-						priv->lmac_id));
-	otx2_rfoe_calc_ptp_ts(priv, &timestamp);
+	timestamp = tx_tstmp->ptp_timestamp;
+
 	memset(&ts, 0, sizeof(ts));
 	ts.hwtstamp = ns_to_ktime(timestamp);
 	skb_tstamp_tx(priv->ptp_tx_skb, &ts);
 
 submit_next_req:
+	priv->ptp_ring_cfg.ptp_ring_idx++;
+	if (priv->ptp_ring_cfg.ptp_ring_idx >= priv->ptp_ring_cfg.ptp_ring_size)
+		priv->ptp_ring_cfg.ptp_ring_idx = 0;
 	if (priv->ptp_tx_skb)
 		dev_kfree_skb_any(priv->ptp_tx_skb);
 	priv->ptp_tx_skb = NULL;
@@ -403,10 +277,10 @@ submit_next_req:
 }
 
 /* psm queue timer callback to check queue space */
-static void otx2_rfoe_tx_timer_cb(struct timer_list *t)
+static void cnf10k_rfoe_tx_timer_cb(struct timer_list *t)
 {
-	struct otx2_rfoe_ndev_priv *priv =
-			container_of(t, struct otx2_rfoe_ndev_priv, tx_timer);
+	struct cnf10k_rfoe_ndev_priv *priv =
+			container_of(t, struct cnf10k_rfoe_ndev_priv, tx_timer);
 	u16 psm_queue_id, queue_space;
 	int reschedule = 0;
 	u64 regval;
@@ -442,19 +316,19 @@ static void otx2_rfoe_tx_timer_cb(struct timer_list *t)
 		mod_timer(&priv->tx_timer, jiffies + msecs_to_jiffies(100));
 }
 
-static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
-				     struct rx_ft_cfg *ft_cfg, int mbt_buf_idx)
+static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
+				       struct cnf10k_rx_ft_cfg *ft_cfg,
+				       int mbt_buf_idx)
 {
 	struct otx2_bphy_cdev_priv *cdev_priv = priv->cdev_priv;
 	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
-	struct rfoe_ecpri_psw0_s *ecpri_psw0 = NULL;
-	struct rfoe_ecpri_psw1_s *ecpri_psw1 = NULL;
 	u64 tstamp = 0, mbt_state, jdt_iova_addr;
+	struct rfoe_psw_w2_ecpri_s *ecpri_psw_w2;
+	struct rfoe_psw_w2_roe_s *rfoe_psw_w2;
+	struct cnf10k_rfoe_ndev_priv *priv2;
+	struct cnf10k_rfoe_drv_ctx *drv_ctx;
 	int found = 0, idx, len, pkt_type;
-	struct otx2_rfoe_ndev_priv *priv2;
-	struct otx2_rfoe_drv_ctx *drv_ctx;
-	struct rfoe_psw0_s *psw0 = NULL;
-	struct rfoe_psw1_s *psw1 = NULL;
+	struct rfoe_psw_s *psw = NULL;
 	struct net_device *netdev;
 	u8 *buf_ptr, *jdt_ptr;
 	struct sk_buff *skb;
@@ -482,57 +356,46 @@ static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
 				(ft_cfg->buf_size * mbt_buf_idx);
 
 	pkt_type = ft_cfg->pkt_type;
-#ifdef ASIM
-	// ASIM issue, all rx packets will hit eCPRI flow table
-	pkt_type = PACKET_TYPE_ECPRI;
-#endif
+
+	psw = (struct rfoe_psw_s *)buf_ptr;
+	if (psw->mac_err_sts || psw->mcs_err_sts) {
+		net_warn_ratelimited("%s: psw mac_err_sts = 0x%x, mcs_err_sts=0x%x\n",
+				     priv->netdev->name,
+				     psw->mac_err_sts,
+				     psw->mcs_err_sts);
+		return;
+	}
+
 	if (pkt_type != PACKET_TYPE_ECPRI) {
-		psw0 = (struct rfoe_psw0_s *)buf_ptr;
-		if (psw0->pkt_err_sts || psw0->dma_error) {
-			net_warn_ratelimited("%s: psw0 pkt_err_sts = 0x%x, dma_err=0x%x\n",
-					     priv->netdev->name,
-					     psw0->pkt_err_sts,
-					     psw0->dma_error);
-			return;
-		}
 		/* check that the psw type is correct: */
-		if (unlikely(psw0->pswt == ECPRI_TYPE)) {
+		if (unlikely(psw->pkt_type == ECPRI)) {
 			net_warn_ratelimited("%s: pswt is eCPRI for pkt_type = %d\n",
 					     priv->netdev->name, pkt_type);
 			return;
 		}
-		lmac_id = psw0->lmac_id;
-		jdt_iova_addr = (u64)psw0->jd_ptr;
-		psw1 = (struct rfoe_psw1_s *)(buf_ptr + 16);
+		jdt_iova_addr = (u64)psw->jd_ptr;
+		rfoe_psw_w2 = (struct rfoe_psw_w2_roe_s *)psw->proto_sts_word;
+		lmac_id = rfoe_psw_w2->lmac_id;
 		if (priv->rx_hw_tstamp_en)
-			tstamp = psw1->ptp_timestamp;
+			tstamp = psw->ptp_timestamp;
 	} else {
-		ecpri_psw0 = (struct rfoe_ecpri_psw0_s *)buf_ptr;
-		if (ecpri_psw0->err_sts & 0x1F) {
-			net_warn_ratelimited("%s: ecpri_psw0 err_sts = 0x%x\n",
-					     priv->netdev->name,
-					     ecpri_psw0->err_sts);
-			return;
-		}
 		/* check that the psw type is correct: */
-		if (unlikely(ecpri_psw0->pswt != ECPRI_TYPE)) {
+		if (unlikely(psw->pkt_type != ECPRI)) {
 			net_warn_ratelimited("%s: pswt is not eCPRI for pkt_type = %d\n",
 					     priv->netdev->name, pkt_type);
 			return;
 		}
-		lmac_id = ecpri_psw0->src_id & 0x3;
-		jdt_iova_addr = (u64)ecpri_psw0->jd_ptr;
-		ecpri_psw1 = (struct rfoe_ecpri_psw1_s *)(buf_ptr + 16);
+		jdt_iova_addr = (u64)psw->jd_ptr;
+		ecpri_psw_w2 = (struct rfoe_psw_w2_ecpri_s *)
+					psw->proto_sts_word;
+		lmac_id = ecpri_psw_w2->lmac_id;
 		if (priv->rx_hw_tstamp_en)
-			tstamp = ecpri_psw1->ptp_timestamp;
+			tstamp = psw->ptp_timestamp;
 	}
 
 	netif_dbg(priv, rx_status, priv->netdev,
-		  "Rx: rfoe=%d lmac=%d mbt_buf_idx=%d psw0(w0)=0x%llx psw0(w1)=0x%llx psw1(w0)=0x%llx psw1(w1)=0x%llx jd:iova=0x%llx\n",
-		  priv->rfoe_num, lmac_id, mbt_buf_idx,
-		  *(u64 *)buf_ptr, *((u64 *)buf_ptr + 1),
-		  *((u64 *)buf_ptr + 2), *((u64 *)buf_ptr + 3),
-		  jdt_iova_addr);
+		  "Rx: rfoe=%d lmac=%d mbt_buf_idx=%d\n",
+		  priv->rfoe_num, lmac_id, mbt_buf_idx);
 
 	/* read jd ptr from psw */
 	jdt_ptr = otx2_iova_to_virt(priv->iommu_domain, jdt_iova_addr);
@@ -550,8 +413,8 @@ static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
 	buf_ptr += (ft_cfg->pkt_offset * 16);
 	len -= (ft_cfg->pkt_offset * 16);
 
-	for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
-		drv_ctx = &rfoe_drv_ctx[idx];
+	for (idx = 0; idx < CNF10K_RFOE_MAX_INTF; idx++) {
+		drv_ctx = &cnf10k_rfoe_drv_ctx[idx];
 		if (drv_ctx->valid && drv_ctx->rfoe_num == priv->rfoe_num &&
 		    drv_ctx->lmac_id == lmac_id) {
 			found = 1;
@@ -559,7 +422,7 @@ static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
 		}
 	}
 	if (found) {
-		netdev = rfoe_drv_ctx[idx].netdev;
+		netdev = cnf10k_rfoe_drv_ctx[idx].netdev;
 		priv2 = netdev_priv(netdev);
 	} else {
 		pr_err("netdev not found, something went wrong!\n");
@@ -596,10 +459,8 @@ static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
 	skb_put(skb, len);
 	skb->protocol = eth_type_trans(skb, netdev);
 
-	if (priv2->rx_hw_tstamp_en) {
-		otx2_rfoe_calc_ptp_ts(priv, &tstamp);
+	if (priv2->rx_hw_tstamp_en)
 		skb_hwtstamps(skb)->hwtstamp = ns_to_ktime(tstamp);
-	}
 
 	netif_receive_skb(skb);
 
@@ -617,12 +478,12 @@ static void otx2_rfoe_process_rx_pkt(struct otx2_rfoe_ndev_priv *priv,
 	priv2->stats.rx_bytes += skb->len;
 }
 
-static int otx2_rfoe_process_rx_flow(struct otx2_rfoe_ndev_priv *priv,
-				     int pkt_type, int budget)
+static int cnf10k_rfoe_process_rx_flow(struct cnf10k_rfoe_ndev_priv *priv,
+				       int pkt_type, int budget)
 {
 	struct otx2_bphy_cdev_priv *cdev_priv = priv->cdev_priv;
 	int count = 0, processed_pkts = 0;
-	struct rx_ft_cfg *ft_cfg;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	u64 mbt_cfg;
 	u16 nxt_buf;
 
@@ -662,7 +523,7 @@ static int otx2_rfoe_process_rx_flow(struct otx2_rfoe_ndev_priv *priv,
 		  ft_cfg->mbt_last_idx, count);
 
 	while (likely((processed_pkts < budget) && (processed_pkts < count))) {
-		otx2_rfoe_process_rx_pkt(priv, ft_cfg, ft_cfg->mbt_last_idx);
+		cnf10k_rfoe_process_rx_pkt(priv, ft_cfg, ft_cfg->mbt_last_idx);
 
 		ft_cfg->mbt_last_idx++;
 		if (ft_cfg->mbt_last_idx == ft_cfg->num_bufs)
@@ -675,28 +536,28 @@ static int otx2_rfoe_process_rx_flow(struct otx2_rfoe_ndev_priv *priv,
 }
 
 /* napi poll routine */
-static int otx2_rfoe_napi_poll(struct napi_struct *napi, int budget)
+static int cnf10k_rfoe_napi_poll(struct napi_struct *napi, int budget)
 {
+	struct cnf10k_rfoe_ndev_priv *priv;
 	struct otx2_bphy_cdev_priv *cdev_priv;
-	struct otx2_rfoe_ndev_priv *priv;
 	int workdone = 0, pkt_type;
-	struct rx_ft_cfg *ft_cfg;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	u64 intr_en, regval;
 
-	ft_cfg = container_of(napi, struct rx_ft_cfg, napi);
+	ft_cfg = container_of(napi, struct cnf10k_rx_ft_cfg, napi);
 	priv = ft_cfg->priv;
 	cdev_priv = priv->cdev_priv;
 	pkt_type = ft_cfg->pkt_type;
 
 	/* pkt processing loop */
-	workdone += otx2_rfoe_process_rx_flow(priv, pkt_type, budget);
+	workdone += cnf10k_rfoe_process_rx_flow(priv, pkt_type, budget);
 
 	if (workdone < budget) {
 		napi_complete_done(napi, workdone);
 
 		/* Re enable the Rx interrupts */
 		intr_en = PKT_TYPE_TO_INTR(pkt_type) <<
-				RFOE_RX_INTR_SHIFT(priv->rfoe_num);
+				CNF10K_RFOE_RX_INTR_SHIFT(priv->rfoe_num);
 		spin_lock(&cdev_priv->lock);
 		regval = readq(bphy_reg_base + PSM_INT_GP_ENA_W1S(1));
 		regval |= intr_en;
@@ -708,18 +569,18 @@ static int otx2_rfoe_napi_poll(struct napi_struct *napi, int budget)
 }
 
 /* Rx GPINT napi schedule api */
-void otx2_rfoe_rx_napi_schedule(int rfoe_num, u32 status)
+void cnf10k_rfoe_rx_napi_schedule(int rfoe_num, u32 status)
 {
 	enum bphy_netdev_packet_type pkt_type;
-	struct otx2_rfoe_drv_ctx *drv_ctx;
-	struct otx2_rfoe_ndev_priv *priv;
-	struct rx_ft_cfg *ft_cfg;
+	struct cnf10k_rfoe_drv_ctx *drv_ctx;
+	struct cnf10k_rfoe_ndev_priv *priv;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	int intf, bit_idx;
 	u32 intr_sts;
 	u64 regval;
 
-	for (intf = 0; intf < RFOE_MAX_INTF; intf++) {
-		drv_ctx = &rfoe_drv_ctx[intf];
+	for (intf = 0; intf < CNF10K_RFOE_MAX_INTF; intf++) {
+		drv_ctx = &cnf10k_rfoe_drv_ctx[intf];
 		/* ignore lmac, one interrupt/pkt_type/rfoe */
 		if (!(drv_ctx->valid && drv_ctx->rfoe_num == rfoe_num))
 			continue;
@@ -728,7 +589,7 @@ void otx2_rfoe_rx_napi_schedule(int rfoe_num, u32 status)
 		if (test_bit(RFOE_INTF_DOWN, &priv->state))
 			continue;
 		/* check rx pkt type */
-		intr_sts = ((status >> RFOE_RX_INTR_SHIFT(rfoe_num)) &
+		intr_sts = ((status >> CNF10K_RFOE_RX_INTR_SHIFT(rfoe_num)) &
 			    RFOE_RX_INTR_EN);
 		for (bit_idx = 0; bit_idx < PACKET_TYPE_MAX; bit_idx++) {
 			if (!(intr_sts & BIT(bit_idx)))
@@ -738,7 +599,7 @@ void otx2_rfoe_rx_napi_schedule(int rfoe_num, u32 status)
 				continue;
 			/* clear intr enable bit, re-enable in napi handler */
 			regval = PKT_TYPE_TO_INTR(pkt_type) <<
-				 RFOE_RX_INTR_SHIFT(rfoe_num);
+				 CNF10K_RFOE_RX_INTR_SHIFT(rfoe_num);
 			writeq(regval, bphy_reg_base + PSM_INT_GP_ENA_W1C(1));
 			/* schedule napi */
 			ft_cfg = &drv_ctx->ft_cfg[pkt_type];
@@ -749,10 +610,10 @@ void otx2_rfoe_rx_napi_schedule(int rfoe_num, u32 status)
 	}
 }
 
-static void otx2_rfoe_get_stats64(struct net_device *netdev,
-				  struct rtnl_link_stats64 *stats)
+static void cnf10k_rfoe_get_stats64(struct net_device *netdev,
+				    struct rtnl_link_stats64 *stats)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	struct otx2_rfoe_stats *dev_stats = &priv->stats;
 
 	stats->rx_bytes = dev_stats->rx_bytes;
@@ -772,10 +633,10 @@ static void otx2_rfoe_get_stats64(struct net_device *netdev,
 			    dev_stats->ecpri_tx_dropped;
 }
 
-static int otx2_rfoe_config_hwtstamp(struct net_device *netdev,
-				     struct ifreq *ifr)
+static int cnf10k_rfoe_config_hwtstamp(struct net_device *netdev,
+				       struct ifreq *ifr)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	struct hwtstamp_config config;
 
 	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
@@ -832,34 +693,35 @@ static int otx2_rfoe_config_hwtstamp(struct net_device *netdev,
 }
 
 /* netdev ioctl */
-static int otx2_rfoe_ioctl(struct net_device *netdev, struct ifreq *req,
-			   int cmd)
+static int cnf10k_rfoe_ioctl(struct net_device *netdev, struct ifreq *req,
+			     int cmd)
 {
 	switch (cmd) {
 	case SIOCSHWTSTAMP:
-		return otx2_rfoe_config_hwtstamp(netdev, req);
+		return cnf10k_rfoe_config_hwtstamp(netdev, req);
 	default:
 		return -EOPNOTSUPP;
 	}
 }
 
 /* netdev xmit */
-static netdev_tx_t otx2_rfoe_eth_start_xmit(struct sk_buff *skb,
-					    struct net_device *netdev)
+static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
+					      struct net_device *netdev)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
 	struct mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
 	struct mhab_job_desc_cfg *jd_cfg_ptr;
+	struct rfoe_tx_ptp_tstmp_s *tx_tstmp;
 	struct psm_cmd_addjob_s *psm_cmd_lo;
 	struct tx_job_queue_cfg *job_cfg;
-	u64 jd_cfg_ptr_iova, regval;
 	struct tx_job_entry *job_entry;
 	struct ptp_tstamp_skb *ts_skb;
 	int psm_queue_id, queue_space;
-	int pkt_type = 0;
+	u64 jd_cfg_ptr_iova, regval;
 	unsigned long flags;
 	struct ethhdr *eth;
+	int pkt_type = 0;
 
 	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) {
 		if (!priv->tx_hw_tstamp_en) {
@@ -983,6 +845,11 @@ static netdev_tx_t otx2_rfoe_eth_start_xmit(struct sk_buff *skb,
 			psm_cmd_lo = (struct psm_cmd_addjob_s *)
 						&job_entry->job_cmd_lo;
 			priv->ptp_job_tag = psm_cmd_lo->jobtag;
+
+			tx_tstmp = (struct rfoe_tx_ptp_tstmp_s *)
+				   ((u8 *)priv->ptp_ring_cfg.ptp_ring_base +
+				    (128 * priv->ptp_ring_cfg.ptp_ring_idx));
+			tx_tstmp->valid = 0;
 		} else {
 			/* check ptp queue count */
 			if (priv->ptp_skb_list.count >= max_ptp_req) {
@@ -1024,14 +891,14 @@ static netdev_tx_t otx2_rfoe_eth_start_xmit(struct sk_buff *skb,
 	/* update length and block size in jd dma cfg word */
 	jd_cfg_ptr_iova = *(u64 *)((u8 *)job_entry->jd_ptr + 8);
 	jd_cfg_ptr = otx2_iova_to_virt(priv->iommu_domain, jd_cfg_ptr_iova);
-	jd_cfg_ptr->cfg1.pkt_len = skb->len;
+	jd_cfg_ptr->cfg3.pkt_len = skb->len;
 	jd_dma_cfg_word_0 = (struct mhbw_jd_dma_cfg_word_0_s *)
 						job_entry->rd_dma_ptr;
 	jd_dma_cfg_word_0->block_size = (((skb->len + 15) >> 4) * 4);
 
 	/* update rfoe_mode and lmac id for non-ptp (shared) psm job entry */
 	if (pkt_type != PACKET_TYPE_PTP) {
-		jd_cfg_ptr->cfg.lmacid = priv->lmac_id & 0x3;
+		jd_cfg_ptr->cfg3.lmacid = priv->lmac_id & 0x3;
 		if (pkt_type == PACKET_TYPE_ECPRI)
 			jd_cfg_ptr->cfg.rfoe_mode = 1;
 		else
@@ -1081,9 +948,9 @@ exit:
 }
 
 /* netdev open */
-static int otx2_rfoe_eth_open(struct net_device *netdev)
+static int cnf10k_rfoe_eth_open(struct net_device *netdev)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	int idx;
 
 	for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
@@ -1104,9 +971,9 @@ static int otx2_rfoe_eth_open(struct net_device *netdev)
 }
 
 /* netdev close */
-static int otx2_rfoe_eth_stop(struct net_device *netdev)
+static int cnf10k_rfoe_eth_stop(struct net_device *netdev)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	struct ptp_tstamp_skb *ts_skb, *ts_skb2;
 	int idx;
 
@@ -1144,9 +1011,9 @@ static int otx2_rfoe_eth_stop(struct net_device *netdev)
 	return 0;
 }
 
-static int otx2_rfoe_init(struct net_device *netdev)
+static int cnf10k_rfoe_init(struct net_device *netdev)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
 	/* Enable VLAN TPID match */
 	writeq(0x18100, (priv->rfoe_reg_base +
@@ -1156,20 +1023,22 @@ static int otx2_rfoe_init(struct net_device *netdev)
 	return 0;
 }
 
-static int otx2_rfoe_vlan_rx_configure(struct net_device *netdev, u16 vid,
-				       bool forward)
+static int cnf10k_rfoe_vlan_rx_configure(struct net_device *netdev, u16 vid,
+					 bool forward)
 {
-	struct rfoe_rx_ind_vlanx_fwd fwd;
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 	struct otx2_bphy_cdev_priv *cdev_priv = priv->cdev_priv;
-	u64 index = (vid >> 6) & 0x3F;
-	u64 mask = (0x1ll << (vid & 0x3F));
+	struct rfoe_rx_ind_vlanx_fwd fwd;
 	unsigned long flags;
+	u64 mask, index;
 
 	if (vid >= VLAN_N_VID) {
 		netdev_err(netdev, "Invalid VLAN ID %d\n", vid);
 		return -EINVAL;
 	}
+
+	mask = (0x1ll << (vid & 0x3F));
+	index = (vid >> 6) & 0x3F;
 
 	spin_lock_irqsave(&cdev_priv->mbt_lock, flags);
 
@@ -1202,34 +1071,34 @@ out:
 	return 0;
 }
 
-static int otx2_rfoe_vlan_rx_add(struct net_device *netdev, __be16 proto,
-				 u16 vid)
+static int cnf10k_rfoe_vlan_rx_add(struct net_device *netdev, __be16 proto,
+				   u16 vid)
 {
-	return otx2_rfoe_vlan_rx_configure(netdev, vid, true);
+	return cnf10k_rfoe_vlan_rx_configure(netdev, vid, true);
 }
 
-static int otx2_rfoe_vlan_rx_kill(struct net_device *netdev, __be16 proto,
-				  u16 vid)
+static int cnf10k_rfoe_vlan_rx_kill(struct net_device *netdev, __be16 proto,
+				    u16 vid)
 {
-	return otx2_rfoe_vlan_rx_configure(netdev, vid, false);
+	return cnf10k_rfoe_vlan_rx_configure(netdev, vid, false);
 }
 
-static const struct net_device_ops otx2_rfoe_netdev_ops = {
-	.ndo_init		= otx2_rfoe_init,
-	.ndo_open		= otx2_rfoe_eth_open,
-	.ndo_stop		= otx2_rfoe_eth_stop,
-	.ndo_start_xmit		= otx2_rfoe_eth_start_xmit,
-	.ndo_do_ioctl		= otx2_rfoe_ioctl,
+static const struct net_device_ops cnf10k_rfoe_netdev_ops = {
+	.ndo_init		= cnf10k_rfoe_init,
+	.ndo_open		= cnf10k_rfoe_eth_open,
+	.ndo_stop		= cnf10k_rfoe_eth_stop,
+	.ndo_start_xmit		= cnf10k_rfoe_eth_start_xmit,
+	.ndo_do_ioctl		= cnf10k_rfoe_ioctl,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_get_stats64	= otx2_rfoe_get_stats64,
-	.ndo_vlan_rx_add_vid	= otx2_rfoe_vlan_rx_add,
-	.ndo_vlan_rx_kill_vid	= otx2_rfoe_vlan_rx_kill,
+	.ndo_get_stats64	= cnf10k_rfoe_get_stats64,
+	.ndo_vlan_rx_add_vid	= cnf10k_rfoe_vlan_rx_add,
+	.ndo_vlan_rx_kill_vid	= cnf10k_rfoe_vlan_rx_kill,
 };
 
-static void otx2_rfoe_dump_rx_ft_cfg(struct otx2_rfoe_ndev_priv *priv)
+static void cnf10k_rfoe_dump_rx_ft_cfg(struct cnf10k_rfoe_ndev_priv *priv)
 {
-	struct rx_ft_cfg *ft_cfg;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	int idx;
 
 	for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
@@ -1245,12 +1114,12 @@ static void otx2_rfoe_dump_rx_ft_cfg(struct otx2_rfoe_ndev_priv *priv)
 	}
 }
 
-static inline void otx2_rfoe_fill_rx_ft_cfg(struct otx2_rfoe_ndev_priv *priv,
-					    struct bphy_netdev_comm_if *if_cfg)
+static void cnf10k_rfoe_fill_rx_ft_cfg(struct cnf10k_rfoe_ndev_priv *priv,
+				       struct cnf10k_bphy_ndev_comm_if *if_cfg)
 {
 	struct otx2_bphy_cdev_priv *cdev_priv = priv->cdev_priv;
-	struct bphy_netdev_rbuf_info *rbuf_info;
-	struct rx_ft_cfg *ft_cfg;
+	struct cnf10k_bphy_ndev_rbuf_info *rbuf_info;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	u64 jdt_cfg0, iova;
 	int idx;
 
@@ -1288,15 +1157,15 @@ static inline void otx2_rfoe_fill_rx_ft_cfg(struct otx2_rfoe_ndev_priv *priv,
 		ft_cfg->pkt_offset = (u8)((jdt_cfg0 >> 52) & 0x7);
 		ft_cfg->priv = priv;
 		netif_napi_add(priv->netdev, &ft_cfg->napi,
-			       otx2_rfoe_napi_poll,
+			       cnf10k_rfoe_napi_poll,
 			       NAPI_POLL_WEIGHT);
 	}
 }
 
-static void otx2_rfoe_fill_tx_job_entries(struct otx2_rfoe_ndev_priv *priv,
-					  struct tx_job_queue_cfg *job_cfg,
-				struct bphy_netdev_tx_psm_cmd_info *tx_job,
-					  int num_entries)
+static void cnf10k_rfoe_fill_tx_job_entries(struct cnf10k_rfoe_ndev_priv *priv,
+					    struct tx_job_queue_cfg *job_cfg,
+				struct cnf10k_bphy_ndev_tx_psm_cmd_info *tx_job,
+					    int num_entries)
 {
 	struct tx_job_entry *job_entry;
 	u64 jd_cfg_iova, iova;
@@ -1329,43 +1198,52 @@ static void otx2_rfoe_fill_tx_job_entries(struct otx2_rfoe_ndev_priv *priv,
 	spin_lock_init(&job_cfg->lock);
 }
 
-int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
-				  struct bphy_netdev_comm_intf_cfg *cfg)
+int cnf10k_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
+				    struct cnf10k_rfoe_ndev_comm_intf_cfg *cfg)
 {
 	int i, intf_idx = 0, num_entries, lmac, idx, ret;
-	struct bphy_netdev_tx_psm_cmd_info *tx_info;
-	struct otx2_rfoe_drv_ctx *drv_ctx = NULL;
-	struct otx2_rfoe_ndev_priv *priv, *priv2;
-	struct bphy_netdev_rfoe_if *rfoe_cfg;
-	struct bphy_netdev_comm_if *if_cfg;
+	struct cnf10k_bphy_ndev_tx_psm_cmd_info *tx_info;
+	struct cnf10k_bphy_ndev_tx_ptp_ring_info *info;
+	struct cnf10k_rfoe_drv_ctx *drv_ctx = NULL;
+	struct cnf10k_rfoe_ndev_priv *priv, *priv2;
+	struct cnf10k_bphy_ndev_rfoe_if *rfoe_cfg;
+	struct cnf10k_bphy_ndev_comm_if *if_cfg;
+	struct tx_ptp_ring_cfg *ptp_ring_cfg;
 	struct tx_job_queue_cfg *tx_cfg;
-	struct ptp_bcn_off_cfg *ptp_cfg;
+	struct cnf10k_rx_ft_cfg *ft_cfg;
 	struct net_device *netdev;
-	struct rx_ft_cfg *ft_cfg;
 	u8 pkt_type_mask;
 
-	ptp_cfg = kzalloc(sizeof(*ptp_cfg), GFP_KERNEL);
-	if (!ptp_cfg)
-		return -ENOMEM;
-	timer_setup(&ptp_cfg->ptp_timer, otx2_rfoe_ptp_offset_timer, 0);
-	ptp_cfg->clk_cfg.clk_freq_ghz = PTP_CLK_FREQ_GHZ;
-	ptp_cfg->clk_cfg.clk_freq_div = PTP_CLK_FREQ_DIV;
-	spin_lock_init(&ptp_cfg->lock);
+	cdev->hw_version = cfg->hw_params.chip_ver;
+	dev_dbg(cdev->dev, "hw_version = 0x%x\n", cfg->hw_params.chip_ver);
 
-	for (i = 0; i < MAX_RFOE_INTF; i++) {
+	if (CHIP_CNF10KB(cdev->hw_version)) {
+		cdev->num_rfoe_mhab = 7;
+		cdev->num_rfoe_lmac = 2;
+		cdev->tot_rfoe_intf = 14;
+	} else if (CHIP_CNF10KA(cdev->hw_version)) {
+		cdev->num_rfoe_mhab = 2;
+		cdev->num_rfoe_lmac = 4;
+		cdev->tot_rfoe_intf = 8;
+	} else {
+		dev_err(cdev->dev, "unsupported chip version\n");
+		return -EINVAL;
+	}
+
+	for (i = 0; i < BPHY_MAX_RFOE_MHAB; i++) {
 		priv2 = NULL;
-		rfoe_cfg = &cfg[i].rfoe_if_cfg;
+		rfoe_cfg = &cfg->rfoe_if_cfg[i];
 		pkt_type_mask = rfoe_cfg->pkt_type_mask;
 		for (lmac = 0; lmac < MAX_LMAC_PER_RFOE; lmac++) {
 			if_cfg = &rfoe_cfg->if_cfg[lmac];
 			/* check if lmac is valid */
 			if (!if_cfg->lmac_info.is_valid) {
 				dev_dbg(cdev->dev,
-					"rfoe%d lmac%d invalid\n", i, lmac);
+					"rfoe%d lmac%d invalid, skipping\n",
+					i, lmac);
 				continue;
 			}
-			netdev =
-			    alloc_etherdev(sizeof(struct otx2_rfoe_ndev_priv));
+			netdev = alloc_etherdev(sizeof(*priv));
 			if (!netdev) {
 				dev_err(cdev->dev,
 					"error allocating net device\n");
@@ -1393,7 +1271,7 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			spin_lock_init(&priv->stats.lock);
 			priv->rfoe_num = if_cfg->lmac_info.rfoe_num;
 			priv->lmac_id = if_cfg->lmac_info.lane_num;
-			priv->if_type = cfg[i].if_type;
+			priv->if_type = IF_TYPE_ETHERNET;
 			memcpy(priv->mac_addr, if_cfg->lmac_info.eth_addr,
 			       ETH_ALEN);
 			if (is_valid_ether_addr(priv->mac_addr))
@@ -1411,31 +1289,39 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			priv->rfoe_reg_base = rfoe_reg_base;
 			priv->bcn_reg_base = bcn_reg_base;
 			priv->ptp_reg_base = ptp_reg_base;
-			priv->ptp_cfg = ptp_cfg;
-			++(priv->ptp_cfg->refcnt);
 
 			/* Initialise PTP TX work queue */
-			INIT_WORK(&priv->ptp_tx_work, otx2_rfoe_ptp_tx_work);
+			INIT_WORK(&priv->ptp_tx_work, cnf10k_rfoe_ptp_tx_work);
 			INIT_WORK(&priv->ptp_queue_work,
-				  otx2_rfoe_ptp_submit_work);
+				  cnf10k_rfoe_ptp_submit_work);
 
 			/* Initialise PTP skb list */
 			INIT_LIST_HEAD(&priv->ptp_skb_list.list);
 			priv->ptp_skb_list.count = 0;
-			timer_setup(&priv->tx_timer, otx2_rfoe_tx_timer_cb, 0);
+			timer_setup(&priv->tx_timer,
+				    cnf10k_rfoe_tx_timer_cb, 0);
 
 			priv->pkt_type_mask = pkt_type_mask;
-			otx2_rfoe_fill_rx_ft_cfg(priv, if_cfg);
-			otx2_rfoe_dump_rx_ft_cfg(priv);
+			cnf10k_rfoe_fill_rx_ft_cfg(priv, if_cfg);
+			cnf10k_rfoe_dump_rx_ft_cfg(priv);
 
 			/* TX PTP job configuration */
 			if (priv->pkt_type_mask & (1U << PACKET_TYPE_PTP)) {
 				tx_cfg = &priv->tx_ptp_job_cfg;
 				tx_info = &if_cfg->ptp_pkt_info[0];
 				num_entries = MAX_PTP_MSG_PER_LMAC;
-				otx2_rfoe_fill_tx_job_entries(priv, tx_cfg,
-							      tx_info,
-							      num_entries);
+				cnf10k_rfoe_fill_tx_job_entries(priv, tx_cfg,
+								tx_info,
+								num_entries);
+				/* fill ptp ring info */
+				ptp_ring_cfg = &priv->ptp_ring_cfg;
+				info = &if_cfg->ptp_ts_ring_info[0];
+				ptp_ring_cfg->ptp_ring_base =
+					otx2_iova_to_virt(priv->iommu_domain,
+							  info->ring_iova_addr);
+				ptp_ring_cfg->ptp_ring_id = info->ring_idx;
+				ptp_ring_cfg->ptp_ring_size = info->ring_size;
+				ptp_ring_cfg->ptp_ring_idx = 0;
 			}
 
 			/* TX ECPRI/OTH(PTP) job configuration */
@@ -1444,14 +1330,13 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			      (1U << PACKET_TYPE_OTHER)) ||
 			     (priv->pkt_type_mask &
 			      (1U << PACKET_TYPE_ECPRI)))) {
-				/* RFOE 2 will have 2 LMAC's */
-				num_entries = (priv->rfoe_num < 2) ?
-						MAX_OTH_MSG_PER_RFOE : 32;
+				num_entries = cdev->num_rfoe_lmac *
+						MAX_OTH_MSG_PER_LMAC;
 				tx_cfg = &priv->rfoe_common->tx_oth_job_cfg;
 				tx_info = &rfoe_cfg->oth_pkt_info[0];
-				otx2_rfoe_fill_tx_job_entries(priv, tx_cfg,
-							      tx_info,
-							      num_entries);
+				cnf10k_rfoe_fill_tx_job_entries(priv, tx_cfg,
+								tx_info,
+								num_entries);
 			} else {
 				/* share rfoe_common data */
 				priv->rfoe_common = priv2->rfoe_common;
@@ -1465,9 +1350,9 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			intf_idx = (i * 4) + lmac;
 			snprintf(netdev->name, sizeof(netdev->name),
 				 "rfoe%d", intf_idx);
-			netdev->netdev_ops = &otx2_rfoe_netdev_ops;
-			otx2_rfoe_set_ethtool_ops(netdev);
-			otx2_rfoe_ptp_init(priv);
+			netdev->netdev_ops = &cnf10k_rfoe_netdev_ops;
+			cnf10k_rfoe_set_ethtool_ops(netdev);
+			cnf10k_rfoe_ptp_init(priv);
 			netdev->watchdog_timeo = (15 * HZ);
 			netdev->mtu = 1500U;
 			netdev->min_mtu = ETH_MIN_MTU;
@@ -1490,28 +1375,24 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			priv->link_state = 0;
 
 			/* initialize global ctx */
-			drv_ctx = &rfoe_drv_ctx[intf_idx];
+			drv_ctx = &cnf10k_rfoe_drv_ctx[intf_idx];
 			drv_ctx->rfoe_num = priv->rfoe_num;
 			drv_ctx->lmac_id = priv->lmac_id;
 			drv_ctx->valid = 1;
 			drv_ctx->netdev = netdev;
 			drv_ctx->ft_cfg = &priv->rx_ft_cfg[0];
-
-			/* create debugfs entry */
-			otx2_rfoe_debugfs_create(drv_ctx);
 		}
 	}
 
 	return 0;
 
 err_exit:
-	for (i = 0; i < RFOE_MAX_INTF; i++) {
-		drv_ctx = &rfoe_drv_ctx[i];
+	for (i = 0; i < CNF10K_RFOE_MAX_INTF; i++) {
+		drv_ctx = &cnf10k_rfoe_drv_ctx[i];
 		if (drv_ctx->valid) {
-			otx2_rfoe_debugfs_remove(drv_ctx);
 			netdev = drv_ctx->netdev;
 			priv = netdev_priv(netdev);
-			otx2_rfoe_ptp_destroy(priv);
+			cnf10k_rfoe_ptp_destroy(priv);
 			unregister_netdev(netdev);
 			for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
 				if (!(priv->pkt_type_mask & (1U << idx)))
@@ -1526,124 +1407,6 @@ err_exit:
 			drv_ctx->valid = 0;
 		}
 	}
-	del_timer_sync(&ptp_cfg->ptp_timer);
-	kfree(ptp_cfg);
 
 	return ret;
-}
-
-static void otx2_rfoe_debugfs_reader(char *buffer, size_t count, void *priv)
-{
-	struct otx2_rfoe_drv_ctx *ctx;
-	struct otx2_rfoe_ndev_priv *netdev;
-	u8 ptp_tx_in_progress;
-	unsigned int queued_ptp_reqs;
-	u8 queue_stopped, state_up;
-	u16 other_tx_psm_space, ptp_tx_psm_space, queue_id;
-	u64 regval;
-	const char *formatter;
-
-	ctx = priv;
-	netdev = netdev_priv(ctx->netdev);
-	ptp_tx_in_progress = test_bit(PTP_TX_IN_PROGRESS, &netdev->state);
-	queued_ptp_reqs = netdev->ptp_skb_list.count;
-	queue_stopped = netif_queue_stopped(ctx->netdev);
-	state_up = netdev->link_state;
-	formatter = otx2_rfoe_debugfs_get_formatter();
-
-	/* other tx psm space */
-	queue_id = netdev->rfoe_common->tx_oth_job_cfg.psm_queue_id;
-	regval = readq(netdev->psm_reg_base + PSM_QUEUE_SPACE(queue_id));
-	other_tx_psm_space = regval & 0x7FFF;
-
-	/* ptp tx psm space */
-	queue_id = netdev->tx_ptp_job_cfg.psm_queue_id;
-	regval = readq(netdev->psm_reg_base + PSM_QUEUE_SPACE(queue_id));
-	ptp_tx_psm_space = regval & 0x7FFF;
-
-	snprintf(buffer, count, formatter,
-		 ptp_tx_in_progress,
-		 queued_ptp_reqs,
-		 queue_stopped,
-		 state_up,
-		 netdev->last_tx_jiffies,
-		 netdev->last_tx_dropped_jiffies,
-		 netdev->last_tx_ptp_jiffies,
-		 netdev->last_tx_ptp_dropped_jiffies,
-		 netdev->last_rx_jiffies,
-		 netdev->last_rx_dropped_jiffies,
-		 netdev->last_rx_ptp_jiffies,
-		 netdev->last_rx_ptp_dropped_jiffies,
-		 jiffies,
-		 other_tx_psm_space,
-		 ptp_tx_psm_space);
-}
-
-static const char *otx2_rfoe_debugfs_get_formatter(void)
-{
-	static const char *buffer_format = "ptp-tx-in-progress: %u\n"
-					   "queued-ptp-reqs: %u\n"
-					   "queue-stopped: %u\n"
-					   "state-up: %u\n"
-					   "last-tx-jiffies: %lu\n"
-					   "last-tx-dropped-jiffies: %lu\n"
-					   "last-tx-ptp-jiffies: %lu\n"
-					   "last-tx-ptp-dropped-jiffies: %lu\n"
-					   "last-rx-jiffies: %lu\n"
-					   "last-rx-dropped-jiffies: %lu\n"
-					   "last-rx-ptp-jiffies: %lu\n"
-					   "last-rx-ptp-dropped-jiffies: %lu\n"
-					   "current-jiffies: %lu\n"
-					   "other-tx-psm-space: %u\n"
-					   "ptp-tx-psm-space: %u\n";
-
-	return buffer_format;
-}
-
-static size_t otx2_rfoe_debugfs_get_buffer_size(void)
-{
-	static size_t buffer_size;
-
-	if (!buffer_size) {
-		const char *formatter = otx2_rfoe_debugfs_get_formatter();
-		u8 max_boolean = 1;
-		int max_ptp_req_count = max_ptp_req;
-		unsigned long max_jiffies = (unsigned long)-1;
-		u16 max_psm_space = (u16)-1;
-
-		buffer_size = snprintf(NULL, 0, formatter,
-				       max_boolean,
-				       max_ptp_req_count,
-				       max_boolean,
-				       max_boolean,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_jiffies,
-				       max_psm_space,
-				       max_psm_space);
-		++buffer_size;
-	}
-
-	return buffer_size;
-}
-
-static void otx2_rfoe_debugfs_create(struct otx2_rfoe_drv_ctx *ctx)
-{
-	size_t buffer_size = otx2_rfoe_debugfs_get_buffer_size();
-
-	ctx->debugfs = otx2_bphy_debugfs_add_file(ctx->netdev->name,
-						  buffer_size, ctx,
-						  otx2_rfoe_debugfs_reader);
-}
-
-static void otx2_rfoe_debugfs_remove(struct otx2_rfoe_drv_ctx *ctx)
-{
-	if (ctx->debugfs)
-		otx2_bphy_debugfs_remove_file(ctx->debugfs);
 }

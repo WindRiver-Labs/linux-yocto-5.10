@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 BPHY RFOE/CPRI Ethernet Driver
+/* Marvell CNF10K BPHY RFOE Netdev Driver
  *
- * Copyright (C) 2020 Marvell International Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2021 Marvell.
  */
 
-#include "otx2_rfoe.h"
-#include "otx2_bphy_hw.h"
+#include "cnf10k_rfoe.h"
+#include "cnf10k_bphy_hw.h"
 
 static const char ethtool_stat_strings[][ETH_GSTRING_LEN] = {
 	"oth_rx_packets",
@@ -34,7 +30,8 @@ static const char ethtool_stat_strings[][ETH_GSTRING_LEN] = {
 	"EthIfInUnknownVlan",
 };
 
-static void otx2_rfoe_get_strings(struct net_device *netdev, u32 sset, u8 *data)
+static void cnf10k_rfoe_get_strings(struct net_device *netdev, u32 sset,
+				    u8 *data)
 {
 	switch (sset) {
 	case ETH_SS_STATS:
@@ -44,7 +41,7 @@ static void otx2_rfoe_get_strings(struct net_device *netdev, u32 sset, u8 *data)
 	}
 }
 
-static int otx2_rfoe_get_sset_count(struct net_device *netdev, int sset)
+static int cnf10k_rfoe_get_sset_count(struct net_device *netdev, int sset)
 {
 	switch (sset) {
 	case ETH_SS_STATS:
@@ -54,7 +51,7 @@ static int otx2_rfoe_get_sset_count(struct net_device *netdev, int sset)
 	}
 }
 
-static void otx2_rfoe_update_lmac_stats(struct otx2_rfoe_ndev_priv *priv)
+static void cnf10k_rfoe_update_lmac_stats(struct cnf10k_rfoe_ndev_priv *priv)
 {
 	struct otx2_rfoe_stats *stats = &priv->stats;
 
@@ -76,33 +73,33 @@ static void otx2_rfoe_update_lmac_stats(struct otx2_rfoe_ndev_priv *priv)
 							      priv->lmac_id));
 }
 
-static void otx2_rfoe_get_ethtool_stats(struct net_device *netdev,
-					struct ethtool_stats *stats,
-					u64 *data)
+static void cnf10k_rfoe_get_ethtool_stats(struct net_device *netdev,
+					  struct ethtool_stats *stats,
+					  u64 *data)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
-	otx2_rfoe_update_lmac_stats(priv);
+	cnf10k_rfoe_update_lmac_stats(priv);
 	spin_lock(&priv->stats.lock);
 	memcpy(data, &priv->stats,
 	       ARRAY_SIZE(ethtool_stat_strings) * sizeof(u64));
 	spin_unlock(&priv->stats.lock);
 }
 
-static void otx2_rfoe_get_drvinfo(struct net_device *netdev,
-				  struct ethtool_drvinfo *p)
+static void cnf10k_rfoe_get_drvinfo(struct net_device *netdev,
+				    struct ethtool_drvinfo *p)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
-	snprintf(p->driver, sizeof(p->driver), "otx2_rfoe {rfoe%d lmac%d}",
+	snprintf(p->driver, sizeof(p->driver), "cnf10k_rfoe {rfoe%d lmac%d}",
 		 priv->rfoe_num, priv->lmac_id);
 	strlcpy(p->bus_info, "platform", sizeof(p->bus_info));
 }
 
-static int otx2_rfoe_get_ts_info(struct net_device *netdev,
-				 struct ethtool_ts_info *info)
+static int cnf10k_rfoe_get_ts_info(struct net_device *netdev,
+				   struct ethtool_ts_info *info)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
 	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
 				SOF_TIMESTAMPING_RX_SOFTWARE |
@@ -121,32 +118,32 @@ static int otx2_rfoe_get_ts_info(struct net_device *netdev,
 	return 0;
 }
 
-static u32 otx2_rfoe_get_msglevel(struct net_device *netdev)
+static u32 cnf10k_rfoe_get_msglevel(struct net_device *netdev)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
 	return priv->msg_enable;
 }
 
-static void otx2_rfoe_set_msglevel(struct net_device *netdev, u32 level)
+static void cnf10k_rfoe_set_msglevel(struct net_device *netdev, u32 level)
 {
-	struct otx2_rfoe_ndev_priv *priv = netdev_priv(netdev);
+	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
 
 	priv->msg_enable = level;
 }
 
-static const struct ethtool_ops otx2_rfoe_ethtool_ops = {
-	.get_drvinfo		= otx2_rfoe_get_drvinfo,
+static const struct ethtool_ops cnf10k_rfoe_ethtool_ops = {
+	.get_drvinfo		= cnf10k_rfoe_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
-	.get_ts_info		= otx2_rfoe_get_ts_info,
-	.get_strings		= otx2_rfoe_get_strings,
-	.get_sset_count		= otx2_rfoe_get_sset_count,
-	.get_ethtool_stats	= otx2_rfoe_get_ethtool_stats,
-	.get_msglevel		= otx2_rfoe_get_msglevel,
-	.set_msglevel		= otx2_rfoe_set_msglevel,
+	.get_ts_info		= cnf10k_rfoe_get_ts_info,
+	.get_strings		= cnf10k_rfoe_get_strings,
+	.get_sset_count		= cnf10k_rfoe_get_sset_count,
+	.get_ethtool_stats	= cnf10k_rfoe_get_ethtool_stats,
+	.get_msglevel		= cnf10k_rfoe_get_msglevel,
+	.set_msglevel		= cnf10k_rfoe_set_msglevel,
 };
 
-void otx2_rfoe_set_ethtool_ops(struct net_device *netdev)
+void cnf10k_rfoe_set_ethtool_ops(struct net_device *netdev)
 {
-	netdev->ethtool_ops = &otx2_rfoe_ethtool_ops;
+	netdev->ethtool_ops = &cnf10k_rfoe_ethtool_ops;
 }

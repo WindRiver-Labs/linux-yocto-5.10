@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Admin Function driver
+/* Marvell RVU Admin Function driver
  *
- * Copyright (C) 2018 Marvell International Ltd.
+ * Copyright (C) 2018 Marvell.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -48,7 +45,7 @@ static const struct pci_device_id rvu_id_table[] = {
 	{ 0, }  /* end of table */
 };
 
-MODULE_AUTHOR("Sunil Goutham <sgoutham@marvell.com>");
+MODULE_AUTHOR("Marvell.");
 MODULE_DESCRIPTION(DRV_STRING);
 MODULE_LICENSE("GPL v2");
 MODULE_DEVICE_TABLE(pci, rvu_id_table);
@@ -1014,16 +1011,26 @@ static int rvu_setup_hw_resources(struct rvu *rvu)
 	block->rvu = rvu;
 	sprintf(block->name, "NPA");
 	err = rvu_alloc_bitmap(&block->lf);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate NPA LF bitmap\n", __func__);
 		return err;
+	}
 
 nix:
 	err = rvu_setup_nix_hw_resource(rvu, BLKADDR_NIX0);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate NIX0 LFs bitmap\n", __func__);
 		return err;
+	}
+
 	err = rvu_setup_nix_hw_resource(rvu, BLKADDR_NIX1);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate NIX1 LFs bitmap\n", __func__);
 		return err;
+	}
 
 	/* Init SSO group's bitmap */
 	block = &hw->block[BLKADDR_SSO];
@@ -1044,8 +1051,11 @@ nix:
 	block->rvu = rvu;
 	sprintf(block->name, "SSO GROUP");
 	err = rvu_alloc_bitmap(&block->lf);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate SSO LF bitmap\n", __func__);
 		return err;
+	}
 
 ssow:
 	/* Init SSO workslot's bitmap */
@@ -1066,8 +1076,11 @@ ssow:
 	block->rvu = rvu;
 	sprintf(block->name, "SSOWS");
 	err = rvu_alloc_bitmap(&block->lf);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate SSOW LF bitmap\n", __func__);
 		return err;
+	}
 
 tim:
 	/* Init TIM LF's bitmap */
@@ -1089,16 +1102,26 @@ tim:
 	block->rvu = rvu;
 	sprintf(block->name, "TIM");
 	err = rvu_alloc_bitmap(&block->lf);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate TIM LF bitmap\n", __func__);
 		return err;
+	}
 
 cpt:
 	err = rvu_setup_cpt_hw_resource(rvu, BLKADDR_CPT0);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate CPT0 LF bitmap\n", __func__);
 		return err;
+	}
 	err = rvu_setup_cpt_hw_resource(rvu, BLKADDR_CPT1);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate CPT1 LF bitmap\n", __func__);
 		return err;
+	}
+
 	/* REE */
 	err = rvu_setup_ree_hw_resource(rvu, BLKADDR_REE0, 0);
 	if (err)
@@ -1110,12 +1133,19 @@ cpt:
 	/* Allocate memory for PFVF data */
 	rvu->pf = devm_kcalloc(rvu->dev, hw->total_pfs,
 			       sizeof(struct rvu_pfvf), GFP_KERNEL);
-	if (!rvu->pf)
+	if (!rvu->pf) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate memory for PF's rvu_pfvf struct\n", __func__);
 		return -ENOMEM;
+	}
+
 	rvu->hwvf = devm_kcalloc(rvu->dev, hw->total_vfs,
 				 sizeof(struct rvu_pfvf), GFP_KERNEL);
-	if (!rvu->hwvf)
+	if (!rvu->hwvf) {
+		dev_err(rvu->dev,
+			"%s: Failed to allocate memory for VF's rvu_pfvf struct\n", __func__);
 		return -ENOMEM;
+	}
 
 	mutex_init(&rvu->rsrc_lock);
 
@@ -1124,8 +1154,11 @@ cpt:
 		goto msix_err;
 
 	err = rvu_setup_msix_resources(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev,
+			"%s: Failed to setup MSIX resources\n", __func__);
 		return err;
+	}
 
 	for (blkid = 0; blkid < BLK_COUNT; blkid++) {
 		block = &hw->block[blkid];
@@ -1151,45 +1184,63 @@ cpt:
 		goto msix_err;
 
 	err = rvu_npc_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize npc\n", __func__);
 		goto npc_err;
+	}
 
 	err = rvu_cgx_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize cgx\n", __func__);
 		goto cgx_err;
+	}
 
 	err = rvu_sso_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize sso\n", __func__);
 		goto sso_err;
+	}
 
 	err = rvu_tim_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize tim\n", __func__);
 		goto sso_err;
+	}
 
 	err = rvu_cpt_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize cpt\n", __func__);
 		goto sso_err;
+	}
 
 	err = rvu_sdp_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize sdp\n", __func__);
 		goto sso_err;
+	}
 
 	/* Assign MACs for CGX mapped functions */
 	rvu_setup_pfvf_macaddress(rvu);
 
 	err = rvu_npa_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize npa\n", __func__);
 		goto npa_err;
+	}
 
 	rvu_get_lbk_bufsize(rvu);
 
 	err = rvu_nix_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize nix\n", __func__);
 		goto nix_err;
+	}
 
 	err = rvu_ree_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize ree\n", __func__);
 		goto nix_err;
+	}
 
 	rvu_program_channels(rvu);
 
@@ -2811,6 +2862,12 @@ static void __rvu_flr_handler(struct rvu *rvu, u16 pcifunc)
 	rvu_reset_lmt_map_tbl(rvu, pcifunc);
 	rvu_detach_rsrcs(rvu, NULL, pcifunc);
 	rvu_sso_pfvf_rst(rvu, pcifunc);
+	/* In scenarios where PF/VF drivers detach NIXLF without freeing MCAM
+	 * entries, check and free the MCAM entries explicitly to avoid leak.
+	 * Since LF is detached use LF number as -1.
+	 */
+	rvu_npc_free_mcam_entries(rvu, pcifunc, -1);
+
 	mutex_unlock(&rvu->flr_lock);
 }
 
@@ -3478,20 +3535,28 @@ static int rvu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = rvu_mbox_init(rvu, &rvu->afpf_wq_info, TYPE_AFPF,
 			    rvu->hw->total_pfs, rvu_afpf_mbox_handler,
 			    rvu_afpf_mbox_up_handler);
-	if (err)
+	if (err) {
+		dev_err(dev, "%s: Failed to initialize mbox\n", __func__);
 		goto err_hwsetup;
+	}
 
 	err = rvu_flr_init(rvu);
-	if (err)
+	if (err) {
+		dev_err(dev, "%s: Failed to initialize flr\n", __func__);
 		goto err_mbox;
+	}
 
 	err = rvu_register_interrupts(rvu);
-	if (err)
+	if (err) {
+		dev_err(dev, "%s: Failed to register interrupts\n", __func__);
 		goto err_flr;
+	}
 
 	err = rvu_register_dl(rvu);
-	if (err)
+	if (err) {
+		dev_err(dev, "%s: Failed to register devlink\n", __func__);
 		goto err_irq;
+	}
 
 	rvu_setup_rvum_blk_revid(rvu);
 
@@ -3501,13 +3566,19 @@ static int rvu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Enable AF's VFs (if any) */
 	err = rvu_enable_sriov(rvu);
-	if (err)
+	if (err) {
+		dev_err(dev, "%s: Failed to enable sriov\n", __func__);
 		goto err_policy;
+	}
 
 	/* Initialize debugfs */
 	rvu_dbg_init(rvu);
 
 	mutex_init(&rvu->rswitch.switch_lock);
+
+	if (rvu->fwdata)
+		ptp_start(rvu->ptp, rvu->fwdata->sclk, rvu->fwdata->ptp_ext_clk_rate,
+			  rvu->fwdata->ptp_ext_tstamp);
 
 	return 0;
 

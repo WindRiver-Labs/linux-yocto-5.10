@@ -17,19 +17,9 @@
 #include <linux/io.h>
 #include <linux/iommu.h>
 
-#include "otx2_bphy_hw.h"
+#include "bphy_common.h"
 #include "rfoe_bphy_netdev_comm_if.h"
-
-/* max ptp tx requests */
-extern int max_ptp_req;
-
-/* reg base address */
-extern void __iomem *bphy_reg_base;
-extern void __iomem *psm_reg_base;
-extern void __iomem *rfoe_reg_base;
-extern void __iomem *bcn_reg_base;
-extern void __iomem *ptp_reg_base;
-extern void __iomem *cpri_reg_base;
+#include "cnf10k_bphy_netdev_comm_if.h"
 
 #define DEVICE_NAME		"otx2_rfoe"
 #define DRV_NAME		"octeontx2-bphy-netdev"
@@ -52,15 +42,14 @@ extern void __iomem *cpri_reg_base;
 					     struct otx2_rfoe_link_event)
 #define OTX2_CPRI_IOCTL_LINK_EVENT	_IOW(OTX2_RFOE_IOCTL_BASE, 0x08, \
 					     struct otx2_cpri_link_event)
+#define OTX2_IOCTL_RFOE_10x_CFG		_IOW(OTX2_RFOE_IOCTL_BASE, 0x0A, \
+					     uint64_t)
+#define OTX2_IOCTL_CPRI_INTF_CFG	_IOW(OTX2_RFOE_IOCTL_BASE, 0x0B, \
+					     uint64_t)
 
 //#define ASIM		/* ASIM environment */
 
 #define OTX2_BPHY_MHAB_INST		3
-
-enum port_link_state {
-	LINK_STATE_DOWN,
-	LINK_STATE_UP,
-};
 
 /* char driver private data */
 struct otx2_bphy_cdev_priv {
@@ -73,13 +62,12 @@ struct otx2_bphy_cdev_priv {
 	struct mutex			mutex_lock;	/* mutex */
 	spinlock_t			lock;		/* irq lock */
 	spinlock_t			mbt_lock;	/* mbt ind lock */
-	u8				mhab_mode[OTX2_BPHY_MHAB_INST];
+	u8				mhab_mode[BPHY_MAX_RFOE_MHAB];
+	/* cnf10k specific information */
+	u32				hw_version;
+	u8				num_rfoe_mhab;
+	u8				num_rfoe_lmac;
+	u8				tot_rfoe_intf;
 };
-
-/* iova to kernel virtual addr */
-static inline void *otx2_iova_to_virt(struct iommu_domain *domain, u64 iova)
-{
-	return phys_to_virt(iommu_iova_to_phys(domain, iova));
-}
 
 #endif
