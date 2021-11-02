@@ -20,6 +20,18 @@
 #include "hse-mu.h"
 
 /**
+ * enum hse_fw_status - HSE firmware status
+ * @HSE_FW_SHUTDOWN: firmware not initialized or shut down due to fatal error
+ * @HSE_FW_RUNNING: firmware running and able to service any type of request
+ * @HSE_FW_STANDBY: firmware considered in stand-by state, no crypto requests
+ */
+enum hse_fw_status {
+	HSE_FW_SHUTDOWN = 0u,
+	HSE_FW_RUNNING = 1u,
+	HSE_FW_STANDBY = 2u,
+};
+
+/**
  * struct hse_drvdata - HSE driver private data
  * @srv_desc[n].ptr: service descriptor virtual address for channel n
  * @srv_desc[n].dma: service descriptor DMA address for channel n
@@ -35,17 +47,17 @@
  * @rx_cbk[n].ctx: context passed to the RX callback on channel n
  * @sync[n].done: completion for synchronous requests on channel n
  * @sync[n].reply: decoded service response location for channel n
- * @stream_lock: lock used for stream channel reservation
- * @tx_lock: lock used for service request transmission
  * @hmac_key_ring: HMAC key slots currently available
  * @aes_key_ring: AES key slots currently available
+ * @stream_lock: lock used for stream channel reservation
+ * @tx_lock: lock used for service request transmission
  * @key_ring_lock: lock used for key slot acquisition
- * @firmware_dead: used to signal firmware fatal error
- * @firmware_standby: firmware preparing for system stand-by
+ * @firmware_version: firmware version attribute structure
+ * @firmware_status: internally cached status of HSE firmware
  */
 struct hse_drvdata {
 	struct {
-		struct hse_srv_desc *ptr;
+		void __iomem *ptr;
 		dma_addr_t dma;
 		u32 id;
 	} srv_desc[HSE_NUM_CHANNELS];
@@ -64,24 +76,24 @@ struct hse_drvdata {
 		struct completion *done;
 		int *reply;
 	} sync[HSE_NUM_CHANNELS];
-	spinlock_t stream_lock; /* covers stream reservation */
-	spinlock_t tx_lock; /* covers request transmission */
 	struct list_head hmac_key_ring;
 	struct list_head aes_key_ring;
+	spinlock_t stream_lock; /* covers stream reservation */
+	spinlock_t tx_lock; /* covers request transmission */
 	spinlock_t key_ring_lock; /* covers key slot acquisition */
-	bool firmware_dead;
-	bool firmware_standby;
+	struct hse_attr_fw_version firmware_version;
+	enum hse_fw_status firmware_status;
 	u32 rng_srv_id;
 };
 
 /**
- * hse_print_fw_version - print firmware version
+ * hse_check_fw_version - retrieve firmware version
  * @dev: HSE device
  *
- * Get firmware version attribute from HSE and print it. Attribute buffer is
- * encoded into the descriptor to get around HSE memory access limitations.
+ * Attribute buffer is encoded into the descriptor to get around HSE memory
+ * access limitations and avoid DMA copy in upper range of 32-bit address space.
  */
-static void hse_print_fw_version(struct device *dev)
+static int hse_check_fw_version(struct device *dev)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	struct hse_srv_desc srv_desc;
@@ -92,7 +104,7 @@ static void hse_print_fw_version(struct device *dev)
 	/* place attribute right after descriptor */
 	fw_ver_offset = offsetof(struct hse_srv_desc, get_attr_req) +
 			sizeof(struct hse_get_attr_srv);
-	fw_ver = (void *)drv->srv_desc[HSE_CHANNEL_ADM].ptr + fw_ver_offset;
+	fw_ver = (void *)&srv_desc + fw_ver_offset;
 
 	srv_desc.srv_id = HSE_SRV_ID_GET_ATTR;
 	srv_desc.get_attr_req.attr_id = HSE_FW_VERSION_ATTR_ID;
@@ -103,16 +115,13 @@ static void hse_print_fw_version(struct device *dev)
 	err = hse_srv_req_sync(dev, HSE_CHANNEL_ADM, &srv_desc);
 	if (unlikely(err)) {
 		dev_dbg(dev, "%s: request failed: %d\n", __func__, err);
-		return;
+		return err;
 	}
 
-	dev_info(dev, "firmware type %d, version %d.%d.%d\n", fw_ver->fw_type,
-		 fw_ver->major, fw_ver->minor, fw_ver->patch);
+	memcpy_fromio(&drv->firmware_version, drv->srv_desc[HSE_CHANNEL_ADM].ptr
+		      + fw_ver_offset, sizeof(*fw_ver));
 
-	drv->rng_srv_id = HSE_SRV_ID_GET_RANDOM_NUM;
-	if (fw_ver->major == 0u && fw_ver->minor == 9u &&
-	    (fw_ver->patch == 0u || fw_ver->patch == 1u))
-		drv->rng_srv_id |= 0x00A50000ul;
+	return 0;
 }
 
 u32 _get_rng_srv_id(struct device *dev)
@@ -243,38 +252,35 @@ void hse_key_slot_release(struct device *dev, struct hse_key *slot)
 }
 
 /**
- * hse_manage_channels - manage channels and descriptor space
+ * hse_config_channels - configure channels and manage descriptor space
  * @dev: HSE device
- * @desc_base_ptr: descriptor base virtual address
- * @desc_base_dma: descriptor base DMA address
  *
  * HSE firmware restricts channel zero to administrative services, all the rest
  * are usable for crypto operations. Driver reserves the last HSE_STREAM_COUNT
  * channels for streaming mode use and marks the remaining as shared channels.
  */
-static inline void hse_manage_channels(struct device *dev, void *desc_base_ptr,
-				       u64 desc_base_dma)
+static inline void hse_config_channels(struct device *dev)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
+	unsigned int offset;
 	u8 channel;
 
-	if (unlikely(!dev || !desc_base_ptr || !desc_base_dma))
+	if (unlikely(!dev))
 		return;
 
-	/* set channel type */
 	drv->type[0] = HSE_CH_TYPE_ADMIN;
-	for (channel = 1; channel < HSE_NUM_CHANNELS; channel++)
+	drv->srv_desc[0].ptr = hse_mu_desc_base_ptr(drv->mu);
+	drv->srv_desc[0].dma = hse_mu_desc_base_dma(drv->mu);
+
+	for (channel = 1; channel < HSE_NUM_CHANNELS; channel++) {
 		if (channel >= HSE_NUM_CHANNELS - HSE_STREAM_COUNT)
 			drv->type[channel] = HSE_CH_TYPE_STREAM;
 		else
 			drv->type[channel] = HSE_CH_TYPE_SHARED;
 
-	/* manage descriptor space */
-	for (channel = 0; channel < HSE_NUM_CHANNELS; channel++) {
-		drv->srv_desc[channel].ptr = desc_base_ptr +
-					     channel * HSE_SRV_DESC_MAX_SIZE;
-		drv->srv_desc[channel].dma = desc_base_dma +
-					     channel * HSE_SRV_DESC_MAX_SIZE;
+		offset = channel * HSE_SRV_DESC_MAX_SIZE;
+		drv->srv_desc[channel].ptr = drv->srv_desc[0].ptr + offset;
+		drv->srv_desc[channel].dma = drv->srv_desc[0].dma + offset;
 	}
 }
 
@@ -294,7 +300,7 @@ static inline void hse_sync_srv_desc(struct device *dev, u8 channel,
 	if (unlikely(!dev || channel >= HSE_NUM_CHANNELS || !srv_desc))
 		return;
 
-	memcpy(drv->srv_desc[channel].ptr, srv_desc, sizeof(*srv_desc));
+	memcpy_toio(drv->srv_desc[channel].ptr, srv_desc, sizeof(*srv_desc));
 	drv->srv_desc[channel].id = srv_desc->srv_id;
 }
 
@@ -489,8 +495,8 @@ int hse_channel_release(struct device *dev, u8 channel)
  * must be set to HSE_CHANNEL_ANY unless obtained via hse_channel_acquire().
  *
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
- *         index out of range, -ENOTRECOVERABLE for firmware stopped due to
- *         internal fatal error, -EBUSY for channel busy or none available
+ *         index out of range, -EBUSY for channel busy, no channel available or
+ *         firmware on stand-by, -ENOTRECOVERABLE for firmware in shutdown state
  */
 int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 		      void *ctx, void (*rx_cbk)(int err, void *ctx))
@@ -504,11 +510,16 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
 
-	if (unlikely(drv->firmware_dead))
+	switch (drv->firmware_status) {
+	case HSE_FW_STANDBY:
+		if (unlikely(channel != HSE_CHANNEL_ADM))
+			return -EBUSY;
+		break;
+	case HSE_FW_SHUTDOWN:
 		return -ENOTRECOVERABLE;
-
-	if (unlikely(drv->firmware_standby))
-		return -EBUSY;
+	default:
+		break;
+	}
 
 	spin_lock(&drv->tx_lock);
 
@@ -550,8 +561,8 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
  * shall be set to HSE_CHANNEL_ANY unless obtained via hse_channel_acquire().
  *
  * Return: 0 on success, -EINVAL for invalid parameter, -ECHRNG for channel
- *         index out of range, -ENOTRECOVERABLE for firmware stopped due to
- *         internal fatal error, -EBUSY for channel busy or none available
+ *         index out of range, -EBUSY for channel busy, no channel available or
+ *         firmware on stand-by, -ENOTRECOVERABLE for firmware in shutdown state
  */
 int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 {
@@ -565,11 +576,16 @@ int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
 	if (unlikely(channel != HSE_CHANNEL_ANY && channel >= HSE_NUM_CHANNELS))
 		return -ECHRNG;
 
-	if (unlikely(drv->firmware_dead))
+	switch (drv->firmware_status) {
+	case HSE_FW_STANDBY:
+		if (unlikely(channel != HSE_CHANNEL_ADM))
+			return -EBUSY;
+		break;
+	case HSE_FW_SHUTDOWN:
 		return -ENOTRECOVERABLE;
-
-	if (unlikely(drv->firmware_standby))
-		return -EBUSY;
+	default:
+		break;
+	}
 
 	spin_lock(&drv->tx_lock);
 
@@ -717,7 +733,7 @@ static void hse_srv_req_cancel_all(struct device *dev)
 }
 
 /**
- * hse_event_dispatcher - deferred handler for HSE_INT_SYS_EVENT type interrupts
+ * hse_evt_dispatcher - deferred handler for HSE_INT_SYS_EVENT type interrupts
  * @irq: interrupt line
  * @dev: HSE device
  *
@@ -726,7 +742,7 @@ static void hse_srv_req_cancel_all(struct device *dev)
  * and communication with HSE terminated. Therefore, all service requests
  * currently in progress are canceled and any subsequent requests are prevented.
  */
-static irqreturn_t hse_event_dispatcher(int irq, void *dev)
+static irqreturn_t hse_evt_dispatcher(int irq, void *dev)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	u32 event = hse_mu_check_event(drv->mu);
@@ -739,7 +755,7 @@ static irqreturn_t hse_event_dispatcher(int irq, void *dev)
 	}
 
 	/* stop any subsequent requests */
-	drv->firmware_dead = true;
+	drv->firmware_status = HSE_FW_SHUTDOWN;
 
 	/* disable RX and event notifications */
 	hse_mu_irq_disable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
@@ -770,8 +786,6 @@ static int hse_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct hse_drvdata *drv;
-	void *desc_base_ptr;
-	u64 desc_base_dma;
 	u16 status;
 	int err;
 
@@ -783,8 +797,7 @@ static int hse_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, drv);
 
 	/* MU interface setup */
-	drv->mu = hse_mu_init(dev, &desc_base_ptr, &desc_base_dma,
-			      hse_rx_dispatcher, hse_event_dispatcher);
+	drv->mu = hse_mu_init(dev, hse_rx_dispatcher, hse_evt_dispatcher);
 	if (IS_ERR(drv->mu)) {
 		dev_dbg(dev, "failed to initialize MU communication\n");
 		return PTR_ERR(drv->mu);
@@ -796,11 +809,9 @@ static int hse_probe(struct platform_device *pdev)
 		dev_err(dev, "firmware not found\n");
 		return -ENODEV;
 	}
-	drv->firmware_dead = false;
-	drv->firmware_standby = false;
 
-	/* manage channels and descriptor space */
-	hse_manage_channels(dev, desc_base_ptr, desc_base_dma);
+	/* configure channels */
+	hse_config_channels(dev);
 
 	/* initialize locks */
 	spin_lock_init(&drv->stream_lock);
@@ -812,8 +823,24 @@ static int hse_probe(struct platform_device *pdev)
 	hse_mu_irq_enable(drv->mu, HSE_INT_SYS_EVENT, HSE_EVT_MASK_WARN);
 	hse_mu_irq_enable(drv->mu, HSE_INT_SYS_EVENT, HSE_EVT_MASK_ERR);
 
+	/* enable service requests */
+	drv->firmware_status = HSE_FW_RUNNING;
+
 	/* check firmware version */
-	hse_print_fw_version(dev);
+	err = hse_check_fw_version(dev);
+	if (unlikely(err))
+		goto err_probe_failed;
+
+	dev_info(dev, "firmware type %d, version %d.%d.%d\n",
+		 drv->firmware_version.fw_type, drv->firmware_version.major,
+		 drv->firmware_version.minor, drv->firmware_version.patch);
+
+	/* backwards compatibility with older firmware */
+	drv->rng_srv_id = HSE_SRV_ID_GET_RANDOM_NUM;
+	if (drv->firmware_version.major == 0u &&
+	    drv->firmware_version.minor == 9u &&
+	    drv->firmware_version.patch < 2u)
+		drv->rng_srv_id |= 0x00A50000ul;
 
 	/* check HSE global status */
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG) &&
@@ -897,7 +924,7 @@ static int hse_pm_suspend(struct device *dev)
 	int err;
 
 	/* stop subsequent requests */
-	drv->firmware_standby = true;
+	drv->firmware_status = HSE_FW_STANDBY;
 
 	/* disable RX notifications, except for HSE_CHANNEL_ADM */
 	hse_mu_irq_disable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
@@ -907,36 +934,58 @@ static int hse_pm_suspend(struct device *dev)
 	srv_desc.srv_id = HSE_SRV_ID_PREPARE_FOR_STANDBY;
 	err = hse_srv_req_sync(dev, HSE_CHANNEL_ADM, &srv_desc);
 
-	/* cancel all requests */
+	/* cancel other requests */
 	hse_srv_req_cancel_all(dev);
 
 	if (unlikely(err && err != -EPERM)) {
 		dev_err(dev, "%s: request failed: %d\n", __func__, err);
-		return err;
+		goto err_enable_irq;
 	}
 
 	dev_info(dev, "firmware prepared for stand-by\n");
 
 	return 0;
+err_enable_irq:
+	hse_mu_irq_enable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
+	drv->firmware_status = HSE_FW_RUNNING;
+	return err;
 }
 
 static int hse_pm_resume(struct device *dev)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	u16 status;
+	int err;
 
-	/* check firmware status */
-	status = hse_mu_check_status(drv->mu);
-	if (!likely(status & HSE_STATUS_INIT_OK)) {
-		dev_err(dev, "firmware not running\n");
-		return -ENODEV;
-	}
+	/* signal firmware not to wait for peripheral configuration */
+	hse_mu_trigger_event(drv->mu, HSE_HOST_PERIPH_CONFIG_DONE);
 
 	/* enable RX and event notifications */
 	hse_mu_irq_enable(drv->mu, HSE_INT_RESPONSE, HSE_CH_MASK_ALL);
 	hse_mu_irq_enable(drv->mu, HSE_INT_SYS_EVENT, HSE_EVT_MASK_WARN);
 	hse_mu_irq_enable(drv->mu, HSE_INT_SYS_EVENT, HSE_EVT_MASK_ERR);
 
+	/* check firmware status */
+	status = hse_mu_check_status(drv->mu);
+	if (!(status & HSE_STATUS_INIT_OK)) {
+		/* wait for firmware init */
+		err = hse_check_fw_version(dev);
+		if (unlikely(err)) {
+			dev_err(dev, "%s: request failed: %d\n", __func__, err);
+			return err;
+		}
+		status = hse_mu_check_status(drv->mu);
+	}
+
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG) &&
+	    !likely(status & HSE_STATUS_RNG_INIT_OK))
+		dev_err(dev, "RNG not initialized\n");
+	if (!likely(status & HSE_STATUS_INSTALL_OK))
+		dev_err(dev, "key catalogs not formatted\n");
+	if (unlikely(status & HSE_STATUS_PUBLISH_SYS_IMAGE))
+		dev_warn(dev, "volatile configuration, publish SYS_IMAGE\n");
+
+	drv->firmware_status = HSE_FW_RUNNING;
 	dev_info(dev, "device resumed, status 0x%04X\n", status);
 
 	return 0;

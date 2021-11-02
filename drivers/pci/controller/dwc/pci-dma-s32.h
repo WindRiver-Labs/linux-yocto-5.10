@@ -4,17 +4,16 @@
  * PCIe host controller driver, customized
  * for the NXP S32V PCIE driver
  *
- * Copyright 2017-2020 NXP
+ * Copyright 2017-2021 NXP
  */
 
 #ifndef PCIE_DMA_S32_H
 #define PCIE_DMA_S32_H
 
-#ifdef CONFIG_PCI_DW_DMA
 #include "pcie-designware.h"
-#endif
+#include "pci-ioctl-s32.h"
 
-#define PCIE_DMA_BASE	0x70000
+#define PCIE_DMA_BASE	0x970
 
 /* Synopsys-specific PCIe configuration registers */
 #define PCIE_DMA_CTRL				(PCIE_DMA_BASE + 0x008)
@@ -62,15 +61,9 @@
 #define PCIE_DMA_LLP_LOW			(PCIE_DMA_BASE + 0x11C)
 #define PCIE_DMA_LLP_HIGH			(PCIE_DMA_BASE + 0x120)
 
-#define DMA_FLAG_LIE         BIT(0)
-#define DMA_FLAG_RIE         BIT(1)
-#define DMA_FLAG_LLP         BIT(2)
-#define DMA_FLAG_WRITE_ELEM			BIT(3)
-#define DMA_FLAG_READ_ELEM			BIT(4)
-#define DMA_FLAG_EN_DONE_INT		BIT(5)
-#define DMA_FLAG_EN_ABORT_INT		BIT(6)
-#define DMA_FLAG_EN_REMOTE_DONE_INT			BIT(7)
-#define DMA_FLAG_EN_REMOTE_ABORT_INT		BIT(8)
+#define NUM_DMA_RD_CHAN_MASK	0xF0000
+#define NUM_DMA_RD_CHAN_SHIFT	16
+#define NUM_DMA_WR_CHAN_MASK	0xF
 
 enum DMA_CH_FLAGS {
 	DMA_CH_STOPPED = 0,
@@ -92,14 +85,7 @@ enum DMA_ERROR {
 	DMA_ERR_CPL_TIMEOUT,
 	DMA_ERR_DATA_POISIONING
 };
-/* Linked list mode struct */
-struct dma_ll_info {
-	u32 direction;
-	u32 ch_num;
-	u32 nr_elem;
-	u32 phy_list_addr;
-	u32 next_phy_list_addr;
-};
+
 /* Channel info struct */
 struct dma_ch_info {
 	u32 direction;
@@ -112,21 +98,6 @@ struct dma_ch_info {
 	u32 *virt_addr;
 	u8 current_elem_idx;
 	u8 current_list_size;
-};
-/* Single block DMA transfer struct */
-struct dma_data_elem {
-	u64 sar;
-	u64 dar;
-	u64 imwr;
-	u32 size;
-	u32 flags;
-	u32 ch_num;
-};
-/* Type of array of structures for passing linked list  */
-struct dma_list {
-	u64 sar;
-	u64 dar;
-	u32 size;
 };
 
 struct dma_info {
@@ -167,8 +138,5 @@ irqreturn_t dw_handle_dma_irq_write(struct dw_pcie *pci, struct dma_info *di,
 					u32 val_write);
 irqreturn_t dw_handle_dma_irq_read(struct dw_pcie *pci, struct dma_info *di,
 					u32 val_read);
-irqreturn_t s32gen1_pcie_dma_handler(int irq, void *arg);
-
-#endif /* CONFIG_PCI_DW_DMA */
 
 #endif  /* PCIE_DMA_S32_H */

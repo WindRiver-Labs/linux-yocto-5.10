@@ -19,6 +19,11 @@
 #define BUILD_BIT_VALUE(field, x) (((x) & (1)) << field##_BIT)
 #define BUILD_MASK_VALUE(field, x) (((x) & (field##_MASK)) << field##_LSB)
 
+#ifdef CONFIG_PCI_DW_DMA
+#include <linux/dma-mapping.h>
+#include "pci-dma-s32.h"
+#endif
+
 /* PCIe MSI capabilities register */
 #define PCI_MSI_CAP		0x50
 /* MSI Enable bit */
@@ -49,6 +54,13 @@
 #define LTSSM_EN_MASK			0x1
 
 #define LTSSM_STATE_L0			0x11 /* L0 state */
+
+#define LINK_INT_CTRL_STS		0x40
+#define LINK_REQ_RST_NOT_INT_EN	BIT(1)
+#define LINK_REQ_RST_NOT_CLR	BIT(2)
+
+#define PE0_INT_STS				0xE8
+#define HP_INT_STS				BIT(6)
 
 #define to_s32gen1_from_dw_pcie(x) \
 	container_of(x, struct s32gen1_pcie, pcie)
