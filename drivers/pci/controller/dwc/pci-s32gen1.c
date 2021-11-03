@@ -872,11 +872,12 @@ out_unlock_rescan:
 static irqreturn_t s32gen1_pcie_hot_plug_irq(int irq, void *arg)
 {
 	struct s32gen1_pcie *s32_pci = arg;
+	struct dw_pcie *pcie = &s32_pci->pcie;
 
 	BSET32(s32_pci, ctrl, PE0_INT_STS, HP_INT_STS);
 
 	/* if EP is not connected, we exit */
-	if (phy_validate(s32_pci->phy0, PHY_MODE_PCIE, 0, NULL))
+	if (!s32gen1_pcie_link_is_up(pcie))
 		return IRQ_HANDLED;
 
 	return IRQ_WAKE_THREAD;
