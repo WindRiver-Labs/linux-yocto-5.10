@@ -37,9 +37,9 @@
 
 &qspi {
 	flash@0 {
-		partition@800000 { /* There are mt25qu512a x2 at rev1.0 board */
-			label = "qspi-rootfs";
-			reg = <0x800000 0x7800000>;
+		partition2000000 { /* There are mt25qu512a x2 at rev1.0 board */
+			label = "qspi-test";
+			reg = <0x2000000 0x6000000>;
 		};
 	};
 };
