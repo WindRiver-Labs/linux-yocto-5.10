@@ -34,7 +34,10 @@
  */
 #define CORESIGHT_CLAIM_SELF_HOSTED	BIT(1)
 
-#define TIMEOUT_US		100
+/* Timeout is in ms to accommodate longer time taken
+ * by ETR hardware on OcteonTX2 implementation.
+ */
+#define TIMEOUT_US		5000
 #define BMVAL(val, lsb, msb)	((val & GENMASK(msb, lsb)) >> lsb)
 
 #define ETM_MODE_EXCL_KERN	BIT(30)
@@ -81,6 +84,7 @@ enum cs_mode {
 	CS_MODE_DISABLED,
 	CS_MODE_SYSFS,
 	CS_MODE_PERF,
+	CS_MODE_READ_PREVBOOT,
 };
 
 /**
@@ -231,5 +235,8 @@ struct coresight_device *
 coresight_find_csdev_by_fwnode(struct fwnode_handle *r_fwnode);
 void coresight_set_assoc_ectdev_mutex(struct coresight_device *csdev,
 				      struct coresight_device *ect_csdev);
+
+void coresight_set_percpu_sink(int cpu, struct coresight_device *csdev);
+struct coresight_device *coresight_get_percpu_sink(int cpu);
 
 #endif
