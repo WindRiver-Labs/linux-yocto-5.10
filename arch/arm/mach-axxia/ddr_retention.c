@@ -205,7 +205,7 @@ static inline void flush_tlb_ID(void)
 static void exercise_stack_ptr(volatile char *recursions)
 {
 	volatile char *p;
-	char stack_var[1024];
+	char stack_var[512];
 	int i;
 
 	p = stack_var;
@@ -236,7 +236,7 @@ initiate_retention_reset(void)
      */
 	volatile long tmp;
 	long *ptmp;
-	char recursions = 4;
+	char recursions = 8;
 
 	if (ddr_retention_enabled == 0) {
 		pr_info("DDR Retention Reset is Not Enabled\n");
