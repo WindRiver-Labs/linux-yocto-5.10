@@ -375,6 +375,7 @@
 #define XHDMIPHY_CLKDET_CTRL_RX_TMR_CLR_MASK		BIT(2)
 #define XHDMIPHY_CLKDET_CTRL_RX_FREQ_RST_MASK		BIT(4)
 #define XHDMIPHY_CLKDET_CTRL_FREQ_LOCK_THRESH_SHIFT	5
+#define XHDMIPHY_CLKDET_CTRL_TX_FREQ_RST_MASK		0x8
 /* 0x300: dru control */
 #define XHDMIPHY_DRU_CTRL_RST_MASK(ch)			(0x01 << (8 * ((ch) - 1)))
 #define XHDMIPHY_DRU_CTRL_EN_MASK(ch)			(0x02 << (8 * ((ch) - 1)))
@@ -431,11 +432,11 @@
 #define XDRP_GTHE4_CHN_REG_007C_TXOUT_DIV_MASK			0x700
 #define XDRP_GTHE4_CHN_REG_007C_FLD_TX_RXDETECT_REF_MASK	0x7
 #define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_MASK		0xff
-#define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_SHIFT		0x8
+#define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_SHIFT		8
 #define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_45_MASK		0x1
-#define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_45_SHIFT		0x7
+#define XDRP_GTHE4_CHN_REG_0028_FLD_CPLL_FBDIV_45_SHIFT		7
 #define XDRP_GTHE4_CHN_REG_002A_FLD_A_TXDIFFCTRL_MASK		0x1f
-#define XDRP_GTHE4_CHN_REG_002A_FLD_A_TXDIFFCTRL_SHIFT		0x11
+#define XDRP_GTHE4_CHN_REG_002A_FLD_A_TXDIFFCTRL_SHIFT		11
 #define XDRP_GTHE4_CHN_REG_0028_CPLL_FBDIV_MASK			0xff80
 #define XDRP_GTHE4_CHN_REG_002A_CPLL_REFCLK_DIV_MASK		0xf800
 #define XDRP_GTHE4_CHN_REG_003E_DRP_VAL1			57442
@@ -477,8 +478,8 @@
 #define XDRP_GTHE4_CMN_REG_0014_FLD_QPLL0_INIT_CFG1_MASK	0xff
 #define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_MASK		0xf80
 #define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_MASK1		0x1f
-#define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_SHIFT		0x6
-#define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_SHIFT1		0x7
+#define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_SHIFT		6
+#define XDRP_GTHE4_CMN_REG_0018_QPLLX_REFCLK_DIV_SHIFT1		7
 #define XDRP_GTHE4_CMN_REG_000D_PPFX_CFG_MASK			0x0fc0
 #define XDRP_GTHE4_CMN_REG_0019_QPLLX_LPF_MASK			0x0003
 #define XDRP_GTHE4_CMN_REG_0030_QPLLX_CFG4_MASK			0x00e7
@@ -802,6 +803,11 @@ enum prbs_pat {
 	XHDMIPHY_PRBSSEL_SQUARE_16UI = 0xA,	/* square wave with 16 UI */
 };
 
+enum xhdmiphy_mode {
+	tmds_mode = 0,
+	frl_mode = 1,
+};
+
 struct pll_param {
 	u8 m_refclk_div;
 	union {
@@ -938,6 +944,11 @@ struct hdmi21_cfg {
 	u8 is_en;
 };
 
+struct clk_config {
+	int (*sel_mux)(u8 direction, u8 clksrc);
+	int (*set_linerate)(u8 direction, u8 mode, u64 lrate);
+};
+
 struct xhdmiphy_conf {
 	u8 tx_channels;
 	u8 rx_channels;
@@ -971,6 +982,7 @@ struct xhdmiphy_dev {
 	int irq;
 	struct mutex hdmiphy_mutex;	/* protecting phy operations */
 	struct xhdmiphy_lane *lanes[4];
+	struct clk_config *data;
 	struct clk *axi_lite_clk;
 	struct clk *dru_clk;
 	struct clk *tmds_clk;
@@ -979,6 +991,7 @@ struct xhdmiphy_dev {
 	struct hdmi21_cfg tx_hdmi21_cfg;
 	struct hdmi21_cfg rx_hdmi21_cfg;
 	struct quad quad;
+	struct gpio_desc *rxch4_gpio;
 	u32 rx_refclk_hz;
 	u32 tx_refclk_hz;
 	u8 bpc;
@@ -1054,6 +1067,8 @@ void xhdmiphy_mmcm_start(struct xhdmiphy_dev *inst, enum dir dir);
 void xhdmiphy_mmcm_param(struct xhdmiphy_dev *inst, enum dir dir);
 void xhdmiphy_ibufds_en(struct xhdmiphy_dev *inst, enum dir dir, u8 en);
 void xhdmiphy_clkout1_obuftds_en(struct xhdmiphy_dev *inst, enum dir dir, u8 en);
+void xhdmiphy_rst_gt_txrx(struct xhdmiphy_dev *inst, enum chid chid,
+			  enum dir dir, u8 hold);
 u32 xhdmiphy_init_phy(struct xhdmiphy_dev *inst);
 u32 xhdmiphy_set_tx_param(struct xhdmiphy_dev *inst, enum chid chid,
 			  enum ppc ppc, enum color_depth bpc,
@@ -1063,7 +1078,7 @@ u32 xhdmiphy_cal_mmcm_param(struct xhdmiphy_dev *inst, enum chid chid,
 u32 xhdmiphy_get_dru_refclk(struct xhdmiphy_dev *inst);
 void xhdmiphy_hdmi20_conf(struct xhdmiphy_dev *inst, enum dir dir);
 u32 xhdmiphy_hdmi21_conf(struct xhdmiphy_dev *inst, enum dir dir, u64 linerate, u8 nchannels);
-
+void xhdmiphy_clkdet_freq_reset(struct xhdmiphy_dev *inst, enum dir dir);
 u32 xhdmiphy_read(struct xhdmiphy_dev *inst, u32 addr);
 void xhdmiphy_write(struct xhdmiphy_dev *inst, u32 addr, u32 val);
 
