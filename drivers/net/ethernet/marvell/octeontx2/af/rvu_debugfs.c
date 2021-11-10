@@ -385,9 +385,8 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 	int index, off = 0, flag = 0, len = 0, i = 0;
 	struct rvu *rvu = filp->private_data;
 	int bytes_not_copied = 0;
-	int lf, pf, vf, pcifunc;
 	struct rvu_block block;
-	int lf_str_size = 12;
+	int pf, vf, pcifunc;
 	int buf_size = 2048;
 	int lf_str_size;
 	char *lfs;
@@ -447,8 +446,6 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 			}
 
 			for (index = 0; index < BLK_COUNT; index++) {
-				int lfs_off;
-
 				block = rvu->hw->block[index];
 				if (!strlen(block.name))
 					continue;
@@ -457,21 +454,7 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 				get_lf_str_list(block, pcifunc, lfs);
 				if (strlen(lfs))
 					flag = 1;
-					lfs_off = scnprintf(&lfs[len],
-							    lf_str_size - len,
-							    "%d,", lf);
-					if (lfs_off <= 0) {
-						len = len > 1 ? len : 1;
-						lfs[len - 1] = '!';
-						len++;
-						break;
-					}
-					len += lfs_off;
-				}
 
-				if (flag && len)
-					len--;
-				lfs[len] = '\0';
 				off += scnprintf(&buf[off], buf_size - 1 - off,
 						 "%-*s", lf_str_size, lfs);
 			}
