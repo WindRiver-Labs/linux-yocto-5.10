@@ -46,12 +46,15 @@ static void hse_rng_done(int err, void *_ctx)
 {
 	struct hse_rng_ctx *ctx = (struct hse_rng_ctx *)_ctx;
 
-	if (unlikely(err))
-		dev_dbg(ctx->dev, "%s: request failed: %d\n", __func__, err);
-	else
-		ctx->cache_idx += ctx->srv_desc.rng_req.random_num_len;
+	if (unlikely(err)) {
+		dev_err(ctx->dev, "%s: request failed: %d\n", __func__, err);
+		return;
+	}
 
+	mutex_lock(&ctx->req_lock);
+	ctx->cache_idx += ctx->srv_desc.rng_req.random_num_len;
 	mutex_unlock(&ctx->req_lock);
+
 }
 
 /**
@@ -78,9 +81,10 @@ static void hse_rng_refill_cache(struct hwrng *rng)
 	err = hse_srv_req_async(ctx->dev, HSE_CHANNEL_ANY, &ctx->srv_desc, ctx,
 				hse_rng_done);
 	if (unlikely(err)) {
-		mutex_unlock(&ctx->req_lock);
 		dev_dbg(ctx->dev, "%s: request failed: %d\n", __func__, err);
 	}
+
+	mutex_unlock(&ctx->req_lock);
 }
 
 /**
