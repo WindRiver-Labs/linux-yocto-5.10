@@ -1068,6 +1068,9 @@ static void npc_enadis_default_entries(struct rvu *rvu, u16 pcifunc,
 
 void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
+	if (nixlf < 0)
+		return;
+
 	npc_enadis_default_entries(rvu, pcifunc, nixlf, false);
 
 	/* Delete multicast and promisc MCAM entries */
@@ -1079,6 +1082,9 @@ void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 
 void rvu_npc_enable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
+	if (nixlf < 0)
+		return;
+
 	/* Enables only broadcast match entry. Promisc/Allmulti are enabled
 	 * in set_rx_mode mbox handler.
 	 */
@@ -2528,22 +2534,32 @@ int rvu_mbox_handler_npc_mcam_alloc_entry(struct rvu *rvu,
 	rsp->free_count = 0;
 
 	/* Check if ref_entry is within range */
-	if (req->priority && req->ref_entry >= mcam->bmap_entries)
+	if (req->priority && req->ref_entry >= mcam->bmap_entries) {
+		dev_err(rvu->dev, "%s: reference entry %d is out of range\n",
+			__func__, req->ref_entry);
 		return NPC_MCAM_INVALID_REQ;
+	}
 
 	/* ref_entry can't be '0' if requested priority is high.
 	 * Can't be last entry if requested priority is low.
 	 */
 	if ((!req->ref_entry && req->priority == NPC_MCAM_HIGHER_PRIO) ||
 	    ((req->ref_entry == (mcam->bmap_entries - 1)) &&
-	     req->priority == NPC_MCAM_LOWER_PRIO))
+	     req->priority == NPC_MCAM_LOWER_PRIO)) {
+		dev_err(rvu->dev, "%s: Invalid reference entry %d priority %d\n",
+			__func__, req->ref_entry, req->priority);
 		return NPC_MCAM_INVALID_REQ;
+	}
 
 	/* Since list of allocated indices needs to be sent to requester,
 	 * max number of non-contiguous entries per mbox msg is limited.
 	 */
-	if (!req->contig && req->count > NPC_MAX_NONCONTIG_ENTRIES)
+	if (!req->contig && req->count > NPC_MAX_NONCONTIG_ENTRIES) {
+		dev_err(rvu->dev,
+			"%s: %d Non-contiguous MCAM entries requested is morethan max (%d) allowed\n",
+			__func__, req->count, NPC_MAX_NONCONTIG_ENTRIES);
 		return NPC_MCAM_INVALID_REQ;
+	}
 
 	/* Alloc request from PFFUNC with no NIXLF attached should be denied */
 	if (!is_nixlf_attached(rvu, pcifunc))
@@ -3141,8 +3157,43 @@ int rvu_mbox_handler_npc_get_kex_cfg(struct rvu *rvu, struct msg_req *req,
 	return 0;
 }
 
-int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
-			   u64 pkind)
+static int
+npc_set_var_len_offset_pkind(struct rvu *rvu, u16 pcifunc, u64 pkind,
+			     u8 var_len_off, u8 var_len_off_mask, u8 shift_dir)
+{
+	struct npc_kpu_action0 *act0;
+	u8 shift_count = 0;
+	int blkaddr;
+	u64 val;
+
+	if (!var_len_off_mask)
+		return -EINVAL;
+
+	if (var_len_off_mask != 0xff) {
+		if (shift_dir)
+			shift_count = __ffs(var_len_off_mask);
+		else
+			shift_count = (8 - __fls(var_len_off_mask));
+	}
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, pcifunc);
+	if (blkaddr < 0) {
+		dev_err(rvu->dev, "%s: NPC block not implemented\n", __func__);
+		return -EINVAL;
+	}
+	val = rvu_read64(rvu, blkaddr, NPC_AF_PKINDX_ACTION0(pkind));
+	act0 = (struct npc_kpu_action0 *)&val;
+	act0->var_len_shift = shift_count;
+	act0->var_len_right = shift_dir;
+	act0->var_len_mask = var_len_off_mask;
+	act0->var_len_offset = var_len_off;
+	rvu_write64(rvu, blkaddr, NPC_AF_PKINDX_ACTION0(pkind), val);
+	return 0;
+}
+
+int
+rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
+		       u64 pkind, u8 var_len_off, u8 var_len_off_mask,
+		       u8 shift_dir)
 
 {
 	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
@@ -3174,6 +3225,14 @@ int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 		intf_mode = NPC_INTF_MODE_HIGIG;
 		enable_higig2 = true;
 	} else if (mode & OTX2_PRIV_FLAGS_CUSTOM) {
+		if (pkind == NPC_RX_CUSTOM_PRE_L2_PKIND) {
+			rc = npc_set_var_len_offset_pkind(rvu, pcifunc, pkind,
+							  var_len_off,
+							  var_len_off_mask,
+							  shift_dir);
+			if (rc)
+				return rc;
+		}
 		rxpkind = pkind;
 		txpkind = pkind;
 	}
@@ -3212,7 +3271,8 @@ int rvu_mbox_handler_npc_set_pkind(struct rvu *rvu,
 				   struct msg_rsp *rsp)
 {
 	return rvu_npc_set_parse_mode(rvu, req->hdr.pcifunc, req->mode,
-				      req->dir, req->pkind);
+				      req->dir, req->pkind, req->var_len_off,
+				      req->var_len_off_mask, req->shift_dir);
 }
 
 int rvu_mbox_handler_npc_read_base_steer_rule(struct rvu *rvu,

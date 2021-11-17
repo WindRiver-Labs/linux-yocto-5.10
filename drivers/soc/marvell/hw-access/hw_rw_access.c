@@ -29,16 +29,30 @@
 /* PCI device IDs */
 #define	PCI_DEVID_OCTEONTX2_RVU_AF	0xA065
 
-/* Smallest start physical address of all HW devices */
-#define REG_PHYS_BASEADDR		0x802000000000
-/* Last physical address - First phsycial address + 1 will be the
- * length of IO remapped block
- * 0x87E0E48FFFFF - 0x802000000000 + 1 = 0x7C0E4800000
- * Last phsyical address is the highest end physical address of all HW devices.
- * First physical address is the smallest start physical address of all HW
+/* First physical address is the smallest start physical address of all HW
  * devices.
+ * Smallest expected start physical address of all HW devices is based on
+ * datasheet 'Figure 4-1 Physical Address Regions' with lowest I/O start address
+ * being 0x800000000000 as:
+ *  - bits <51:47> = 0x1 define I/O range,
+ *  - bits <43:36> = 0x0 constitute NCB DID,
+ *  - bits <36:0>  = 0x0 assume zero-offset.
+ * In practice the lowest observed register address is for GIC = 0x801000000000
+ * which will be used for access.
  */
-#define REG_SPACE_MAPSIZE		0x7C0E4800000
+#define REG_PHYS_BASEADDR	0x801000000000
+
+/* The calculation does not take into consideration Armv8.2's 52bit extended
+ * addressing used for PEM which has bits<51:49> set to {0x1, 0x2, 0x3}.
+ *
+ * Maximum I/O address bits<43:36> are assumed ti be 0xFF with no limits on NCB
+ * offset addesses forwarded to NCB device. Such assumtion leads to maximum
+ * addressable HW address being 0x8FFFFFFFFFFF.
+ * In practice the highest observed address is for PEM(5)_MSIX_MBA(0) as below:
+ */
+#define REG_PHYS_ENDADDR	0x8E5F000F0000
+
+#define REG_SPACE_MAPSIZE	(REG_PHYS_ENDADDR - REG_PHYS_BASEADDR + 1)
 
 struct hw_reg_cfg {
 	u64	regaddr; /* Register physical address within a hw device */
@@ -48,7 +62,10 @@ struct hw_reg_cfg {
 struct hw_ctx_cfg {
 	u16	blkaddr;
 	u16	pcifunc;
-	u16	qidx;
+	union {
+		u16	qidx;
+		u16	aura;
+	};
 	u8	ctype;
 	u8	op;
 };
@@ -169,23 +186,17 @@ hw_access_csr_write(void __iomem *regbase, unsigned long arg)
 }
 
 static int
-hw_access_ctx_read(struct rvu *rvu, unsigned long arg)
+hw_access_nix_ctx_read(struct rvu *rvu, struct hw_ctx_cfg *ctx_cfg,
+		       unsigned long arg)
 {
 	struct nix_aq_enq_req aq_req;
 	struct nix_aq_enq_rsp rsp;
-	struct hw_ctx_cfg ctx_cfg;
-
-	if (copy_from_user(&ctx_cfg, (struct hw_ctx_cfg *)arg,
-			   sizeof(struct hw_ctx_cfg))) {
-		pr_err("Write Fault in copy from user\n");
-		return -EFAULT;
-	}
 
 	memset(&aq_req, 0, sizeof(struct nix_aq_enq_req));
-	aq_req.hdr.pcifunc = ctx_cfg.pcifunc;
-	aq_req.ctype = ctx_cfg.ctype;
-	aq_req.op = ctx_cfg.op;
-	aq_req.qidx = ctx_cfg.qidx;
+	aq_req.hdr.pcifunc = ctx_cfg->pcifunc;
+	aq_req.ctype = ctx_cfg->ctype;
+	aq_req.op = ctx_cfg->op;
+	aq_req.qidx = ctx_cfg->qidx;
 
 	if (rvu_mbox_handler_nix_aq_enq(rvu, &aq_req, &rsp)) {
 		pr_err("Failed to read the context\n");
@@ -199,6 +210,60 @@ hw_access_ctx_read(struct rvu *rvu, unsigned long arg)
 	}
 
 	return 0;
+}
+
+static int
+hw_access_npa_ctx_read(struct rvu *rvu, struct hw_ctx_cfg *ctx_cfg,
+		       unsigned long arg)
+{
+	struct npa_aq_enq_req aq_req;
+	struct npa_aq_enq_rsp rsp;
+
+	memset(&aq_req, 0, sizeof(struct npa_aq_enq_req));
+	aq_req.hdr.pcifunc = ctx_cfg->pcifunc;
+	aq_req.ctype = ctx_cfg->ctype;
+	aq_req.op = ctx_cfg->op;
+	aq_req.aura_id = ctx_cfg->aura;
+
+	if (rvu_mbox_handler_npa_aq_enq(rvu, &aq_req, &rsp)) {
+		pr_err("Failed to read the npa context\n");
+		return -EINVAL;
+	}
+
+	if (copy_to_user((struct npa_aq_enq_rsp *)arg,
+			 &rsp, sizeof(struct npa_aq_enq_rsp))) {
+		pr_err("Fault in copy to user\n");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static int
+hw_access_ctx_read(struct rvu *rvu, unsigned long arg)
+{
+	struct hw_ctx_cfg ctx_cfg;
+	int rc;
+
+	if (copy_from_user(&ctx_cfg, (struct hw_ctx_cfg *)arg,
+			   sizeof(struct hw_ctx_cfg))) {
+		pr_err("Write Fault in copy from user\n");
+		return -EFAULT;
+	}
+
+	switch (ctx_cfg.blkaddr) {
+	case BLKADDR_NIX0:
+	case BLKADDR_NIX1:
+		rc = hw_access_nix_ctx_read(rvu, &ctx_cfg, arg);
+		break;
+	case BLKADDR_NPA:
+		rc = hw_access_npa_ctx_read(rvu, &ctx_cfg, arg);
+		break;
+	default:
+		rc = -EINVAL;
+		break;
+	}
+	return rc;
 }
 
 static int
