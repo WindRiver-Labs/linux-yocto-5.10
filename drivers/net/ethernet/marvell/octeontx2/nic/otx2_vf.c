@@ -446,6 +446,7 @@ static void otx2vf_do_set_rx_mode(struct work_struct *work)
 
 static int otx2vf_change_mtu(struct net_device *netdev, int new_mtu)
 {
+	struct otx2_nic *vf = netdev_priv(netdev);
 	bool if_up = netif_running(netdev);
 	int err = 0;
 
@@ -455,6 +456,10 @@ static int otx2vf_change_mtu(struct net_device *netdev, int new_mtu)
 	netdev_info(netdev, "Changing MTU from %d to %d\n",
 		    netdev->mtu, new_mtu);
 	netdev->mtu = new_mtu;
+	/* Modify receive buffer size based on MTU and do not
+	 * use the fixed size set.
+	 */
+	vf->hw.rbuf_fixed_size = 0;
 
 	if (if_up)
 		err = otx2vf_open(netdev);
@@ -594,6 +599,8 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	hw->tx_queues = qcount;
 	hw->max_queues = qcount;
 	hw->tot_tx_queues = qcount;
+	/* Use CQE of 128 byte descriptor size by default */
+	hw->xqe_size = 128;
 
 	hw->irq_name = devm_kmalloc_array(&hw->pdev->dev, num_vec, NAME_SIZE,
 					  GFP_KERNEL);
@@ -715,9 +722,8 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto err_unreg_netdev;
 
-	otx2vf_set_ethtool_ops(netdev);
-
-	otx2_cgx_features_get(vf);
+	if (!is_otx2_sdpvf(vf->pdev))
+		otx2vf_set_ethtool_ops(netdev);
 
 	err = otx2vf_mcam_flow_init(vf);
 	if (err)
@@ -739,6 +745,8 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 err_unreg_netdev:
 	unregister_netdev(netdev);
 err_detach_rsrc:
+	if (vf->hw.lmt_info)
+		free_percpu(vf->hw.lmt_info);
 	if (test_bit(CN10K_LMTST, &vf->hw.cap_flag))
 		qmem_free(vf->dev, vf->dync_lmt);
 	otx2_detach_resources(&vf->mbox);
@@ -778,6 +786,8 @@ static void otx2vf_remove(struct pci_dev *pdev)
 
 	otx2vf_disable_mbox_intr(vf);
 	otx2_detach_resources(&vf->mbox);
+	if (vf->hw.lmt_info)
+		free_percpu(vf->hw.lmt_info);
 	if (test_bit(CN10K_LMTST, &vf->hw.cap_flag))
 		qmem_free(vf->dev, vf->dync_lmt);
 	otx2vf_vfaf_mbox_destroy(vf);

@@ -52,6 +52,7 @@ static int otx2_config_hw_rx_tstamp(struct otx2_nic *pfvf, bool enable);
 
 static int otx2_change_mtu(struct net_device *netdev, int new_mtu)
 {
+	struct otx2_nic *pf = netdev_priv(netdev);
 	bool if_up = netif_running(netdev);
 	int err = 0;
 
@@ -61,6 +62,10 @@ static int otx2_change_mtu(struct net_device *netdev, int new_mtu)
 	netdev_info(netdev, "Changing MTU from %d to %d\n",
 		    netdev->mtu, new_mtu);
 	netdev->mtu = new_mtu;
+	/* Modify receive buffer size based on MTU and do not
+	 * use the fixed size set.
+	 */
+	pf->hw.rbuf_fixed_size = 0;
 
 	if (if_up)
 		err = otx2_open(netdev);
@@ -794,9 +799,6 @@ static void otx2_process_pfaf_mbox_msg(struct otx2_nic *pf,
 	case MBOX_MSG_CGX_FEC_STATS:
 		mbox_handler_cgx_fec_stats(pf, (struct cgx_fec_stats_rsp *)msg);
 		break;
-	case MBOX_MSG_RPM_STATS:
-		mbox_handler_rpm_stats(pf, (struct rpm_stats_rsp *)msg);
-		break;
 	default:
 		if (msg->rc)
 			dev_err(pf->dev,
@@ -1133,42 +1135,6 @@ static int otx2_cgx_config_linkevents(struct otx2_nic *pf, bool enable)
 	return err;
 }
 
-int otx2_cgx_features_get(struct otx2_nic *pfvf)
-{
-	struct cgx_features_info_msg *rsp;
-	struct msg_req *msg;
-	int err;
-
-	mutex_lock(&pfvf->mbox.lock);
-	msg = otx2_mbox_alloc_msg_cgx_features_get(&pfvf->mbox);
-
-	if (!msg) {
-		mutex_unlock(&pfvf->mbox.lock);
-		return -ENOMEM;
-	}
-
-	err = otx2_sync_mbox_msg(&pfvf->mbox);
-	if (err)
-		goto out;
-
-	rsp = (struct cgx_features_info_msg *)
-		     otx2_mbox_get_rsp(&pfvf->mbox.mbox, 0, &msg->hdr);
-	pfvf->hw.mac_features = rsp->lmac_features;
-
-	if (pfvf->hw.mac_features & RVU_MAC_RPM) {
-		pfvf->hw.lmac_rx_stats_cnt = RPM_RX_STATS_COUNT;
-		pfvf->hw.lmac_tx_stats_cnt = RPM_TX_STATS_COUNT;
-	} else {
-		pfvf->hw.lmac_rx_stats_cnt = CGX_RX_STATS_COUNT;
-		pfvf->hw.lmac_tx_stats_cnt = CGX_TX_STATS_COUNT;
-	}
-
-out:
-	mutex_unlock(&pfvf->mbox.lock);
-	return err;
-}
-EXPORT_SYMBOL(otx2_cgx_features_get);
-
 static int otx2_cgx_config_loopback(struct otx2_nic *pf, bool enable)
 {
 	struct msg_req *msg;
@@ -1366,23 +1332,24 @@ static int otx2_get_rbuf_size(struct otx2_nic *pf, int mtu)
 	int total_size;
 	int rbuf_size;
 
+	if (pf->hw.rbuf_fixed_size)
+		return pf->hw.rbuf_fixed_size;
+
 	/* The data transferred by NIX to memory consists of actual packet
 	 * plus additional data which has timestamp and/or EDSA/HIGIG2
 	 * headers if interface is configured in corresponding modes.
 	 * NIX transfers entire data using 6 segments/buffers and writes
 	 * a CQE_RX descriptor with those segment addresses. First segment
 	 * has additional data prepended to packet. Also software omits a
-	 * headroom of 128 bytes and sizeof(struct skb_shared_info) in
-	 * each segment. Hence the total size of memory needed
-	 * to receive a packet with 'mtu' is:
+	 * headroom of 128 bytes in each segment. Hence the total size of
+	 * memory needed to receive a packet with 'mtu' is:
 	 * frame size =  mtu + additional data;
-	 * memory = frame_size + (headroom + struct skb_shared_info size) * 6;
+	 * memory = frame_size + headroom * 6;
 	 * each receive buffer size = memory / 6;
 	 */
 	frame_size = mtu + OTX2_ETH_HLEN + OTX2_HW_TIMESTAMP_LEN +
 		     pf->addl_mtu + pf->xtra_hdr;
-	total_size = frame_size + (OTX2_HEAD_ROOM +
-		     OTX2_DATA_ALIGN(sizeof(struct skb_shared_info))) * 6;
+	total_size = frame_size + OTX2_HEAD_ROOM * 6;
 	rbuf_size = total_size / 6;
 
 	return ALIGN(rbuf_size, 2048);
@@ -1601,14 +1568,6 @@ int otx2_open(struct net_device *netdev)
 			   sizeof(struct otx2_rcv_queue), GFP_KERNEL);
 	if (!qset->rq)
 		goto err_free_mem;
-
-	if (test_bit(CN10K_LMTST, &pf->hw.cap_flag)) {
-		/* Reserve LMT lines for NPA AURA batch free */
-		pf->hw.npa_lmt_base = pf->hw.lmt_base;
-		/* Reserve LMT lines for NIX TX */
-		pf->hw.nix_lmt_base = (u64 *)((u64)pf->hw.npa_lmt_base +
-				      (pf->npa_lmt_lines * LMT_LINE_SIZE));
-	}
 
 	err = otx2_init_hw_resources(pf);
 	if (err)
@@ -2711,6 +2670,8 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	hw->tx_queues = qcount;
 	hw->tot_tx_queues = qcount;
 	hw->max_queues = qcount;
+	/* Use CQE of 128 byte descriptor size by default */
+	hw->xqe_size = 128;
 
 	num_vec = pci_msix_vec_count(pdev);
 	hw->irq_name = devm_kmalloc_array(&hw->pdev->dev, num_vec, NAME_SIZE,
@@ -2849,8 +2810,6 @@ static int otx2_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	otx2_set_ethtool_ops(netdev);
 
-	otx2_cgx_features_get(pf);
-
 	err = otx2_init_tc(pf);
 	if (err)
 		goto err_mcam_flow_del;
@@ -2887,6 +2846,8 @@ err_del_mcam_entries:
 err_ptp_destroy:
 	otx2_ptp_destroy(pf);
 err_detach_rsrc:
+	if (pf->hw.lmt_info)
+		free_percpu(pf->hw.lmt_info);
 	if (test_bit(CN10K_LMTST, &pf->hw.cap_flag))
 		qmem_free(pf->dev, pf->dync_lmt);
 	otx2_detach_resources(&pf->mbox);
@@ -3060,6 +3021,8 @@ static void otx2_remove(struct pci_dev *pdev)
 	otx2_mcam_flow_del(pf);
 	otx2_shutdown_tc(pf);
 	otx2_detach_resources(&pf->mbox);
+	if (pf->hw.lmt_info)
+		free_percpu(pf->hw.lmt_info);
 	if (test_bit(CN10K_LMTST, &pf->hw.cap_flag))
 		qmem_free(pf->dev, pf->dync_lmt);
 	otx2_disable_mbox_intr(pf);
