@@ -59,6 +59,7 @@ end	.req	x5
 srcin	.req	x15
 SYM_FUNC_START(__arch_copy_to_user)
 	add	end, x0, x2
+	mov	srcin, x1
 alternative_if_not ARM64_WORKAROUND_MRVL_38500
 	nop
 alternative_else
