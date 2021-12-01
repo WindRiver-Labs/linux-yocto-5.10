@@ -275,7 +275,7 @@ static int stmmac_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 				      !(v & MII_BUSY), 100, 10000)) {
 			data = -EBUSY;
 			goto err_disable_clks;
-	}
+		}
 
 	writel(data, priv->ioaddr + mii_data);
 	writel(value, priv->ioaddr + mii_address);
@@ -359,7 +359,7 @@ static int stmmac_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg,
 				      !(v & MII_BUSY), 100, 10000)) {
 			ret = -EBUSY;
 			goto err_disable_clks;
-	}
+		}
 
 	/* Set the MII address register to write */
 	writel(data, priv->ioaddr + mii_data);
