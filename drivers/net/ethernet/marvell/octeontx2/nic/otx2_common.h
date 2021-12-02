@@ -54,6 +54,10 @@ enum arua_mapped_qtypes {
 /* Send skid of 2000 packets required for CQ size of 4K CQEs. */
 #define SEND_CQ_SKID	2000
 
+struct otx2_lmt_info {
+	u64 lmt_addr;
+	u16 lmt_id;
+};
 /* RSS configuration */
 struct otx2_rss_ctx {
 	u8  ind_tbl[MAX_RSS_INDIR_TBL_SIZE];
@@ -174,6 +178,8 @@ struct otx2_hw {
 	u16			pool_cnt;
 	u16			rqpool_cnt;
 	u16			sqpool_cnt;
+	u16			xqe_size;
+	u16			rbuf_fixed_size;
 
 	/* NPA */
 	u32			stack_pg_ptrs;  /* No of ptrs per stack page */
@@ -214,27 +220,23 @@ struct otx2_hw {
 	/* Stats */
 	struct otx2_dev_stats	dev_stats;
 	struct otx2_drv_stats	drv_stats;
-	u64			cgx_rx_stats[RPM_RX_STATS_COUNT];
-	u64			cgx_tx_stats[RPM_TX_STATS_COUNT];
+	u64			cgx_rx_stats[CGX_RX_STATS_COUNT];
+	u64			cgx_tx_stats[CGX_TX_STATS_COUNT];
 	u64			cgx_fec_corr_blks;
 	u64			cgx_fec_uncorr_blks;
 	u8			cgx_links;  /* No. of CGX links present in HW */
 	u8			lbk_links;  /* No. of LBK links present in HW */
 	u8			tx_link;    /* Transmit channel link number */
-	u8			lmac_rx_stats_cnt;
-	u8			lmac_tx_stats_cnt;
 #define HW_TSO			0
 #define CN10K_MBOX		1
 #define CN10K_LMTST		2
+#define CN10K_RPM		3
 	unsigned long		cap_flag;
 
 #define LMT_LINE_SIZE		128
 #define LMT_BURST_SIZE		32 /* 32 LMTST lines for burst SQE flush */
 	u64			*lmt_base;
-	u64			*npa_lmt_base;
-	u64			*nix_lmt_base;
-	/* Supported MAC features */
-	u64			mac_features;
+	struct otx2_lmt_info	__percpu *lmt_info;
 };
 
 struct vfvlan {
@@ -358,6 +360,7 @@ struct otx2_nic {
 #define OTX2_FLAG_TC_MATCHALL_INGRESS_ENABLED	BIT_ULL(13)
 #define OTX2_FLAG_DMACFLTR_SUPPORT		BIT_ULL(14)
 	u64			flags;
+	u64			*cq_op_addr;
 
 	struct bpf_prog		*xdp_prog;
 	struct otx2_qset	qset;
@@ -518,6 +521,7 @@ static inline void otx2_setup_dev_hw_settings(struct otx2_nic *pfvf)
 	if (!is_dev_otx2(pfvf->pdev)) {
 		__set_bit(CN10K_MBOX, &hw->cap_flag);
 		__set_bit(CN10K_LMTST, &hw->cap_flag);
+		__set_bit(CN10K_RPM, &hw->cap_flag);
 	}
 }
 
@@ -632,15 +636,16 @@ static inline u64 otx2_atomic64_add(u64 incr, u64 *ptr)
 #endif
 
 static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
-					u64 *ptrs, u64 num_ptrs,
-					u64 *lmt_addr)
+					u64 *ptrs, u64 num_ptrs)
 {
+	struct otx2_lmt_info *lmt_info;
 	u64 size = 0, count_eot = 0;
 	u64 tar_addr, val = 0;
 
+	lmt_info = per_cpu_ptr(pfvf->hw.lmt_info, smp_processor_id());
 	tar_addr = (__force u64)otx2_get_regaddr(pfvf, NPA_LF_AURA_BATCH_FREE0);
 	/* LMTID is same as AURA Id */
-	val = (aura & 0x7FF) | BIT_ULL(63);
+	val = (lmt_info->lmt_id & 0x7FF) | BIT_ULL(63);
 	/* Set if [127:64] of last 128bit word has a valid pointer */
 	count_eot = (num_ptrs % 2) ? 0ULL : 1ULL;
 	/* Set AURA ID to free pointer */
@@ -656,7 +661,7 @@ static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
 			size++;
 		tar_addr |=  ((size - 1) & 0x7) << 4;
 	}
-	memcpy(lmt_addr, ptrs, sizeof(u64) * num_ptrs);
+	memcpy((u64 *)lmt_info->lmt_addr, ptrs, sizeof(u64) * num_ptrs);
 	/* Perform LMTST flush */
 	cn10k_lmt_flush(val, tar_addr);
 }
@@ -664,12 +669,11 @@ static inline void __cn10k_aura_freeptr(struct otx2_nic *pfvf, u64 aura,
 static inline void cn10k_aura_freeptr(void *dev, int aura, u64 buf)
 {
 	struct otx2_nic *pfvf = dev;
-	struct otx2_pool *pool;
 	u64 ptrs[2];
 
-	pool = &pfvf->qset.pool[aura];
 	ptrs[1] = buf;
-	__cn10k_aura_freeptr(pfvf, aura, ptrs, 2, pool->lmt_addr);
+	/* Free only one buffer at time during init and teardown */
+	__cn10k_aura_freeptr(pfvf, aura, ptrs, 2);
 }
 /* Alloc pointer from pool/aura */
 static inline u64 otx2_aura_allocptr(struct otx2_nic *pfvf, int aura)
@@ -824,6 +828,7 @@ void otx2_get_mac_from_af(struct net_device *netdev);
 void otx2_config_irq_coalescing(struct otx2_nic *pfvf, int qidx);
 int otx2_config_pause_frm(struct otx2_nic *pfvf);
 void otx2_setup_segmentation(struct otx2_nic *pfvf);
+int otx2_config_serdes_link_state(struct otx2_nic *pfvf, bool en);
 
 /* RVU block related APIs */
 int otx2_attach_npa_nix(struct otx2_nic *pfvf);
@@ -874,8 +879,6 @@ void mbox_handler_cgx_fec_stats(struct otx2_nic *pfvf,
 void otx2_set_fec_stats_count(struct otx2_nic *pfvf);
 void mbox_handler_nix_bp_enable(struct otx2_nic *pfvf,
 				struct nix_bp_cfg_rsp *rsp);
-void mbox_handler_rpm_stats(struct otx2_nic *pfvf,
-			    struct rpm_stats_rsp *rsp);
 
 /* Device stats APIs */
 void otx2_get_dev_stats(struct otx2_nic *pfvf);
@@ -923,7 +926,6 @@ int otx2smqvf_probe(struct otx2_nic *vf);
 int otx2smqvf_remove(struct otx2_nic *vf);
 
 bool otx2_xdp_sq_append_pkt(struct otx2_nic *pfvf, u64 iova, int len, u16 qidx);
-int otx2_cgx_features_get(struct otx2_nic *pfvf);
 u16 otx2_get_max_mtu(struct otx2_nic *pfvf);
 /* tc support */
 int otx2_init_tc(struct otx2_nic *nic);

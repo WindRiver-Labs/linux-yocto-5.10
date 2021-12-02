@@ -29,10 +29,35 @@
 static LIST_HEAD(cgx_list);
 
 /* Convert firmware speed encoding to user format(Mbps) */
-static u32 cgx_speed_mbps[CGX_LINK_SPEED_MAX];
+static const u32 cgx_speed_mbps[CGX_LINK_SPEED_MAX] = {
+	[CGX_LINK_NONE] = 0,
+	[CGX_LINK_10M] = 10,
+	[CGX_LINK_100M] = 100,
+	[CGX_LINK_1G] = 1000,
+	[CGX_LINK_2HG] = 2500,
+	[CGX_LINK_5G] = 5000,
+	[CGX_LINK_10G] = 10000,
+	[CGX_LINK_20G] = 20000,
+	[CGX_LINK_25G] = 25000,
+	[CGX_LINK_40G] = 40000,
+	[CGX_LINK_50G] = 50000,
+	[CGX_LINK_80G] = 80000,
+	[CGX_LINK_100G] = 100000,
+};
 
 /* Convert firmware lmac type encoding to string */
-static char *cgx_lmactype_string[LMAC_MODE_MAX];
+static const char *cgx_lmactype_string[LMAC_MODE_MAX] = {
+	[LMAC_MODE_SGMII] = "SGMII",
+	[LMAC_MODE_XAUI] = "XAUI",
+	[LMAC_MODE_RXAUI] = "RXAUI",
+	[LMAC_MODE_10G_R] = "10G_R",
+	[LMAC_MODE_40G_R] = "40G_R",
+	[LMAC_MODE_QSGMII] = "QSGMII",
+	[LMAC_MODE_25G_R] = "25G_R",
+	[LMAC_MODE_50G_R] = "50G_R",
+	[LMAC_MODE_100G_R] = "100G_R",
+	[LMAC_MODE_USXGMII] = "USXGMII",
+};
 
 /* CGX PHY management internal APIs */
 static int cgx_fwi_link_change(struct cgx *cgx, int lmac_id, bool en);
@@ -55,7 +80,9 @@ static bool is_dev_rpm(void *cgxd)
 
 bool is_lmac_valid(struct cgx *cgx, int lmac_id)
 {
-	return cgx && test_bit(lmac_id, &cgx->lmac_bmap);
+	if (!cgx || lmac_id < 0 || lmac_id >= MAX_LMAC_PER_CGX)
+		return false;
+	return test_bit(lmac_id, &cgx->lmac_bmap);
 }
 
 /* Helper function to get sequential index
@@ -1049,34 +1076,6 @@ int cgx_fwi_cmd_generic(u64 req, u64 *resp, struct cgx *cgx, int lmac_id)
 	return err;
 }
 
-static inline void cgx_link_usertable_init(void)
-{
-	cgx_speed_mbps[CGX_LINK_NONE] = 0;
-	cgx_speed_mbps[CGX_LINK_10M] = 10;
-	cgx_speed_mbps[CGX_LINK_100M] = 100;
-	cgx_speed_mbps[CGX_LINK_1G] = 1000;
-	cgx_speed_mbps[CGX_LINK_2HG] = 2500;
-	cgx_speed_mbps[CGX_LINK_5G] = 5000;
-	cgx_speed_mbps[CGX_LINK_10G] = 10000;
-	cgx_speed_mbps[CGX_LINK_20G] = 20000;
-	cgx_speed_mbps[CGX_LINK_25G] = 25000;
-	cgx_speed_mbps[CGX_LINK_40G] = 40000;
-	cgx_speed_mbps[CGX_LINK_50G] = 50000;
-	cgx_speed_mbps[CGX_LINK_80G] = 80000;
-	cgx_speed_mbps[CGX_LINK_100G] = 100000;
-
-	cgx_lmactype_string[LMAC_MODE_SGMII] = "SGMII";
-	cgx_lmactype_string[LMAC_MODE_XAUI] = "XAUI";
-	cgx_lmactype_string[LMAC_MODE_RXAUI] = "RXAUI";
-	cgx_lmactype_string[LMAC_MODE_10G_R] = "10G_R";
-	cgx_lmactype_string[LMAC_MODE_40G_R] = "40G_R";
-	cgx_lmactype_string[LMAC_MODE_QSGMII] = "QSGMII";
-	cgx_lmactype_string[LMAC_MODE_25G_R] = "25G_R";
-	cgx_lmactype_string[LMAC_MODE_50G_R] = "50G_R";
-	cgx_lmactype_string[LMAC_MODE_100G_R] = "100G_R";
-	cgx_lmactype_string[LMAC_MODE_USXGMII] = "USXGMII";
-}
-
 static int cgx_link_usertable_index_map(int speed)
 {
 	switch (speed) {
@@ -1292,7 +1291,7 @@ static inline void link_status_user_format(u64 lstat,
 					   struct cgx_link_user_info *linfo,
 					   struct cgx *cgx, u8 lmac_id)
 {
-	char *lmac_string;
+	const char *lmac_string;
 
 	linfo->link_up = FIELD_GET(RESP_LINKSTAT_UP, lstat);
 	linfo->full_duplex = FIELD_GET(RESP_LINKSTAT_FDUPLEX, lstat);
@@ -1755,7 +1754,7 @@ static int cgx_lmac_init(struct cgx *cgx)
 		cgx->lmac_count = MAX_LMAC_PER_CGX;
 
 	for (i = 0; i < cgx->lmac_count; i++) {
-		lmac = kcalloc(1, sizeof(struct lmac), GFP_KERNEL);
+		lmac = kzalloc(sizeof(struct lmac), GFP_KERNEL);
 		if (!lmac)
 			return -ENOMEM;
 		lmac->name = kcalloc(1, sizeof("cgx_fwi_xxx_yyy"), GFP_KERNEL);
@@ -1776,7 +1775,7 @@ static int cgx_lmac_init(struct cgx *cgx)
 				MAX_DMAC_ENTRIES_PER_CGX / cgx->lmac_count;
 		err = rvu_alloc_bitmap(&lmac->mac_to_index_bmap);
 		if (err)
-			return err;
+			goto err_name_free;
 
 		/* Reserve first entry for default MAC address */
 		set_bit(0, lmac->mac_to_index_bmap.bmap);
@@ -1787,7 +1786,7 @@ static int cgx_lmac_init(struct cgx *cgx)
 
 		err = cgx_configure_interrupt(cgx, lmac, lmac->lmac_id, false);
 		if (err)
-			goto err_irq;
+			goto err_bitmap_free;
 
 		/* Add reference */
 		cgx->lmac_idmap[lmac->lmac_id] = lmac;
@@ -1797,7 +1796,9 @@ static int cgx_lmac_init(struct cgx *cgx)
 
 	return cgx_lmac_verify_fwi_version(cgx);
 
-err_irq:
+err_bitmap_free:
+	rvu_free_bitmap(&lmac->mac_to_index_bmap);
+err_name_free:
 	kfree(lmac->name);
 err_lmac_free:
 	kfree(lmac);
@@ -1935,7 +1936,6 @@ static int cgx_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	list_add(&cgx->cgx_list, &cgx_list);
 
-	cgx_link_usertable_init();
 
 	cgx_populate_features(cgx);
 

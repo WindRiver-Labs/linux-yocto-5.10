@@ -94,13 +94,23 @@
 
 /* RSS Registers */
 #define MVPP22_RSS_INDEX			0x1500
+#define MVPP22_RSS_IDX_ENTRY_NUM_OFF		0
+#define MVPP22_RSS_IDX_ENTRY_NUM_MASK		0x1F
+#define MVPP22_RSS_IDX_TBL_NUM_OFF		8
+#define MVPP22_RSS_IDX_TBL_NUM_MASK		0x700
+#define MVPP22_RSS_IDX_RXQ_NUM_OFF		16
+#define MVPP22_RSS_IDX_RXQ_NUM_MASK		0xFF0000
 #define     MVPP22_RSS_INDEX_TABLE_ENTRY(idx)	(idx)
 #define     MVPP22_RSS_INDEX_TABLE(idx)		((idx) << 8)
 #define     MVPP22_RSS_INDEX_QUEUE(idx)		((idx) << 16)
 #define MVPP22_RXQ2RSS_TABLE			0x1504
 #define     MVPP22_RSS_TABLE_POINTER(p)		(p)
 #define MVPP22_RSS_TABLE_ENTRY			0x1508
+#define MVPP22_RSS_TBL_ENTRY_OFF		0
+#define MVPP22_RSS_TBL_ENTRY_MASK		0xFF
 #define MVPP22_RSS_WIDTH			0x150c
+#define MVPP22_RSS_WIDTH_OFF			0
+#define MVPP22_RSS_WIDTH_MASK			0xF
 
 /* Classifier Registers */
 #define MVPP2_CLS_MODE_REG			0x1800
@@ -823,6 +833,8 @@
 
 /* RSS constants */
 #define MVPP22_RSS_TABLE_ENTRIES	32
+#define MVPP22_RSS_TBL_NUM		8
+#define MVPP22_RSS_WIDTH_MAX		8
 
 /* IPv6 max L3 address size */
 #define MVPP2_MAX_L3_ADDR_SIZE		16
@@ -1114,6 +1126,9 @@ struct mvpp2 {
 	/* HW version */
 	enum { MVPP21, MVPP22, MVPP23 } hw_version;
 
+		/* Bitmap of the participating cpu's */
+	u16 cpu_map;
+
 	/* Maximum number of RXQs per port */
 	unsigned int max_port_rxqs;
 
@@ -1243,6 +1258,7 @@ struct mvpp2_port {
 	struct bpf_prog *xdp_prog;
 
 	int pkt_size;
+	u32 num_tc_queues;
 
 	/* Per-CPU port control */
 	struct mvpp2_port_pcpu __percpu *pcpu;
@@ -1702,6 +1718,8 @@ u32 mvpp2_thread_read_relaxed(struct mvpp2 *priv, unsigned int thread,
 void mvpp2_dbgfs_init(struct mvpp2 *priv, const char *name);
 void mvpp2_dbgfs_cleanup(struct mvpp2 *priv);
 void mvpp23_rx_fifo_fc_en(struct mvpp2 *priv, int port, bool en);
+u32 mvpp2_get_tc_width(struct mvpp2_port *port);
+int  mvpp22_rss_fill_table_per_tc(struct mvpp2_port *port);
 
 #ifdef CONFIG_MVPP2_PTP
 int mvpp22_tai_probe(struct device *dev, struct mvpp2 *priv);

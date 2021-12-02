@@ -79,6 +79,8 @@
 #define MVPP2_RECYCLE_FULL	(NAPI_POLL_WEIGHT * 3)
 #define MVPP2_RECYCLE_FULL_SKB	(NAPI_POLL_WEIGHT * 5)
 
+#define MVPP2_NUM_OF_TC		1
+
 struct mvpp2_recycle_pool {
 	void *pbuf[MVPP2_RECYCLE_FULL_SKB];
 };
@@ -97,6 +99,14 @@ struct mvpp2_share {
 	/* Counters set by Probe/Init/Open */
 	int num_open_ports;
 } __aligned(L1_CACHE_BYTES);
+
+/* Normal RSS entry */
+struct mvpp2_rss_tbl_entry {
+	u8 tbl_id;
+	u8 tbl_line;
+	u8 width;
+	u8 rxq;
+};
 
 struct mvpp2_share mvpp2_share;
 
@@ -818,13 +828,13 @@ void mvpp2_rxq_enable_fc(struct mvpp2_port *port)
 		 * In Single queue mode: Host ID equal to Host ID used for
 		 *			 shared RX interrupt
 		 * In Multi queue mode: Host ID equal to number of
-		 *			RXQ ID / number of CoS queues
+		 *			RXQ ID / number of tc queues
 		 * In Single resource mode: Host ID always equal to 0
 		 */
 		if (queue_mode == MVPP2_QDIST_SINGLE_MODE)
 			host_id = mvpp22_calc_shared_addr_space(port);
 		else if (queue_mode == MVPP2_QDIST_MULTI_MODE)
-			host_id = q;
+			host_id = q / port->num_tc_queues;
 		else
 			host_id = 0;
 
@@ -6533,6 +6543,107 @@ static int mvpp2_ethtool_get_rxfh(struct net_device *dev, u32 *indir, u8 *key,
 	return 0;
 }
 
+/* RSS API */
+
+/* Translate CPU sequence number to real CPU ID */
+static int mvpp22_cpu_id_from_indir_tbl_get(struct mvpp2 *pp2,
+					    int cpu_seq, u32 *cpu_id)
+{
+	int i;
+	int seq = 0;
+
+	if (!pp2 || !cpu_id || cpu_seq >= 16)
+		return -EINVAL;
+
+	for (i = 0; i < 16; i++) {
+		if (pp2->cpu_map & (1 << i)) {
+			if (seq == cpu_seq) {
+				*cpu_id = i;
+				return 0;
+			}
+			seq++;
+		}
+	}
+
+	return -1;
+}
+
+/* RSS */
+/* The function will set rss table entry */
+int mvpp22_rss_tbl_entry_set(struct mvpp2 *hw, struct mvpp2_rss_tbl_entry entry)
+{
+	unsigned int reg_val = 0;
+
+	if (entry.tbl_id >= MVPP22_RSS_TBL_NUM ||
+	    entry.tbl_line >= MVPP22_RSS_TABLE_ENTRIES ||
+	    entry.width >= MVPP22_RSS_WIDTH_MAX)
+		return -EINVAL;
+	/* Write index */
+	reg_val |= (entry.tbl_line << MVPP22_RSS_IDX_ENTRY_NUM_OFF |
+		    entry.tbl_id << MVPP22_RSS_IDX_TBL_NUM_OFF);
+	mvpp2_write(hw, MVPP22_RSS_INDEX, reg_val);
+	/* Write entry */
+	reg_val &= (~MVPP22_RSS_TBL_ENTRY_MASK);
+	reg_val |= (entry.rxq << MVPP22_RSS_TBL_ENTRY_OFF);
+	mvpp2_write(hw, MVPP22_RSS_TABLE_ENTRY, reg_val);
+	reg_val &= (~MVPP22_RSS_WIDTH_MASK);
+	reg_val |= (entry.width << MVPP22_RSS_WIDTH_OFF);
+	mvpp2_write(hw, MVPP22_RSS_WIDTH, reg_val);
+
+	return 0;
+}
+
+static u32 mvpp2_get_cpu_width(struct mvpp2_port *port)
+{
+	return ilog2(roundup_pow_of_two(num_online_cpus()));
+}
+
+u32 mvpp2_get_tc_width(struct mvpp2_port *port)
+{
+	return ilog2(roundup_pow_of_two(port->num_tc_queues));
+}
+
+int  mvpp22_rss_fill_table_per_tc(struct mvpp2_port *port)
+{
+	struct mvpp2_rss_tbl_entry rss_entry;
+	int rss_tbl, entry_idx;
+	u32 tc_width = 0, cpu_width = 0, cpu_id = 0;
+	int rss_tbl_needed = port->num_tc_queues;
+
+	if (queue_mode == MVPP2_QDIST_SINGLE_MODE)
+		return -1;
+
+	memset(&rss_entry, 0, sizeof(rss_entry));
+
+	if (!port->priv->cpu_map)
+		return -1;
+
+	/* Calculate cpu and tc width */
+	cpu_width = mvpp2_get_cpu_width(port);
+	tc_width = mvpp2_get_tc_width(port);
+
+	rss_entry.width = tc_width + cpu_width;
+
+	for (rss_tbl = 0; rss_tbl < rss_tbl_needed; rss_tbl++) {
+		for (entry_idx = 0; entry_idx < MVPP22_RSS_TABLE_ENTRIES;
+			entry_idx++) {
+			rss_entry.tbl_id = rss_tbl;
+			rss_entry.tbl_line = entry_idx;
+			if (mvpp22_cpu_id_from_indir_tbl_get(port->priv,
+							     port->indir[entry_idx],
+			     &cpu_id))
+				return -1;
+			/* Value of rss_tbl equals to tc queue */
+			rss_entry.rxq = (cpu_id << tc_width) |
+				rss_tbl;
+			if (mvpp22_rss_tbl_entry_set(port->priv, rss_entry))
+				return -1;
+		}
+	}
+
+	return 0;
+}
+
 static int mvpp2_ethtool_set_rxfh(struct net_device *dev, const u32 *indir,
 				  const u8 *key, const u8 hfunc)
 {
@@ -6550,7 +6661,10 @@ static int mvpp2_ethtool_set_rxfh(struct net_device *dev, const u32 *indir,
 	if (indir) {
 		memcpy(port->indir, indir,
 		       ARRAY_SIZE(port->indir) * sizeof(port->indir[0]));
-		mvpp22_rss_fill_table(port, port->id);
+		if (port->num_tc_queues > 1)
+			mvpp22_rss_fill_table_per_tc(port);
+		else
+			mvpp22_rss_fill_table(port, port->id);
 	}
 
 	return 0;
@@ -6782,8 +6896,8 @@ static int mvpp2_multi_queue_vectors_init(struct mvpp2_port *port,
 			snprintf(irqname, sizeof(irqname), "hif%d", i);
 
 		if (queue_mode == MVPP2_QDIST_MULTI_MODE) {
-			v->first_rxq = i;
-			v->nrxqs = 1;
+			v->first_rxq = port->num_tc_queues * i;
+			v->nrxqs = port->num_tc_queues;
 		} else if (queue_mode == MVPP2_QDIST_SINGLE_MODE &&
 			   i == (port->nqvecs - 1)) {
 			v->first_rxq = 0;
@@ -7748,6 +7862,8 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 	char *mac_from = "";
 	unsigned int ntxqs, nrxqs;
 	unsigned long flags = 0;
+	u32 cpu_nrxqs;
+	u16 cpu_map = 0;
 	bool has_tx_irqs;
 	dma_addr_t p;
 	u32 id;
@@ -7764,6 +7880,7 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 	}
 
 	ntxqs = MVPP2_MAX_TXQ;
+	cpu_nrxqs = MVPP2_NUM_OF_TC;
 	if (priv->hw_version != MVPP21 && queue_mode ==
 	    MVPP2_QDIST_SINGLE_MODE) {
 		nrxqs = 1;
@@ -7773,9 +7890,12 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 		 * more than a single one on PPv2.2).
 		 * Round up to nearest multiple of 4.
 		 */
-		nrxqs = (num_possible_cpus() + 3) & ~0x3;
-		if (nrxqs > MVPP2_PORT_MAX_RXQ)
+		nrxqs = (num_possible_cpus() * cpu_nrxqs + 3) & ~0x3;
+		if (nrxqs > MVPP2_PORT_MAX_RXQ) {
 			nrxqs = MVPP2_PORT_MAX_RXQ;
+			cpu_nrxqs = MVPP2_PORT_MAX_RXQ / num_possible_cpus();
+			dev_warn(&pdev->dev, "cpu_nrxqs to big set to %d\n", cpu_nrxqs);
+		}
 	}
 
 	dev = alloc_etherdev_mqs(sizeof(*port), ntxqs, nrxqs);
@@ -7783,9 +7903,11 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 		return -ENOMEM;
 
 	/* XPS mapping queues to 0..N cpus (may be less than ntxqs) */
-	for_each_online_cpu(cpu)
+	for_each_online_cpu(cpu) {
+		cpu_map |= (1 << cpu);
 		netif_set_xps_queue(dev, cpumask_of(cpu), cpu);
-
+	}
+	priv->cpu_map = cpu_map;
 	phy_mode = fwnode_get_phy_mode(port_fwnode);
 	if (phy_mode < 0) {
 		dev_err(&pdev->dev, "incorrect phy mode\n");
@@ -7828,6 +7950,7 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 	port->dev = dev;
 	port->fwnode = port_fwnode;
 	port->has_phy = !!of_find_property(port_node, "phy", NULL);
+	port->num_tc_queues = cpu_nrxqs;
 	if (port->has_phy && phy_mode == PHY_INTERFACE_MODE_INTERNAL) {
 		err = -EINVAL;
 		dev_err(&pdev->dev, "internal mode doesn't work with phy\n");

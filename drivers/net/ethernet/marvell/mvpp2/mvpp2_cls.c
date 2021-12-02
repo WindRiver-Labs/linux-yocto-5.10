@@ -1124,21 +1124,39 @@ void mvpp22_rss_port_init(struct mvpp2_port *port)
 	mvpp2_write(priv, MVPP22_RSS_INDEX, MVPP22_RSS_INDEX_TABLE(port->id));
 	mvpp2_write(priv, MVPP22_RSS_WIDTH, 8);
 
-	/* The default RxQ is used as a key to select the RSS table to use.
-	 * We use one RSS table per port.
-	 */
-	mvpp2_write(priv, MVPP22_RSS_INDEX,
-		    MVPP22_RSS_INDEX_QUEUE(port->first_rxq));
-	mvpp2_write(priv, MVPP22_RXQ2RSS_TABLE,
-		    MVPP22_RSS_TABLE_POINTER(port->id));
+	if (port->num_tc_queues > 1) {
+		int rxq;
+		u32 tc_width;
+		int tc_mask;
 
+		tc_width = mvpp2_get_tc_width(port);
+		tc_mask = ((1 << tc_width) - 1);
+
+		for (rxq = 0; rxq < port->nrxqs; rxq++) {
+			mvpp2_write(priv, MVPP22_RSS_INDEX,
+				    MVPP22_RSS_INDEX_QUEUE(port->rxqs[rxq]->id));
+			mvpp2_write(priv, MVPP22_RXQ2RSS_TABLE,
+				    MVPP22_RSS_TABLE_POINTER(port->rxqs[rxq]->id & tc_mask));
+		}
+	} else {
+		/* The default RxQ is used as a key to select the RSS table to use.
+		 * We use one RSS table per port.
+		 */
+		mvpp2_write(priv, MVPP22_RSS_INDEX,
+			    MVPP22_RSS_INDEX_QUEUE(port->first_rxq));
+		mvpp2_write(priv, MVPP22_RXQ2RSS_TABLE,
+			    MVPP22_RSS_TABLE_POINTER(port->id));
+	}
 	/* Configure the first table to evenly distribute the packets across
 	 * real Rx Queues. The table entries map a hash to a port Rx Queue.
 	 */
 	for (i = 0; i < MVPP22_RSS_TABLE_ENTRIES; i++)
 		port->indir[i] = ethtool_rxfh_indir_default(i, port->nrxqs);
 
-	mvpp22_rss_fill_table(port, port->id);
+	if (port->num_tc_queues > 1)
+		mvpp22_rss_fill_table_per_tc(port);
+	else
+		mvpp22_rss_fill_table(port, port->id);
 
 	/* Configure default flows */
 	mvpp2_port_rss_hash_opts_set(port, IPV4_FLOW, MVPP22_CLS_HEK_IP4_2T);
