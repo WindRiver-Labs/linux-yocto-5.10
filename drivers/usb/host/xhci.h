@@ -1618,6 +1618,9 @@ struct xhci_ring {
 	enum xhci_ring_type	type;
 	bool			last_td_was_short;
 	struct radix_tree_root	*trb_address_map;
+	struct timer_list	stream_timer;
+	bool			stream_timeout_handler;
+	struct xhci_hcd		*xhci;
 };
 
 struct xhci_erst_entry {
@@ -1884,6 +1887,7 @@ struct xhci_hcd {
 #define XHCI_DISABLE_SPARSE	BIT_ULL(38)
 #define XHCI_SG_TRB_CACHE_SIZE_QUIRK	BIT_ULL(39)
 #define XHCI_NO_SOFT_RETRY	BIT_ULL(40)
+#define XHCI_STREAM_QUIRK	BIT_ULL(41) /* FIXME this is wrong */
 #define XHCI_EP_CTX_BROKEN_DCS	BIT_ULL(42)
 
 	unsigned int		num_active_eps;
@@ -2068,6 +2072,8 @@ void xhci_free_container_ctx(struct xhci_hcd *xhci,
 
 /* xHCI host controller glue */
 typedef void (*xhci_get_quirks_t)(struct device *, struct xhci_hcd *);
+typedef void (*host_wakeup_t)(struct device *dev, bool wakeup);
+void dwc3_host_wakeup_capable(struct device *dev, bool wakeup);
 int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec);
 void xhci_quiesce(struct xhci_hcd *xhci);
 int xhci_halt(struct xhci_hcd *xhci);
@@ -2138,6 +2144,7 @@ void xhci_cleanup_stalled_ring(struct xhci_hcd *xhci, unsigned int slot_id,
 			       unsigned int ep_index, unsigned int stream_id,
 			       struct xhci_td *td);
 void xhci_stop_endpoint_command_watchdog(struct timer_list *t);
+void xhci_stream_timeout(struct timer_list *unused);
 void xhci_handle_command_timeout(struct work_struct *work);
 
 void xhci_ring_ep_doorbell(struct xhci_hcd *xhci, unsigned int slot_id,

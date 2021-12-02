@@ -3,7 +3,9 @@ menu "Xilinx SoC drivers"
 
 config XILINX_VCU
 	tristate "Xilinx VCU logicoreIP Init"
-	depends on HAS_IOMEM
+	select REGMAP_MMIO
+	select MFD_CORE
+	depends on HAS_IOMEM && COMMON_CLK
 	help
 	  Provides the driver to enable and disable the isolation between the
 	  processing system and programmable logic part by using the logicoreIP
@@ -41,4 +43,14 @@ config ZYNQMP_PM_DOMAINS
 	  Say yes to enable device power management through PM domains
 	  If in doubt, say N.
 
+config XLNX_EVENT_MANAGER
+	bool "Enable Xilinx Event Management Driver"
+	depends on ZYNQMP_FIRMWARE
+	default ZYNQMP_FIRMWARE
+	help
+	  Say yes to enable event management support for Xilinx.
+	  This driver uses firmware driver as an interface for event/power
+	  management request to firmware.
+
+	  If in doubt, say N.
 endmenu

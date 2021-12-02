@@ -454,6 +454,7 @@ static void zynqmp_dma_free_desc_list(struct zynqmp_dma_chan *chan,
 
 	list_for_each_entry_safe(desc, next, list, node)
 		zynqmp_dma_free_descriptor(chan, desc);
+	INIT_LIST_HEAD(list);
 }
 
 /**
@@ -490,7 +491,8 @@ static int zynqmp_dma_alloc_chan_resources(struct dma_chan *dchan)
 	}
 
 	chan->desc_pool_v = dma_alloc_coherent(chan->dev,
-					       (2 * chan->desc_size * ZYNQMP_DMA_NUM_DESCS),
+					       ((size_t)(2 * chan->desc_size) *
+						ZYNQMP_DMA_NUM_DESCS),
 					       &chan->desc_pool_p, GFP_KERNEL);
 	if (!chan->desc_pool_v)
 		return -ENOMEM;
@@ -501,7 +503,8 @@ static int zynqmp_dma_alloc_chan_resources(struct dma_chan *dchan)
 					(i * ZYNQMP_DMA_DESC_SIZE(chan) * 2));
 		desc->dst_v = (struct zynqmp_dma_desc_ll *) (desc->src_v + 1);
 		desc->src_p = chan->desc_pool_p +
-				(i * ZYNQMP_DMA_DESC_SIZE(chan) * 2);
+				((dma_addr_t)i * ZYNQMP_DMA_DESC_SIZE(chan)
+				 * 2);
 		desc->dst_p = desc->src_p + ZYNQMP_DMA_DESC_SIZE(chan);
 	}
 
@@ -677,7 +680,8 @@ static void zynqmp_dma_free_chan_resources(struct dma_chan *dchan)
 	zynqmp_dma_free_descriptors(chan);
 	spin_unlock_irqrestore(&chan->lock, irqflags);
 	dma_free_coherent(chan->dev,
-		(2 * ZYNQMP_DMA_DESC_SIZE(chan) * ZYNQMP_DMA_NUM_DESCS),
+		((size_t)(2 * ZYNQMP_DMA_DESC_SIZE(chan)) *
+		 ZYNQMP_DMA_NUM_DESCS),
 		chan->desc_pool_v, chan->desc_pool_p);
 	kfree(chan->sw_desc_pool);
 	pm_runtime_mark_last_busy(chan->dev);
@@ -846,7 +850,7 @@ static struct dma_async_tx_descriptor *zynqmp_dma_prep_memcpy(
 
 	zynqmp_dma_desc_config_eod(chan, desc);
 	async_tx_ack(&first->async_tx);
-	first->async_tx.flags = flags;
+	first->async_tx.flags = (enum dma_ctrl_flags)flags;
 	return &first->async_tx;
 }
 
@@ -1077,7 +1081,11 @@ static int zynqmp_dma_probe(struct platform_device *pdev)
 	pm_runtime_set_autosuspend_delay(zdev->dev, ZDMA_PM_TIMEOUT);
 	pm_runtime_use_autosuspend(zdev->dev);
 	pm_runtime_enable(zdev->dev);
-	pm_runtime_get_sync(zdev->dev);
+	ret = pm_runtime_get_sync(zdev->dev);
+	if (ret < 0) {
+		dev_err(zdev->dev, "pm_runtime_get_sync() failed\n");
+		pm_runtime_disable(zdev->dev);
+	}
 	if (!pm_runtime_enabled(zdev->dev)) {
 		ret = zynqmp_dma_runtime_resume(zdev->dev);
 		if (ret)
@@ -1093,7 +1101,11 @@ static int zynqmp_dma_probe(struct platform_device *pdev)
 	p->dst_addr_widths = BIT(zdev->chan->bus_width / 8);
 	p->src_addr_widths = BIT(zdev->chan->bus_width / 8);
 
-	dma_async_device_register(&zdev->common);
+	ret = dma_async_device_register(&zdev->common);
+	if (ret) {
+		dev_err(zdev->dev, "failed to register the dma device\n");
+		goto free_chan_resources;
+	}
 
 	ret = of_dma_controller_register(pdev->dev.of_node,
 					 of_zynqmp_dma_xlate, zdev);

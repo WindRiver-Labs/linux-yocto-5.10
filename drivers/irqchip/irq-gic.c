@@ -821,18 +821,30 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	return IRQ_SET_MASK_OK_DONE;
 }
 
-static void gic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
+void gic_set_cpu(unsigned int cpu, unsigned int irq)
+{
+	struct irq_data *d = irq_get_irq_data(irq);
+	struct cpumask mask;
+
+	cpumask_clear(&mask);
+	cpumask_set_cpu(cpu, &mask);
+	gic_set_affinity(d, &mask, true);
+}
+EXPORT_SYMBOL(gic_set_cpu);
+
+void gic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 {
 	int cpu;
 	unsigned long flags, map = 0;
 
+#if 0
 	if (unlikely(nr_cpu_ids == 1)) {
 		/* Only one CPU? let's do a self-IPI... */
 		writel_relaxed(2 << 24 | d->hwirq,
 			       gic_data_dist_base(&gic_data[0]) + GIC_DIST_SOFTINT);
 		return;
 	}
-
+#endif
 	gic_lock_irqsave(flags);
 
 	/* Convert our logical CPU mask into a physical one. */
@@ -850,6 +862,7 @@ static void gic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 
 	gic_unlock_irqrestore(flags);
 }
+EXPORT_SYMBOL(gic_ipi_send_mask);
 
 static int gic_starting_cpu(unsigned int cpu)
 {
@@ -897,6 +910,7 @@ void gic_send_sgi(unsigned int cpu_id, unsigned int irq)
 	/* this always happens on GIC0 */
 	writel_relaxed((cpu_id << 16) | irq, gic_data_dist_base(&gic_data[0]) + GIC_DIST_SOFTINT);
 }
+EXPORT_SYMBOL(gic_send_sgi);
 
 /*
  * gic_get_cpu_id - get the CPU interface ID for the specified CPU
@@ -1029,13 +1043,7 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	struct irq_data *irqd = irq_desc_get_irq_data(irq_to_desc(irq));
 
 	switch (hw) {
-	case 0 ... 15:
-		irq_set_percpu_devid(irq);
-		irq_domain_set_info(d, irq, hw, &gic->chip, d->host_data,
-				    handle_percpu_devid_fasteoi_ipi,
-				    NULL, NULL);
-		break;
-	case 16 ... 31:
+	case 0 ... 31:
 		irq_set_percpu_devid(irq);
 		irq_domain_set_info(d, irq, hw, &gic->chip, d->host_data,
 				    handle_percpu_devid_irq, NULL, NULL);

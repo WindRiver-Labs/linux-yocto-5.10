@@ -14,7 +14,9 @@ allOf:
 
 properties:
   compatible:
-    const: xlnx,xps-iic-2.00.a
+    enum:
+      - xlnx,xps-iic-2.00.a
+      - xlnx,axi-iic-2.1
 
   reg:
     maxItems: 1
@@ -29,6 +31,13 @@ properties:
     const: pclk
     description: |
       Input clock name.
+
+  clock-frequency:
+    description: Desired operating frequency, in Hz, of the bus.
+                 If not specified, driver doesn't configure frequency,
+                 relies only on Vivado design IP configuration.
+
+    enum: [100000, 400000, 1000000]
 
 required:
   - compatible
@@ -48,4 +57,5 @@ examples:
 
       #size-cells = <0>;
       #address-cells = <1>;
+      clock-frequency = <400000>;
     };

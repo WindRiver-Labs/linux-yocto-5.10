@@ -24,6 +24,7 @@ config USB_DWC3_ULPI
 choice
 	bool "DWC3 Mode Selection"
 	default USB_DWC3_DUAL_ROLE if (USB && USB_GADGET)
+	default USB_DWC3_OTG if (USB && USB_GADGET && USB_OTG && USB_OTG_FSM)
 	default USB_DWC3_HOST if (USB && !USB_GADGET)
 	default USB_DWC3_GADGET if (!USB && USB_GADGET)
 
@@ -48,6 +49,15 @@ config USB_DWC3_DUAL_ROLE
 	help
 	  This is the default mode of working of DWC3 controller where
 	  both host and gadget features are enabled.
+
+config USB_DWC3_OTG
+	bool "Dual Role mode + OTG"
+	depends on ((USB=y || USB=USB_DWC3) && \
+			(USB_GADGET=y || USB_GADGET=USB_DWC3) && \
+				USB_OTG && USB_OTG_FSM && PM)
+	help
+	  This is the default mode of working of DWC3 controller where
+	  both host and gadget features are enabled with OTG support.
 
 endchoice
 
@@ -137,6 +147,15 @@ config USB_DWC3_QCOM
 	  functionality.
 	  This driver also handles Qscratch wrapper which is needed
 	  for peripheral mode support.
+	  Say 'Y' or 'M' if you have one such device.
+
+config USB_DWC3_XILINX
+	tristate "Xilinx Platforms"
+	depends on (ARCH_ZYNQMP || ARCH_VERSAL) && OF && REGULATOR
+	default USB_DWC3
+	help
+	  Support Xilinx SoCs with DesignWare Core USB3 IP.
+	  This driver handles both ZynqMP and Versal SoC operations.
 	  Say 'Y' or 'M' if you have one such device.
 
 endif
