@@ -90,7 +90,6 @@
 	pinctrl-1 = <&pinctrl1_i2c1_gpio>;
 	scl-gpios = <&gpio1 163 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 	sda-gpios = <&gpio1 165 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
-	status = "okay";
 };
 
 &i2c2 {
@@ -753,6 +752,30 @@
 &gpio1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_gpioeirq>;
+	status = "okay";
+};
+
+&llce_dte_sram {
+	status = "okay";
+};
+
+&llce_ppe_rx_sram {
+	status = "okay";
+};
+
+&llce_ppe_tx_sram {
+	status = "okay";
+};
+
+&llce_frpe_sram {
+	status = "okay";
+};
+
+&llce_shmem {
+	status = "okay";
+};
+
+&llce_boot_status {
 	status = "okay";
 };
 

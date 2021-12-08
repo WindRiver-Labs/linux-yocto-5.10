@@ -872,11 +872,12 @@ out_unlock_rescan:
 static irqreturn_t s32gen1_pcie_hot_plug_irq(int irq, void *arg)
 {
 	struct s32gen1_pcie *s32_pci = arg;
+	struct dw_pcie *pcie = &s32_pci->pcie;
 
 	BSET32(s32_pci, ctrl, PE0_INT_STS, HP_INT_STS);
 
 	/* if EP is not connected, we exit */
-	if (phy_validate(s32_pci->phy0, PHY_MODE_PCIE, 0, NULL))
+	if (!s32gen1_pcie_link_is_up(pcie))
 		return IRQ_HANDLED;
 
 	return IRQ_WAKE_THREAD;
@@ -985,7 +986,7 @@ static int s32gen1_pcie_config_hp_irq(struct s32gen1_pcie *s32_pp,
 	return ret;
 }
 
-static int __init s32gen1_add_pcie_port(struct pcie_port *pp)
+static int s32gen1_add_pcie_port(struct pcie_port *pp)
 {
 	struct dw_pcie *pcie = to_dw_pcie_from_pp(pp);
 	int ret;
@@ -1027,7 +1028,7 @@ static struct dw_pcie_ep_ops pcie_ep_ops = {
 	.raise_irq = s32gen1_pcie_ep_raise_irq,
 };
 
-static int __init s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp)
+static int s32gen1_add_pcie_ep(struct s32gen1_pcie *s32_pp)
 {
 	int ret;
 	struct dw_pcie *pcie = &s32_pp->pcie;
@@ -1550,9 +1551,8 @@ static int s32gen1_pcie_config_common(struct s32gen1_pcie *s32_pp,
 	/* MSI configuration, for both RC and EP */
 #ifdef CONFIG_PCI_MSI
 	if ((!s32_pp->is_endpoint) && (!s32gen1_has_msi_parent(pp))) {
-		ret = s32gen1_pcie_config_irq(&pp->msi_irq, "msi", pdev,
-					      s32gen1_pcie_msi_handler, pp);
-		if (ret) {
+		pp->msi_irq = platform_get_irq_byname(pdev, "msi");
+		if (pp->msi_irq <= 0) {
 			dev_err(&pdev->dev, "failed to request msi irq\n");
 			return ret;
 		}

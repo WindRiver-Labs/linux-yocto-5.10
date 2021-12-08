@@ -185,7 +185,8 @@ static int hse_key_ring_init(struct device *dev, struct list_head *key_ring,
 		list_add_tail(&ring[i].entry, key_ring);
 	}
 
-	dev_dbg(dev, "key ring type 0x%02x: group id %d, size %d\n", type,
+	dev_dbg(dev, "%s key ring: group id %d, size %d\n",
+		type == HSE_KEY_TYPE_AES ? "aes" : "hmac",
 		group_id, group_size);
 
 	return 0;
@@ -316,7 +317,7 @@ static inline void hse_config_channels(struct device *dev)
  * Copy descriptor to the dedicated space and cache service ID internally.
  */
 static inline void hse_sync_srv_desc(struct device *dev, u8 channel,
-				     struct hse_srv_desc *srv_desc)
+				     const struct hse_srv_desc *srv_desc)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 
@@ -375,7 +376,7 @@ static u8 hse_next_free_channel(struct device *dev)
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	u8 channel;
 
-	for (channel = 0; channel < HSE_NUM_CHANNELS; channel++)
+	for (channel = HSE_NUM_CHANNELS - 1; channel > 0; channel--)
 		switch (drv->type[channel]) {
 		case HSE_CH_TYPE_STREAM:
 			if (atomic_read(&drv->refcnt[channel]))
@@ -521,8 +522,8 @@ int hse_channel_release(struct device *dev, u8 channel)
  *         index out of range, -EBUSY for channel busy, no channel available or
  *         firmware on stand-by, -ENOTRECOVERABLE for firmware in shutdown state
  */
-int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
-		      void *ctx, void (*rx_cbk)(int err, void *ctx))
+int hse_srv_req_async(struct device *dev, u8 channel, const void *srv_desc,
+		      const void *ctx, void (*rx_cbk)(int err, void *ctx))
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	int err;
@@ -564,7 +565,7 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
 	spin_unlock(&drv->tx_lock);
 
 	drv->rx_cbk[channel].fn = rx_cbk;
-	drv->rx_cbk[channel].ctx = ctx;
+	drv->rx_cbk[channel].ctx = (void *)ctx;
 
 	hse_sync_srv_desc(dev, channel, srv_desc);
 
@@ -587,7 +588,7 @@ int hse_srv_req_async(struct device *dev, u8 channel, void *srv_desc,
  *         index out of range, -EBUSY for channel busy, no channel available or
  *         firmware on stand-by, -ENOTRECOVERABLE for firmware in shutdown state
  */
-int hse_srv_req_sync(struct device *dev, u8 channel, void *srv_desc)
+int hse_srv_req_sync(struct device *dev, u8 channel, const void *srv_desc)
 {
 	struct hse_drvdata *drv = dev_get_drvdata(dev);
 	DECLARE_COMPLETION_ONSTACK(done);
@@ -798,7 +799,7 @@ static irqreturn_t hse_evt_dispatcher(int irq, void *dev)
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
 		hse_aead_unregister(&drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
-		hse_hwrng_unregister(dev);
+		hse_rng_unregister(dev);
 
 	dev_crit(dev, "communication terminated, reset system to recover\n");
 
@@ -854,9 +855,11 @@ static int hse_probe(struct platform_device *pdev)
 	if (unlikely(err))
 		goto err_probe_failed;
 
-	dev_info(dev, "firmware type %d, version %d.%d.%d\n",
-		 drv->firmware_version.fw_type, drv->firmware_version.major,
-		 drv->firmware_version.minor, drv->firmware_version.patch);
+	dev_info(dev, "%s firmware, version %d.%d.%d\n",
+		 drv->firmware_version.fw_type == 0 ? "standard" :
+		 (drv->firmware_version.fw_type == 1 ? "premium" : "custom"),
+		 drv->firmware_version.major, drv->firmware_version.minor,
+		 drv->firmware_version.patch);
 
 	/* interface fixup */
 	hse_fw_if_fixup(dev);
@@ -897,7 +900,7 @@ static int hse_probe(struct platform_device *pdev)
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
 		hse_aead_register(dev, &drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
-		hse_hwrng_register(dev);
+		hse_rng_register(dev);
 
 	dev_info(dev, "device ready, status 0x%04X\n", status);
 
@@ -924,7 +927,7 @@ static int hse_remove(struct platform_device *pdev)
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_AEAD))
 		hse_aead_unregister(&drv->aead_algs);
 	if (IS_ENABLED(CONFIG_CRYPTO_DEV_NXP_HSE_HWRNG))
-		hse_hwrng_unregister(dev);
+		hse_rng_unregister(dev);
 
 	/* empty used key rings */
 	hse_key_ring_free(&drv->aes_key_ring);

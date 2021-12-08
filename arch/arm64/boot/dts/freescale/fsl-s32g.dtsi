@@ -27,6 +27,7 @@
 		compatible = "virtio,mmio";
 		reg = <0x0 0x39501000 0x0 0x1000>;
 		interrupts = <0 68 4>;
+		status = "disabled";
 	};
 
 	reserved-memory {
@@ -34,41 +35,41 @@
 		#size-cells = <2>;
 		ranges;
 
-		pfe_reserved_bmu2: pfebufs@83000000 {
+		pfe_reserved_bmu2: pfebufs@8f000000 {
 			compatible = "fsl,pfe-bmu2-pool";
 			/* 2 MB */
-			reg = <0 0x83000000 0 0x200000>;
+			reg = <0 0x8f000000 0 0x200000>;
 			no-map;
 			status = "okay";
 		};
 
-		pfe_reserved: pfebufs@83200000 {
+		pfe_reserved: pfebufs@8f200000 {
 			compatible = "shared-dma-pool";
 			/* 4 MB - 128 KB */
-			reg = <0 0x83200000 0 0x3e0000>;
+			reg = <0 0x8f200000 0 0x3e0000>;
 			no-map;
 			status = "okay";
 		};
 
-		pfe_reserved_bdr: pfebufs@83bf0000 {
+		pfe_reserved_bdr: pfebufs@8f5e0000 {
 			compatible = "fsl,pfe-bdr-pool";
 			/* 128 KB */
-			reg = <0 0x835e0000 0 0x20000>;
+			reg = <0 0x8f5e0000 0 0x20000>;
 			status = "okay";
 		};
 
-		pfe_reserved_slave: pfebufs@83600000 {
+		pfe_reserved_slave: pfebufs@8f600000 {
 			compatible = "shared-dma-pool";
 			/* 2 MB - 128 KB */
-			reg = <0 0x83600000 0 0x1e0000>;
+			reg = <0 0x8f600000 0 0x1e0000>;
 			no-map;
 			status = "disabled";
 		};
 
-		pfe_reserved_bdr_slave: pfebufs@837e0000 {
+		pfe_reserved_bdr_slave: pfebufs@8f7e0000 {
 			compatible = "fsl,pfe-bdr-pool";
 			/* 128 KB */
-			reg = <0 0x837e0000 0 0x20000>;
+			reg = <0 0x8f7e0000 0 0x20000>;
 			status = "disabled";
 		};
 		/* ends 0x83800000 */
@@ -85,7 +86,7 @@
 		#reset-cells = <1>;
 	};
 
-	pfe: pfe@46080000 {
+	pfe: pfe@46000000 {
 		compatible = "fsl,s32g274a-pfeng",
 			     "fsl,s32g274-pfe";
 		reg = <0x0 0x46000000 0x0 0x1000000>,	/* PFE controller */
@@ -312,6 +313,8 @@
 		#address-cells = <0x01>;
 		#size-cells = <0x00>;
 		interrupt-parent = <&gic>;
+		/* Interrupt duplicated for XEN passthrough */
+		interrupts = <GIC_SPI 193 IRQ_TYPE_EDGE_RISING>;
 		dma-coherent;
 		memory-region = <&pfe_reserved_slave>,
 				<&pfe_reserved_bdr_slave>;
@@ -511,34 +514,34 @@
 		status = "disabled";
 	};
 
-	llce0_sram: llce0_sram@43000000 {
+	llce_dte_sram: llce_dte_sram@43000000 {
 		compatible = "mmio-sram";
 		reg = <0x0 0x43000000 0x0 0x2000>;
 	};
 
-	llce1_sram: llce1_sram@43100000 {
+	llce_ppe_rx_sram: llce_ppe_rx_sram@43100000 {
 		compatible = "mmio-sram";
 		reg = <0x0 0x43100000 0x0 0x8000>;
 	};
 
-	llce2_sram: llce2_sram@43200000 {
+	llce_ppe_tx_sram: llce_ppe_tx_sram@43200000 {
 		compatible = "mmio-sram";
 		reg = <0x0 0x43200000 0x0 0x8000>;
 	};
 
-	llce3_sram: llce3_sram@43300000 {
+	llce_frpe_sram: llce_frpe_sram@43300000 {
 		compatible = "mmio-sram";
 		reg = <0x0 0x43300000 0x0 0x10000>;
 	};
 
 	llce_shmem: llce_shmem@43800000 {
 		compatible = "mmio-sram";
-		reg = <0x0 0x43800000 0x0 0x40000>;
+		reg = <0x0 0x43800000 0x0 0x3c000>;
 	};
 
-	llce_boot_status: llce_boot_status@43840000 {
+	llce_boot_status: llce_boot_status@4383c000 {
 		compatible = "mmio-sram";
-		reg = <0x0 0x43840000 0x0 0x10000>;
+		reg = <0x0 0x4383c000 0x0 0x14000>;
 	};
 
 	llce {
@@ -555,14 +558,16 @@
 			/* BLR-OUT_FIFO */
 			<0x4 0 0x0 0x43B08000 0x0 0x6000>,
 			/* Tx_Ack_FIFO */
-			<0x5 0 0x0 0x43B10000 0x0 0x8000>;
+			<0x5 0 0x0 0x43B10000 0x0 0x8000>,
+			/* LLCE SEMA42*/
+			<0x6 0 0x0 0x43C20000 0x0 0x44>;
 
 		clocks = <&clks S32G_SCMI_CLK_LLCE_SYS>;
 		clock-names = "llce_sys";
 		firmware-name = "dte.bin", "ppe_rx.bin",
 			"ppe_tx.bin", "frpe.bin";
-		memory-region = <&llce0_sram>, <&llce1_sram>,
-			<&llce2_sram>, <&llce3_sram>,
+		memory-region = <&llce_dte_sram>, <&llce_ppe_rx_sram>,
+			<&llce_ppe_tx_sram>, <&llce_frpe_sram>,
 			<&llce_shmem>, <&llce_boot_status>;
 		memory-region-names = "dte.bin", "ppe_rx.bin",
 			"ppe_tx.bin", "frpe.bin", "shmem", "status";
@@ -584,13 +589,15 @@
 				<0x2 0x0 0x0 0x1000>,
 				<0x3 0x0 0x0 0x6000>,
 				<0x4 0x0 0x0 0x6000>,
-				<0x5 0x0 0x0 0x8000>;
+				<0x5 0x0 0x0 0x8000>,
+				<0x6 0x0 0x0 0x44>;
 			reg-names = "rxin_fifo",
 				"rxout_fifo",
 				"icsr",
 				"blrin_fifo",
 				"blrout_fifo",
-				"txack_fifo";
+				"txack_fifo",
+				"sema42";
 			clocks = <&clks S32G_SCMI_CLK_LLCE_SYS>;
 			clock-names = "llce_sys";
 			memory-region = <&llce_shmem>, <&llce_boot_status>;
@@ -1092,4 +1099,12 @@
 &qspi {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl0_qspi>;
+};
+
+&stm0 {
+	status = "okay";
+};
+
+&stm1 {
+	status = "okay";
 };
