@@ -7,6 +7,7 @@
 Required properties:
 - compatible : Should be "fsl,s32g274a-pfeng"
 - reg : Address and length of the register set for the device
+- resets: Specify PFE partition reset
 - interrupts : Should contain all pfeng interrupts but hifs: bmu,upegpt,safety
 - clocks : Should contain at least: pfe_sys, pfe_pe
 - memory-region : Physical address space for PFE buffers
@@ -23,6 +24,7 @@ Optional properties:
 - fsl,fw-class-name : PFE CLASS firmware filename
 - fsl,fw-util-name : PFE UTIL firmware filename
 - fsl,pfeng-master-hif-channel : [slave only] The number of master's HIF channel (0-3)
+- phys : Serdes phys for sgmii interfaces
 
 Required subnode:
 - hif : specifies the PFE HIF channel
@@ -111,6 +113,8 @@ pfe@46080000 {
 			      <GIC_SPI 197 IRQ_TYPE_EDGE_RISING>;
 		interrupt-names = "bmu", "nocpy", "upegpt", "safety";
 		dma-coherent;
+		resets = <&reset S32GEN1_SCMI_RST_PART2>;
+		reset-names = "pfe_part";
 		clocks = <&clks S32G_SCMI_CLK_PFE_AXI>,
 			 <&clks S32G_SCMI_CLK_PFE_PE>,
 			 <&clks S32G_SCMI_CLK_PFE_TS>;
@@ -118,6 +122,10 @@ pfe@46080000 {
 		memory-region = <&pfe_reserved_bmu2>, <&pfe_reserved>, <&pfe_reserved_bdr>;
 		fsl,fw-class-name = "s32g_pfe_class.fw";
 		fsl,fw-util-name = "s32g_pfe_util.fw";
+		phys = <&serdes1 PHY_TYPE_XPCS 0 0>,
+			 <&serdes1 PHY_TYPE_XPCS 1 1>,
+			 <&serdes0 PHY_TYPE_XPCS 1 1>;
+		phy-names = "emac0_xpcs", "emac1_xpcs", "emac2_xpcs";
 
 		/* PFE_HIF_0 */
 		pfe_hif0: hif@0 {
