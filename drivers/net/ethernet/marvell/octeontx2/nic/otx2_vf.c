@@ -774,10 +774,9 @@ static void otx2vf_remove(struct pci_dev *pdev)
 
 	vf = netdev_priv(netdev);
 
-	cancel_work_sync(&vf->reset_task);
-
 	if (otx2smqvf_remove(vf)) {
 		otx2_unregister_dl(vf);
+		cancel_work_sync(&vf->reset_task);
 		unregister_netdev(netdev);
 	}
 
