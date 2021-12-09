@@ -7645,6 +7645,7 @@ int stmmac_suspend(struct device *dev)
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct stmmac_priv *priv = netdev_priv(ndev);
 	u32 chan;
+	int ret;
 
 #ifdef CONFIG_STMMAC_NETWORK_PROXY
 	stmmac_pm_suspend(priv, priv, ndev);
