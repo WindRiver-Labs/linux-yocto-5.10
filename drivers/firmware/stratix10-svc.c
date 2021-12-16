@@ -54,7 +54,6 @@ struct stratix10_svc_chan;
  */
 struct stratix10_svc {
 	struct platform_device *stratix10_svc_rsu;
-	struct platform_device *intel_svc_fcs;
 };
 
 /**
@@ -1644,31 +1643,14 @@ static int stratix10_svc_drv_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_put_device;
 
-	svc->intel_svc_fcs = platform_device_alloc(INTEL_FCS, 1);
-	if (!svc->intel_svc_fcs) {
-		dev_err(dev, "failed to allocate %s device\n", INTEL_FCS);
-		ret = -ENOMEM;
-		goto err_del_device;
-	}
-
-	ret = platform_device_add(svc->intel_svc_fcs);
-	if (ret)
-		goto err_del_device;
-
 	dev_set_drvdata(dev, svc);
 
 	pr_info("Intel Service Layer Driver Initialized\n");
 
 	return 0;
 
-err_del_device:
-	platform_device_del(svc->stratix10_svc_rsu);
-
 err_put_device:
 	platform_device_put(svc->stratix10_svc_rsu);
-	if (svc->intel_svc_fcs)
-		platform_device_put(svc->intel_svc_fcs);
-
 
 	return ret;
 }
@@ -1679,7 +1661,6 @@ static int stratix10_svc_drv_remove(struct platform_device *pdev)
 	struct stratix10_svc *svc = dev_get_drvdata(&pdev->dev);
 	struct stratix10_svc_controller *ctrl = platform_get_drvdata(pdev);
 
-	platform_device_unregister(svc->intel_svc_fcs);
 	platform_device_unregister(svc->stratix10_svc_rsu);
 
 	for (i = 0; i < SVC_NUM_CHANNEL; i++) {
