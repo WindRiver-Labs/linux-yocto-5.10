@@ -9,6 +9,7 @@
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/fs.h>
+#include <linux/hw_random.h>
 #include <linux/kobject.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -74,6 +75,7 @@ struct intel_fcs_priv {
 	unsigned int cid_low;
 	unsigned int cid_high;
 	unsigned int sid;
+	struct hwrng rng;
 };
 
 static void fcs_data_callback(struct stratix10_svc_client *client,
@@ -187,6 +189,24 @@ static void fcs_crypto_sessionid_callback(struct stratix10_svc_client *client,
 	complete(&priv->completion);
 }
 
+static void fcs_hwrng_callback(struct stratix10_svc_client *client,
+			       struct stratix10_svc_cb_data *data)
+{
+	struct intel_fcs_priv *priv = client->priv;
+
+	priv->status = 0;
+	priv->kbuf = NULL;
+	priv->size = 0;
+
+	if ((data->status == BIT(SVC_STATUS_OK)) ||
+	    (data->status == BIT(SVC_STATUS_COMPLETED))) {
+		priv->kbuf = data->kaddr2;
+		priv->size = *((unsigned int *)data->kaddr3);
+	}
+
+	complete(&priv->completion);
+}
+
 static int fcs_request_service(struct intel_fcs_priv *priv,
 			       void *msg, unsigned long timeout)
 {
@@ -198,8 +218,10 @@ static int fcs_request_service(struct intel_fcs_priv *priv,
 	reinit_completion(&priv->completion);
 
 	ret = stratix10_svc_send(priv->chan, p_msg);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&priv->lock);
 		return -EINVAL;
+	}
 
 	ret = wait_for_completion_timeout(&priv->completion,
 							timeout);
@@ -327,6 +349,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.c_request.size == 0 ||
+		    data->com_paras.c_request.addr == NULL) {
+			dev_err(dev, "Invalid VAB request param\n");
+			return -EFAULT;
+		}
+
 		dev_dbg(dev, "Test=%d, Size=%d; Address=0x%p\n",
 			data->com_paras.c_request.test.test_word,
 			data->com_paras.c_request.size,
@@ -334,7 +362,7 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 
 		/* Allocate memory for certificate + test word */
 		tsz = sizeof(struct intel_fcs_cert_test_word);
-		datasz = data->com_paras.s_request.size + tsz;
+		datasz = data->com_paras.c_request.size + tsz;
 
 		s_buf = stratix10_svc_allocate_memory(priv->chan, datasz);
 		if (!s_buf) {
@@ -355,7 +383,7 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		/* Copy in the certificate data (skipping over the test word) */
 		ret = copy_from_user(s_buf + tsz,
 				     data->com_paras.c_request.addr,
-				     data->com_paras.s_request.size);
+				     data->com_paras.c_request.size);
 		if (ret) {
 			dev_err(dev, "failed copy buf ret=%d\n", ret);
 			fcs_close_services(priv, s_buf, ps_buf);
@@ -486,6 +514,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.gp_data.size == 0 ||
+		    data->com_paras.gp_data.addr == NULL) {
+			dev_err(dev, "Invalid provision request param\n");
+			return -EFAULT;
+		}
+
 		s_buf = stratix10_svc_allocate_memory(priv->chan,
 					data->com_paras.gp_data.size);
 		if (!s_buf) {
@@ -494,32 +528,58 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		msg->command = COMMAND_FCS_GET_PROVISION_DATA;
-		msg->payload = s_buf;
-		msg->payload_length = data->com_paras.gp_data.size;
-		priv->client.receive_cb = fcs_data_callback;
+		msg->payload = NULL;
+		msg->payload_length = 0;
+		priv->client.receive_cb = fcs_vab_callback;
 
 		ret = fcs_request_service(priv, (void *)msg,
 					  FCS_REQUEST_TIMEOUT);
 		if (!ret && !priv->status) {
-			if (!priv->kbuf) {
-				dev_err(dev, "failure on kbuf\n");
-				fcs_close_services(priv, s_buf, NULL);
-				return -EFAULT;
+			/* to query the complete status */
+			msg->arg[0] = ASYNC_POLL_SERVICE;
+			msg->payload = s_buf;
+			msg->payload_length = data->com_paras.gp_data.size;
+			msg->command = COMMAND_POLL_SERVICE_STATUS_ASYNC;
+			priv->client.receive_cb = fcs_data_callback;
+
+			timeout = 100;
+			while (timeout != 0) {
+				ret = fcs_request_service(priv, (void *)msg,
+							  FCS_REQUEST_TIMEOUT);
+				dev_dbg(dev, "request service ret=%d\n", ret);
+
+				if (!ret && !priv->status) {
+					if (priv->size) {
+						if (!priv->kbuf) {
+							dev_err(dev, "failure on kbuf\n");
+							fcs_close_services(priv, s_buf, NULL);
+							return -EFAULT;
+						}
+
+						data->com_paras.gp_data.size = priv->size;
+						ret = copy_to_user(data->com_paras.gp_data.addr,
+								   priv->kbuf, priv->size);
+						if (ret) {
+							dev_err(dev, "failure on copy_to_user\n");
+							fcs_close_services(priv, s_buf, NULL);
+							return -EFAULT;
+						}
+						break;
+					}
+				} else {
+					data->com_paras.gp_data.addr = NULL;
+					data->com_paras.gp_data.size = 0;
+					break;
+				}
+				timeout--;
+				mdelay(500);
 			}
-			data->com_paras.gp_data.size = priv->size;
-			ret = copy_to_user(data->com_paras.gp_data.addr,
-					   priv->kbuf, priv->size);
-			if (ret) {
-				dev_err(dev, "failure on copy_to_user\n");
-				fcs_close_services(priv, s_buf, NULL);
-				return -EFAULT;
-			}
-			data->status = 0;
 		} else {
 			data->com_paras.gp_data.addr = NULL;
 			data->com_paras.gp_data.size = 0;
-			data->status = priv->status;
 		}
+
+		data->status = priv->status;
 
 		if (copy_to_user((void __user *)arg, data, sizeof(*data))) {
 			dev_err(dev, "failure on copy_to_user\n");
@@ -547,6 +607,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		    data->com_paras.d_encryption.dst_size > ENC_MAX_SZ) {
 			dev_err(dev, "Invalid SDOS Buffer dst size:%d\n",
 				data->com_paras.d_encryption.dst_size);
+			return -EFAULT;
+		}
+
+		if (data->com_paras.d_encryption.src == NULL ||
+		    data->com_paras.d_encryption.dst == NULL) {
+			dev_err(dev, "Invalid SDOS Buffer pointer\n");
 			return -EFAULT;
 		}
 
@@ -658,6 +724,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		    data->com_paras.d_encryption.dst_size > DEC_MAX_SZ) {
 			dev_err(dev, "Invalid SDOS Buffer dst size:%d\n",
 				data->com_paras.d_encryption.dst_size);
+			return -EFAULT;
+		}
+
+		if (data->com_paras.d_encryption.src == NULL ||
+		    data->com_paras.d_encryption.dst == NULL) {
+			dev_err(dev, "Invalid SDOS Buffer pointer\n");
 			return -EFAULT;
 		}
 
@@ -822,6 +894,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.subkey.cmd_data == NULL ||
+		    data->com_paras.subkey.rsp_data == NULL) {
+			dev_err(dev, "Invalid subkey data pointer\n");
+			return -EFAULT;
+		}
+
 		/* allocate buffer for both soruce and destination */
 		rsz = sizeof(struct intel_fcs_attestation_resv_word);
 		datasz = data->com_paras.subkey.cmd_data_sz + rsz;
@@ -843,8 +921,16 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 
 		/* copy the reserve word first then command payload */
 		memcpy(s_buf, &data->com_paras.subkey.resv.resv_word, rsz);
-		memcpy(s_buf + rsz, data->com_paras.subkey.cmd_data,
-		       data->com_paras.subkey.cmd_data_sz);
+
+		/* Copy user data from user space to kernel space */
+		ret = copy_from_user(s_buf + rsz,
+				     data->com_paras.subkey.cmd_data,
+				     data->com_paras.subkey.cmd_data_sz);
+		if (ret) {
+			dev_err(dev, "failure on copy_from_user\n");
+			fcs_close_services(priv, s_buf, d_buf);
+			return -EFAULT;
+		}
 
 		msg->command = COMMAND_FCS_ATTESTATION_SUBKEY;
 		msg->payload = s_buf;
@@ -900,6 +986,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.measurement.cmd_data == NULL ||
+		    data->com_paras.measurement.rsp_data == NULL) {
+			dev_err(dev, "Invalid measurement data pointer\n");
+			return -EFAULT;
+		}
+
 		/* allocate buffer for both soruce and destination */
 		rsz = sizeof(struct intel_fcs_attestation_resv_word);
 		datasz = data->com_paras.measurement.cmd_data_sz + rsz;
@@ -921,8 +1013,16 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 
 		/* copy the reserve word first then command payload */
 		memcpy(s_buf, &data->com_paras.measurement.resv.resv_word, rsz);
-		memcpy(s_buf + rsz, data->com_paras.measurement.cmd_data,
-		       data->com_paras.measurement.cmd_data_sz);
+
+		/* Copy user data from user space to kernel space */
+		ret = copy_from_user(s_buf + rsz,
+				     data->com_paras.measurement.cmd_data,
+				     data->com_paras.measurement.cmd_data_sz);
+		if (ret) {
+			dev_err(dev, "failure on copy_from_user\n");
+			fcs_close_services(priv, s_buf, d_buf);
+			return -EFAULT;
+		}
 
 		msg->command = COMMAND_FCS_ATTESTATION_MEASUREMENTS;
 		msg->payload = s_buf;
@@ -1147,6 +1247,12 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			 return -EFAULT;
 		 }
 
+		if (data->com_paras.k_import.obj_data_sz == 0 ||
+		    data->com_paras.k_import.obj_data == NULL) {
+			dev_err(dev, "Invalid key import request param\n");
+			return -EFAULT;
+		}
+
 		 /* Allocate memory for header + key object */
 		 tsz = sizeof(struct fcs_crypto_key_header);
 		 datasz = data->com_paras.k_import.obj_data_sz + tsz;
@@ -1165,7 +1271,7 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		 }
 
 		 /* copy session ID from the header */
-		 memcpy(s_buf, &data->com_paras.k_import.hd.sid, tsz);
+		 memcpy(s_buf, &data->com_paras.k_import.hd.sid, sizeof(uint32_t));
 		 ret = copy_from_user(s_buf + tsz,
 				      data->com_paras.k_import.obj_data,
 				      data->com_paras.k_import.obj_data_sz);
@@ -2075,6 +2181,18 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.ecdsa_data.src_size == 0 ||
+		    data->com_paras.ecdsa_data.src == NULL) {
+			dev_err(dev, "Invalid ECDH request src param\n");
+			return -EFAULT;
+		}
+
+		if (data->com_paras.ecdsa_data.dst_size == 0 ||
+		    data->com_paras.ecdsa_data.dst == NULL) {
+			dev_err(dev, "Invalid ECDH request dst param\n");
+			return -EFAULT;
+		}
+
 		sid = data->com_paras.ecdsa_data.sid;
 		cid = data->com_paras.ecdsa_data.cid;
 		kuid = data->com_paras.ecdsa_data.kuid;
@@ -2110,8 +2228,15 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -ENOMEM;
 		}
 
-		memcpy(s_buf, data->com_paras.ecdsa_data.src,
-		       data->com_paras.ecdsa_data.src_size);
+		/* Copy user data from user space to kernel space */
+		ret = copy_from_user(s_buf,
+				     data->com_paras.ecdsa_data.src,
+				     data->com_paras.ecdsa_data.src_size);
+		if (ret) {
+			dev_err(dev, "failed copy buf ret=%d\n", ret);
+			fcs_close_services(priv, s_buf, d_buf);
+			return -EFAULT;
+		}
 
 		msg->command = COMMAND_FCS_CRYPTO_ECDH_REQUEST_FINALIZE;
 		msg->arg[0] = sid;
@@ -2178,6 +2303,7 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 					  FCS_REQUEST_TIMEOUT);
 		dev_dbg(dev, "request service ret=%d\n", ret);
 
+		timeout = 100;
 		if (!ret && !priv->status) {
 			/* to query the complete status */
 			msg->arg[0] = ASYNC_POLL_SERVICE;
@@ -2186,7 +2312,6 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			msg->command = COMMAND_POLL_SERVICE_STATUS_ASYNC;
 			priv->client.receive_cb = fcs_data_callback;
 
-			timeout = 100;
 			while (timeout != 0) {
 				ret = fcs_request_service(priv, (void *)msg,
 							  FCS_REQUEST_TIMEOUT);
@@ -2231,6 +2356,18 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		}
 
+		if (data->com_paras.data_sdos_ext.src_size == 0 ||
+		    data->com_paras.data_sdos_ext.src == NULL) {
+			dev_err(dev, "Invalid SDOS request src param\n");
+			return -EFAULT;
+		}
+
+		if (data->com_paras.data_sdos_ext.dst_size == 0 ||
+		    data->com_paras.data_sdos_ext.dst == NULL) {
+			dev_err(dev, "Invalid SDOS request dst param\n");
+			return -EFAULT;
+		}
+
 		sid = data->com_paras.data_sdos_ext.sid;
 		cid = data->com_paras.data_sdos_ext.cid;
 		in_sz = data->com_paras.data_sdos_ext.src_size;
@@ -2248,8 +2385,15 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			return -ENOMEM;
 		}
 
-		memcpy(s_buf, data->com_paras.data_sdos_ext.src,
-		       data->com_paras.data_sdos_ext.src_size);
+		/* Copy user data from user space to kernel space */
+		ret = copy_from_user(s_buf,
+				     data->com_paras.data_sdos_ext.src,
+				     data->com_paras.data_sdos_ext.src_size);
+		if (ret) {
+			dev_err(dev, "failed copy buf ret=%d\n", ret);
+			fcs_close_services(priv, s_buf, d_buf);
+			return -EFAULT;
+		}
 
 		msg->command = COMMAND_FCS_SDOS_DATA_EXT;
 		msg->arg[0] = sid;
@@ -2313,6 +2457,57 @@ static int fcs_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static int fcs_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
+{
+	struct stratix10_svc_client_msg *msg;
+	struct intel_fcs_priv *priv;
+	struct device *dev;
+	void *s_buf;
+	int ret = 0;
+	size_t size = 0;
+
+	priv = (struct intel_fcs_priv *)rng->priv;
+	dev = priv->client.dev;
+
+	msg = devm_kzalloc(dev, sizeof(*msg), GFP_KERNEL);
+	if (!msg) {
+		dev_err(dev, "failed to allocate msg buffer\n");
+		return -ENOMEM;
+	}
+
+	s_buf = stratix10_svc_allocate_memory(priv->chan,
+					      RANDOM_NUMBER_SIZE);
+	if (!s_buf) {
+		dev_err(dev, "failed to allocate random number buffer\n");
+		return -ENOMEM;
+	}
+
+	msg->command = COMMAND_FCS_RANDOM_NUMBER_GEN;
+	msg->payload = s_buf;
+	msg->payload_length = RANDOM_NUMBER_SIZE;
+	priv->client.receive_cb = fcs_hwrng_callback;
+
+	ret = fcs_request_service(priv, (void *)msg,
+				  FCS_REQUEST_TIMEOUT);
+	if (!ret && !priv->status) {
+		if (priv->size && priv->kbuf) {
+			if (max > priv->size)
+				size = priv->size;
+			else
+				size = max;
+
+			memcpy((uint8_t *)buf, (uint8_t *)priv->kbuf, size);
+		}
+	}
+
+	fcs_close_services(priv, s_buf, NULL);
+
+	if (size == 0)
+		return -ENOTSUPP;
+
+	return size;
+}
+
 static const struct file_operations fcs_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = fcs_ioctl,
@@ -2355,14 +2550,25 @@ static int fcs_driver_probe(struct platform_device *pdev)
 
 	init_completion(&priv->completion);
 
-	platform_set_drvdata(pdev, priv);
-
 	ret = misc_register(&priv->miscdev);
 	if (ret) {
 		dev_err(dev, "can't register on minor=%d\n",
 			MISC_DYNAMIC_MINOR);
 		return ret;
 	}
+
+	/* register hwrng device */
+	priv->rng.name = "intel-rng";
+	priv->rng.read = fcs_rng_read;
+	priv->rng.priv = (unsigned long)priv;
+
+	ret = hwrng_register(&priv->rng);
+	if (ret) {
+		dev_err(dev, "can't register RNG device (%d)\n", ret);
+		return ret;
+	}
+
+	platform_set_drvdata(pdev, priv);
 
 	return 0;
 }
@@ -2371,23 +2577,64 @@ static int fcs_driver_remove(struct platform_device *pdev)
 {
 	struct intel_fcs_priv *priv = platform_get_drvdata(pdev);
 
+	hwrng_unregister(&priv->rng);
 	misc_deregister(&priv->miscdev);
 	stratix10_svc_free_channel(priv->chan);
 
 	return 0;
 }
 
+static const struct of_device_id fcs_of_match[] = {
+	{.compatible = "intel,stratix10-soc-fcs"},
+	{.compatible = "intel,agilex-soc-fcs"},
+	{},
+};
+
 static struct platform_driver fcs_driver = {
 	.probe = fcs_driver_probe,
 	.remove = fcs_driver_remove,
 	.driver = {
 		.name = "intel-fcs",
+		.of_match_table = of_match_ptr(fcs_of_match),
 	},
 };
 
-module_platform_driver(fcs_driver);
+MODULE_DEVICE_TABLE(of, fcs_of_match);
+
+static int __init fcs_init(void)
+{
+	struct device_node *fw_np;
+	struct device_node *np;
+	int ret;
+
+	fw_np = of_find_node_by_name(NULL, "svc");
+	if (!fw_np)
+		return -ENODEV;
+
+	of_node_get(fw_np);
+	np = of_find_matching_node(fw_np, fcs_of_match);
+	if (!np) {
+		of_node_put(fw_np);
+		return -ENODEV;
+	}
+
+	of_node_put(np);
+	ret = of_platform_populate(fw_np, fcs_of_match, NULL, NULL);
+	of_node_put(fw_np);
+	if (ret)
+		return ret;
+
+	return platform_driver_register(&fcs_driver);
+}
+
+static void __exit fcs_exit(void)
+{
+	return platform_driver_unregister(&fcs_driver);
+}
+
+module_init(fcs_init);
+module_exit(fcs_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Intel FGPA Crypto Services Driver");
 MODULE_AUTHOR("Richard Gong <richard.gong@intel.com>");
-
