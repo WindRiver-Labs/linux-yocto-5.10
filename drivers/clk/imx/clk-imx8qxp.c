@@ -307,12 +307,6 @@ static struct platform_driver imx8qxp_clk_driver = {
 	},
 	.probe = imx8qxp_clk_probe,
 };
-
-static int __init imx8qxp_clk_driver_init(void)
-{
-	return platform_driver_register(&imx8qxp_clk_driver);
-}
-subsys_initcall_sync(imx8qxp_clk_driver_init);
 module_platform_driver(imx8qxp_clk_driver);
 
 MODULE_AUTHOR("Aisheng Dong <aisheng.dong@nxp.com>");
