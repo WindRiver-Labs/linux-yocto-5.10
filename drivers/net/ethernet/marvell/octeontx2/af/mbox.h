@@ -1988,6 +1988,8 @@ enum ptp_op {
 	PTP_OP_GET_CLOCK = 1,
 	PTP_OP_GET_TSTMP = 2,
 	PTP_OP_SET_THRESH = 3,
+	PTP_OP_SET_CLOCK = 4,
+	PTP_OP_ADJ_CLOCK = 5,
 };
 
 struct ptp_req {
@@ -1996,6 +1998,8 @@ struct ptp_req {
 	s64 scaled_ppm;
 	u8 is_pmu;
 	u64 thresh;
+	u64 nsec;
+	s64 delta;
 };
 
 struct ptp_rsp {
