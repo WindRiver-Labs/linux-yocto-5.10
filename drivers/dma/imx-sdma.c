@@ -1558,6 +1558,57 @@ static void sdma_desc_free(struct virt_dma_desc *vd)
 	kfree(desc);
 }
 
+static int sdma_init(struct sdma_engine *sdma)
+{
+        int i, ret;
+        ret = clk_enable(sdma->clk_ipg);
+        if (ret)
+                return ret;
+        ret = clk_enable(sdma->clk_ahb);
+        if (ret)
+                goto disable_clk_ipg;
+
+        /* Be sure SDMA has not started yet */
+        writel_relaxed(0, sdma->regs + SDMA_H_C0PTR);
+
+                /* disable all channels */
+        for (i = 0; i < sdma->drvdata->num_events; i++)
+                writel_relaxed(0, sdma->regs + chnenbl_ofs(sdma, i));
+
+        /* All channels have priority 0 */
+        for (i = 0; i < MAX_DMA_CHANNELS; i++)
+                writel_relaxed(0, sdma->regs + SDMA_CHNPRI_0 + i * 4);
+
+        ret = sdma_request_channel0(sdma);
+        if (ret)
+                goto err_dma_alloc;
+
+        sdma_config_ownership(&sdma->channel[0], false, true, false);
+
+        /* Set Command Channel (Channel Zero) */
+        writel_relaxed(0x4050, sdma->regs + SDMA_CHN0ADDR);
+
+        /* Set bits of CONFIG register but with static context switching */
+        if (sdma->clk_ratio)
+                writel_relaxed(SDMA_H_CONFIG_ACR, sdma->regs + SDMA_H_CONFIG);
+        else
+                writel_relaxed(0, sdma->regs + SDMA_H_CONFIG);
+
+	writel_relaxed(sdma->ccb_phys, sdma->regs + SDMA_H_C0PTR);
+
+        /* Initializes channel's priorities */
+        sdma_set_channel_priority(&sdma->channel[0], 7);
+
+        return 0;
+
+err_dma_alloc:
+        clk_disable(sdma->clk_ahb);
+disable_clk_ipg:
+        clk_disable(sdma->clk_ipg);
+        dev_err(sdma->dev, "initialisation failed with %d\n", ret);
+        return ret;
+}
+
 static int sdma_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -1590,13 +1641,6 @@ static int sdma_runtime_resume(struct device *dev)
 	struct sdma_engine *sdma = platform_get_drvdata(pdev);
 	int i, ret = 0;
 
-	ret = clk_enable(sdma->clk_ipg);
-	if (ret)
-		return ret;
-	ret = clk_enable(sdma->clk_ahb);
-	if (ret)
-		goto disable_clk_ipg;
-
 	/* Do nothing at HW level if audiomix which shared with audio driver
 	 * not off indeed.
 	 */
@@ -1618,51 +1662,12 @@ static int sdma_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	/* Be sure SDMA has not started yet */
-	writel_relaxed(0, sdma->regs + SDMA_H_C0PTR);
-
-	/* disable all channels */
-	for (i = 0; i < sdma->drvdata->num_events; i++)
-		writel_relaxed(0, sdma->regs + chnenbl_ofs(sdma, i));
-
-	/* All channels have priority 0 */
-	for (i = 0; i < MAX_DMA_CHANNELS; i++)
-		writel_relaxed(0, sdma->regs + SDMA_CHNPRI_0 + i * 4);
-
-	ret = sdma_request_channel0(sdma);
-	if (ret)
+	ret = sdma_init(sdma);
+	if(ret)
 		return ret;
-
-	sdma_config_ownership(&sdma->channel[0], false, true, false);
-
-	/* Set Command Channel (Channel Zero) */
-	writel_relaxed(0x4050, sdma->regs + SDMA_CHN0ADDR);
-
-	/* Set bits of CONFIG register but with static context switching */
-	if (sdma->clk_ratio)
-		writel_relaxed(SDMA_H_CONFIG_ACR, sdma->regs + SDMA_H_CONFIG);
-	else
-		writel_relaxed(0, sdma->regs + SDMA_H_CONFIG);
-
-	writel_relaxed(sdma->ccb_phys, sdma->regs + SDMA_H_C0PTR);
-
-	/* Initializes channel's priorities */
-	sdma_set_channel_priority(&sdma->channel[0], 7);
-
-	if (!sdma->fw_data)
-		dev_dbg(sdma->dev, "firmware not ready.\n");
-	else if (sdma_load_script(sdma))
-		dev_warn(sdma->dev, "failed to load script.\n");
-
-	sdma->is_on = true;
 
 	return 0;
 
-disable_clk_ipg:
-	clk_disable(sdma->clk_ipg);
-	dev_err(sdma->dev, "initialisation failed with %d\n", ret);
-
-	return ret;
 }
 
 static int sdma_alloc_chan_resources(struct dma_chan *chan)
@@ -1670,7 +1675,7 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 	struct imx_dma_data *data = chan->private;
 	struct imx_dma_data mem_data;
-	int prio;
+	int ret, prio;
 
 	/*
 	 * MEMCPY may never setup chan->private by filter function such as
@@ -1710,7 +1715,28 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
 	sdmac->event_id1 = data->dma_request2;
 	sdmac->prio = prio;
 
+	if (sdmac->sdma->drvdata->pm_runtime)
+		pm_runtime_get_sync(sdmac->sdma->dev);
+	else {
+		ret = clk_enable(sdmac->sdma->clk_ipg);
+		if (ret)
+			return ret;
+		ret = clk_enable(sdmac->sdma->clk_ahb);
+		if (ret)
+			goto disable_clk_ahb;
+	}
+
+	ret = sdma_set_channel_priority(sdmac, prio);
+	if (ret)
+		goto disable_clk_ahb;
+
 	return 0;
+
+disable_clk_ahb:
+        clk_disable(sdmac->sdma->clk_ahb);
+disable_clk_ipg:
+        clk_disable(sdmac->sdma->clk_ipg);
+        return ret;
 }
 
 static void sdma_free_chan_resources(struct dma_chan *chan)
@@ -2592,6 +2618,12 @@ static int sdma_probe(struct platform_device *pdev)
 	}
 
 	pm_runtime_enable(&pdev->dev);
+
+	if (!sdma->drvdata->pm_runtime) {
+		ret = sdma_init(sdma);
+		if (ret)
+                	goto err_init;
+	}
 
 	return 0;
 
