@@ -180,6 +180,8 @@ M(RPM_STATS,		0x21C, rpm_stats, msg_req, rpm_stats_rsp)	\
 M(CGX_MAC_ADDR_RESET,	0x21D, cgx_mac_addr_reset, msg_req, msg_rsp)	\
 M(CGX_MAC_ADDR_UPDATE,	0x21E, cgx_mac_addr_update, cgx_mac_addr_update_req,    \
 			       msg_rsp)					\
+M(CGX_PRIO_FLOW_CTRL_CFG, 0x21F, cgx_prio_flow_ctrl_cfg, cgx_pfc_cfg,  \
+				 cgx_pfc_rsp)                               \
 /* NPA mbox IDs (range 0x400 - 0x5FF) */				\
 M(NPA_LF_ALLOC,		0x400, npa_lf_alloc,				\
 				npa_lf_alloc_req, npa_lf_alloc_rsp)	\
@@ -712,6 +714,21 @@ struct rpm_stats_rsp {
 	u64 tx_stats[RPM_TX_STATS_COUNT];
 };
 
+struct cgx_pfc_cfg {
+	struct mbox_msghdr hdr;
+	u8 rx_pause;
+	u8 tx_pause;
+	u16 pfc_en; /*  bitmap indicating pfc enabled traffic classes */
+};
+
+struct cgx_pfc_rsp {
+	struct mbox_msghdr hdr;
+	u8 rx_pause;
+	u8 tx_pause;
+};
+
+ /* NPA mbox message formats */
+
 struct npc_set_pkind {
 	struct mbox_msghdr hdr;
 #define OTX2_PRIV_FLAGS_DEFAULT  BIT_ULL(0)
@@ -838,6 +855,7 @@ enum nix_af_status {
 	NIX_AF_ERR_BANDPROF_INVAL_REQ  = -428,
 	NIX_AF_ERR_CQ_CTX_WRITE_ERR  = -429,
 	NIX_AF_ERR_AQ_CTX_RETRY_WRITE  = -430,
+	NIX_AF_ERR_LINK_CREDITS  = -431,
 };
 
 /* For NIX RX vtag action  */
@@ -1169,6 +1187,7 @@ struct nix_rx_cfg {
 	struct mbox_msghdr hdr;
 #define NIX_RX_OL3_VERIFY   BIT(0)
 #define NIX_RX_OL4_VERIFY   BIT(1)
+#define NIX_RX_DROP_RE      BIT(2)
 	u8 len_verify; /* Outer L3/L4 len check */
 #define NIX_RX_CSUM_OL4_VERIFY  BIT(0)
 	u8 csum_verify; /* Outer L4 checksum verification */
@@ -2012,6 +2031,10 @@ enum cgx_af_status {
 	LMAC_AF_ERR_INVALID_PARAM	= -1101,
 	LMAC_AF_ERR_PF_NOT_MAPPED	= -1102,
 	LMAC_AF_ERR_PERM_DENIED		= -1103,
+	LMAC_AF_ERR_PFC_ENADIS_PERM_DENIED       = -1104,
+	LMAC_AF_ERR_8023PAUSE_ENADIS_PERM_DENIED = -1105,
+	LMAC_AF_ERR_CMD_TIMEOUT = -1106,
+	LMAC_AF_ERR_FIRMWARE_DATA_NOT_MAPPED = -1107,
 };
 
 #endif /* MBOX_H */

@@ -99,7 +99,6 @@ struct rx_ft_cfg {
 	void __iomem			*jdt_virt_addr;
 	u8				jd_rd_offset;	/* jd rd offset */
 	u8				pkt_offset;
-	int				mbt_last_idx;	/* sw head */
 	struct napi_struct		napi;
 	struct otx2_rfoe_ndev_priv	*priv;
 };
@@ -211,5 +210,8 @@ void otx2_rfoe_set_ethtool_ops(struct net_device *netdev);
 void otx2_rfoe_calc_ptp_ts(struct otx2_rfoe_ndev_priv *priv, u64 *ts);
 int otx2_rfoe_ptp_init(struct otx2_rfoe_ndev_priv *priv);
 void otx2_rfoe_ptp_destroy(struct otx2_rfoe_ndev_priv *priv);
+
+/* update carrier state */
+void otx2_rfoe_set_link_state(struct net_device *netdev, u8 state);
 
 #endif

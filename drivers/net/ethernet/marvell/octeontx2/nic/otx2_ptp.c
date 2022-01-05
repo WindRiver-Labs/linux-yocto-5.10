@@ -5,6 +5,7 @@
  *
  */
 
+#include <linux/module.h>
 #include "otx2_common.h"
 #include "otx2_ptp.h"
 
@@ -292,11 +293,20 @@ int otx2_ptp_init(struct otx2_nic *pfvf)
 		goto error;
 	}
 
+	if (is_dev_otx2(pfvf->pdev)) {
+		ptp_ptr->convert_rx_ptp_tstmp = &otx2_ptp_convert_rx_timestamp;
+		ptp_ptr->convert_tx_ptp_tstmp = &otx2_ptp_convert_tx_timestamp;
+	} else {
+		ptp_ptr->convert_rx_ptp_tstmp = &cn10k_ptp_convert_timestamp;
+		ptp_ptr->convert_tx_ptp_tstmp = &cn10k_ptp_convert_timestamp;
+	}
+
 	pfvf->ptp = ptp_ptr;
 
 error:
 	return err;
 }
+EXPORT_SYMBOL_GPL(otx2_ptp_init);
 
 void otx2_ptp_destroy(struct otx2_nic *pfvf)
 {
@@ -309,6 +319,7 @@ void otx2_ptp_destroy(struct otx2_nic *pfvf)
 	kfree(ptp);
 	pfvf->ptp = NULL;
 }
+EXPORT_SYMBOL_GPL(otx2_ptp_destroy);
 
 int otx2_ptp_clock_index(struct otx2_nic *pfvf)
 {
@@ -317,6 +328,7 @@ int otx2_ptp_clock_index(struct otx2_nic *pfvf)
 
 	return ptp_clock_index(pfvf->ptp->ptp_clock);
 }
+EXPORT_SYMBOL_GPL(otx2_ptp_clock_index);
 
 int otx2_ptp_tstamp2time(struct otx2_nic *pfvf, u64 tstamp, u64 *tsns)
 {
@@ -327,3 +339,8 @@ int otx2_ptp_tstamp2time(struct otx2_nic *pfvf, u64 tstamp, u64 *tsns)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(otx2_ptp_tstamp2time);
+
+MODULE_AUTHOR("Sunil Goutham <sgoutham@marvell.com>");
+MODULE_DESCRIPTION("Marvell RVU NIC PTP Driver");
+MODULE_LICENSE("GPL v2");

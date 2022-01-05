@@ -56,8 +56,6 @@ static int __init ghes_bed_acpi_match_resource(struct platform_device *pdev,
 {
 	struct resource *res;
 
-	initdbgmsg("%s: entry\n", __func__);
-
 	// Error Block Ring
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
 	if (!res) {
@@ -80,8 +78,6 @@ static int __init ghes_bed_of_match_resource(struct mrvl_bed_source *bsrc)
 	const __be32 *res;
 	u64 size;
 	u64 base;
-
-	initdbgmsg("%s: entry\n", __func__);
 
 	of_node = of_find_matching_node_and_match(NULL, bed_bert_of_match, NULL);
 	if (!of_node) {
@@ -137,7 +133,7 @@ static int __init ghes_bed_map_resource(struct device *dev, struct mrvl_bed_sour
 
 static int __init ghes_bed_count_error(struct mrvl_bed_source *bsrc)
 {
-	struct mrvl_ghes_err_ring *ring;
+	struct otx2_ghes_err_ring *ring;
 	size_t error_cnt = 0;
 
 	ring = bsrc->block_va;
@@ -163,7 +159,7 @@ static int __init ghes_bed_count_error(struct mrvl_bed_source *bsrc)
 
 static int __init ghes_bed_adjust_bert_layout(struct mrvl_bed_source *bsrc)
 {
-	struct mrvl_ghes_err_ring *ring;
+	struct otx2_ghes_err_ring *ring;
 	size_t ring_len;
 	size_t bert_len;
 
@@ -180,8 +176,8 @@ static int __init ghes_bed_adjust_bert_layout(struct mrvl_bed_source *bsrc)
 	 *		[*] ...
 	 * [3] BERT
 	 */
-	ring_len = sizeof(struct mrvl_ghes_err_ring) +
-			(sizeof(struct mrvl_ghes_err_record) * (ring->size - 1));
+	ring_len = sizeof(struct otx2_ghes_err_ring) +
+			(sizeof(struct otx2_ghes_err_record) * (ring->size - 1));
 
 	ring_len = roundup(ring_len, 8);
 
@@ -215,17 +211,15 @@ static int __init ghes_bed_fetch_errors(struct mrvl_bed_source *bsrc)
 	struct acpi_table_bert *bert_tbl;
 	struct acpi_bert_region *bert_esb;
 	struct bed_bert_mem_entry *bert_entries;
-	struct mrvl_ghes_err_ring *ring;
+	struct otx2_ghes_err_ring *ring;
 	struct acpi_hest_generic_data *hest_gen_data;
 	struct bed_bert_mem_entry *bert_mem_entry;
 	struct acpi_hest_generic_status *estatus;
 	struct cper_sec_mem_err_old *mem_err;
-	struct mrvl_ghes_err_record *err_rec;
+	struct otx2_ghes_err_record *err_rec;
 	u8 *p;
 	u8 sum = 0;
 	u32 idx = 0;
-
-	initdbgmsg("%s: entry\n", __func__);
 
 	ring = bsrc->block_va;
 
@@ -240,17 +234,13 @@ static int __init ghes_bed_fetch_errors(struct mrvl_bed_source *bsrc)
 
 	bert_entries = (struct bed_bert_mem_entry *)bert_esb;
 
-	strncpy(bert_tbl->header.signature, ACPI_SIG_BERT,
-			  sizeof(bert_tbl->header.signature));
+	strcpy(bert_tbl->header.signature, ACPI_SIG_BERT);
 	bert_tbl->header.length = sizeof(*bert_tbl);
 	bert_tbl->header.revision = 1;
 	bert_tbl->header.oem_revision = 1;
-	strncpy(bert_tbl->header.oem_id, BERT_OEM_ID,
-		sizeof(bert_tbl->header.oem_id));
-	strncpy(bert_tbl->header.oem_table_id, BERT_TBL_OEM_ID,
-		sizeof(bert_tbl->header.oem_table_id));
-	strncpy(bert_tbl->header.asl_compiler_id, BERT_OEM_ID,
-		sizeof(bert_tbl->header.asl_compiler_id));
+	strcpy(bert_tbl->header.oem_id, BERT_OEM_ID);
+	strcpy(bert_tbl->header.oem_table_id, BERT_TBL_OEM_ID);
+	strcpy(bert_tbl->header.asl_compiler_id, BERT_OEM_ID);
 	bert_tbl->header.asl_compiler_revision = 1;
 
 	p = (u8 *)&bert_tbl->header;
@@ -323,8 +313,6 @@ static int __init ghes_bert_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	int ret = -ENODEV;
 
-	initdbgmsg("%s: entry\n", __func__);
-
 #ifdef CONFIG_CRASH_DUMP
 	if (is_kdump_kernel())
 #else
@@ -351,7 +339,7 @@ static int __init ghes_bert_probe(struct platform_device *pdev)
 
 	ret = ghes_bed_count_error(&bed_src);
 	if (ret <= 0) {
-		initerrmsg("%s No BERT errors\n", __func__);
+		initdbgmsg("%s No BERT errors\n", __func__);
 		goto exit1;
 	}
 
@@ -368,8 +356,12 @@ static int __init ghes_bert_probe(struct platform_device *pdev)
 	}
 
 	if (!has_acpi_companion(dev)) {
-		initdbgmsg("%s Setup bert table\n", __func__);
 		bert_table_set(bed_src.bert_va);
+	}
+
+	if (has_acpi_companion(dev) && !pfn_valid(PHYS_PFN(bed_src.block_pa))) {
+		devm_iounmap(dev, bed_src.block_va);
+		devm_release_mem_region(dev, bed_src.block_pa, bed_src.block_sz);
 	}
 
 exit1:
@@ -383,12 +375,10 @@ exit0:
 
 static void ghes_bert_shutdown(struct platform_device *pdev)
 {
-	initerrmsg("%s: entry\n", __func__);
 }
 
 static int ghes_bert_remove(struct platform_device *pdev)
 {
-	initerrmsg("%s: entry\n", __func__);
 	return 0;
 }
 
@@ -399,7 +389,7 @@ static const struct platform_device_id ghes_bert_pdev_match[] = {
 };
 MODULE_DEVICE_TABLE(platform, ghes_bert_pdev_match);
 
-static struct platform_driver ghes_bert_drv __refdata = {
+static struct platform_driver ghes_bert_drv_ops __refdata = {
 	.driver = {
 		.name             = DRV_NAME,
 		.of_match_table   = bed_bert_of_match,
@@ -413,13 +403,13 @@ static struct platform_driver ghes_bert_drv __refdata = {
 
 static int __init ghes_bert_init(void)
 {
-	platform_driver_probe(&ghes_bert_drv, ghes_bert_probe);
+	platform_driver_probe(&ghes_bert_drv_ops, ghes_bert_probe);
 	return 0;
 }
 
 static void __exit ghes_bert_exit(void)
 {
-	platform_driver_unregister(&ghes_bert_drv);
+	platform_driver_unregister(&ghes_bert_drv_ops);
 }
 
 module_init(ghes_bert_init);

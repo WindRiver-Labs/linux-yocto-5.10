@@ -21,7 +21,6 @@
 #include <soc/marvell/octeontx/octeontx_smc.h>
 #include <asm/cputype.h>
 #include "otx2-sdei-ghes.h"
-#include "cn10k-core-cper.h"
 
 #define DRV_NAME       "sdei-ghes"
 
@@ -64,15 +63,15 @@ static const struct pci_device_id sdei_ghes_mrvl_pci_tbl[] = {
 	{ 0, },
 };
 
-static struct page *error_status_block_page;
-static u32 order;
+static bool cn10kx_model;
+static u8 tmp[256];
 
 static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 {
 	struct acpi_hest_generic_status *estatus;
 	struct acpi_hest_generic_data *gdata;
 	void *esb_err;
-	struct mrvl_ghes_err_record *ring_rec;
+	struct otx2_ghes_err_record *ring_rec;
 	struct mrvl_ghes_source *gsrc;
 	u32 head, tail;
 
@@ -85,19 +84,11 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 
 	gsrc = arg;
 
-	if (gsrc->esa_va && *gsrc->esa_va != gsrc->esb_pa) {
-		initerrmsg("%s ACPI ESB address 0x%llx 0x%llx\n",
-				__func__, *gsrc->esa_va, gsrc->esb_pa);
-		*gsrc->esa_va = gsrc->esb_pa;
-	} else
-		initdbgmsg("%s no need patch address\n", __func__);
-
-	initdbgmsg("%s matching event id 0x%x\n", __func__, gsrc->id);
-
 	head = gsrc->ring->head;
 	tail = gsrc->ring->tail;
 
-	initerrmsg("%s head=%d (%llx), tail=%d (%llx), size=%d, sign=%x\n", __func__, head,
+	initerrmsg("%s to %llx, head=%d (%llx), tail=%d (%llx), size=%d, sign=%x\n", __func__,
+			(long long)gsrc->esb_va, head,
 			(long long)&gsrc->ring->head, tail, (long long)&gsrc->ring->tail,
 			gsrc->ring->size, *(int *)((&gsrc->ring->size) + 1));
 
@@ -112,23 +103,22 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 
 	ring_rec = &gsrc->ring->records[tail];
 
-	estatus = gsrc->esb_va;
+	memset(tmp, 0, sizeof(tmp));
+	estatus = (struct acpi_hest_generic_status *)tmp;
 	gdata = (struct acpi_hest_generic_data *)(estatus + 1);
 	esb_err = (gdata + 1);
 
-	initdbgmsg("%s esb=%llx, gdata=%llx, esb_err=%llx\n", __func__,
-			(long long)estatus, (long long)gdata, (long long)esb_err);
-
+	//This simply needs the entry count to be non-zero.
+	//Set entry count to one (see ACPI_HEST_ERROR_ENTRY_COUNT).
+	estatus->block_status = (1 << 4); // i.e. one entry
 	estatus->raw_data_offset = sizeof(*estatus) + sizeof(*gdata);
 	estatus->raw_data_length = 0;
 	estatus->data_length = gsrc->esb_sz - sizeof(*estatus);
 	estatus->error_severity = ring_rec->severity;
-
-	memset(gdata, 0, sizeof(*gdata));
 	gdata->revision = 0x201; // ACPI 4.x
 	if (ring_rec->fru_text[0]) {
 		gdata->validation_bits = ACPI_HEST_GEN_VALID_FRU_STRING;
-		strncpy(gdata->fru_text, ring_rec->fru_text, sizeof(gdata->fru_text));
+		memcpy_fromio(gdata->fru_text, ring_rec->fru_text, sizeof(gdata->fru_text));
 	}
 	gdata->error_severity = estatus->error_severity;
 
@@ -138,19 +128,12 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	gdata->error_data_length = gsrc->esb_sz -
 			(sizeof(*estatus) + sizeof(*gdata));
 
+	memcpy_fromio(esb_err, &ring_rec->u.mcc, gdata->error_data_length);
 	initdbgmsg("%s err_sev=%x,\n", __func__, ring_rec->severity);
-
-	if (pfn_valid(PHYS_PFN(gsrc->ring_pa)))
-		memcpy(esb_err, &ring_rec->u.mcc, gdata->error_data_length);
-	else
-		memcpy_fromio(esb_err, &ring_rec->u.mcc, gdata->error_data_length);
+	memcpy_toio(gsrc->esb_va, tmp, gsrc->esb_sz);
 
 	/*Ensure that error status is committed to memory prior to set block_status*/
 	wmb();
-
-	//This simply needs the entry count to be non-zero.
-	//Set entry count to one (see ACPI_HEST_ERROR_ENTRY_COUNT).
-	estatus->block_status = (1 << 4); // i.e. one entry
 
 	if (++tail >= gsrc->ring->size)
 		tail = 0;
@@ -159,13 +142,13 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	return 0;
 }
 
-int sdei_ras_core_callback(uint32_t event_id, struct pt_regs *regs, void *arg)
+static int sdei_ras_core_callback(uint32_t event_id, struct pt_regs *regs, void *arg)
 {
 	struct mrvl_ghes_source *core = NULL;
 	struct mrvl_core_error_raport *raport = NULL;
 	struct acpi_hest_generic_status *estatus = NULL;
 	struct acpi_hest_generic_data *gdata = NULL;
-	struct processor_error *rec = NULL;
+	struct otx2_ghes_err_record *rec = NULL;
 	uint32_t head = 0;
 	uint32_t tail = 0;
 
@@ -188,39 +171,43 @@ int sdei_ras_core_callback(uint32_t event_id, struct pt_regs *regs, void *arg)
 				event_id, head, core->ring->size);
 		return -EINVAL;
 	}
-	rec = &core->ring_core->error[tail];
 
-	raport = core->esb_core_va;
+	memset(tmp, 0, sizeof(tmp));
+	rec = &core->ring->records[tail];
 
+	raport = (struct mrvl_core_error_raport *)tmp;
 	estatus = &raport->estatus;
 	gdata = &raport->gdata;
 
-	estatus->raw_data_offset = sizeof(*estatus) + sizeof(*gdata);
+	estatus->block_status = (1 << 4);
+	estatus->raw_data_offset = sizeof(struct acpi_hest_generic_status) +
+			sizeof(struct acpi_hest_generic_data);
 	estatus->raw_data_length = 0;
-	estatus->data_length = core->esb_sz - sizeof(*estatus);
+	estatus->data_length = core->esb_sz - sizeof(struct acpi_hest_generic_status);
 	estatus->error_severity = rec->severity;
 
-	memset(gdata, 0, sizeof(*gdata));
 	gdata->revision = 0x201; // ACPI 4.x
 	if (rec->fru_text[0]) {
 		gdata->validation_bits = ACPI_HEST_GEN_VALID_FRU_STRING;
-		strncpy(gdata->fru_text, rec->fru_text, sizeof(gdata->fru_text));
+		memcpy(gdata->fru_text, rec->fru_text, sizeof(gdata->fru_text));
 	}
+
 	gdata->error_severity = estatus->error_severity;
-
 	guid_copy((guid_t *)gdata->section_type, &CPER_SEC_PROC_ARM);
-
-	gdata->error_data_length = core->esb_sz - (sizeof(*estatus) + sizeof(*gdata));
+	gdata->error_data_length = core->esb_sz -
+			(sizeof(struct acpi_hest_generic_status) +
+					sizeof(struct acpi_hest_generic_data));
 
 	initdbgmsg("%s event 0x%x error severity=%x,\n", DRV_NAME, core->id,
 			rec->severity);
 
-	memcpy(&raport->desc, &rec->desc, gdata->error_data_length);
+	memcpy_fromio(&raport->desc, &rec->u.core.desc, gdata->error_data_length);
+	memcpy_fromio(&raport->info, &rec->u.core.info, sizeof(rec->u.core.info));
+
+	memcpy_toio(core->esb_core_va, tmp, core->esb_sz);
 
 	/*Ensure that error status is committed to memory prior to set status*/
 	wmb();
-
-	estatus->block_status = (1 << 4);
 
 	if (++tail >= core->ring->size)
 		tail = 0;
@@ -300,10 +287,10 @@ static int sdei_ghes_driver_init(struct platform_device *pdev)
 	for (i = 0; i < ghes_drv->source_count; i++) {
 		gsrc = &ghes_drv->source_list[i];
 
-		if (!strncmp("core", gsrc->name, 4))
-			ret = sdei_event_register(gsrc->id, sdei_ras_core_callback, gsrc);
-		else
+		if (gsrc->id < OCTEONTX_SDEI_RAS_AP0_EVENT)
 			ret = sdei_event_register(gsrc->id, sdei_ghes_callback, gsrc);
+		else
+			ret = sdei_event_register(gsrc->id, sdei_ras_core_callback, gsrc);
 
 		if (ret < 0) {
 			dev_err(dev, "Error %d registering ghes 0x%x (%s)\n",
@@ -361,54 +348,6 @@ static int sdei_ghes_driver_deinit(struct platform_device *pdev)
 	return 0;
 }
 
-/*
- * For ACPI, the Error Status address must be present in the
- * memory map.  If not present, ACPI can generate an exception
- * when trying to map it (see apei_read/acpi_os_read_memory()).
- * For this reason, if the Error Status Address is NOT present
- * we allocate one here (the firmware doesn't actually write
- * to this block; THIS driver does so, in response to SDEI
- * notifications).
- */
-static int sdei_ghes_adjust_error_status_block(struct mrvl_sdei_ghes_drv *ghes_drv)
-{
-	struct mrvl_ghes_source *gsrc;
-	phys_addr_t pg_pa;
-	void *pg_va;
-	int i;
-
-	gsrc = ghes_drv->source_list;
-
-	if (pfn_valid(PHYS_PFN(gsrc->esa_pa))) {
-		initdbgmsg("%s not required\n", __func__);
-		return 0;
-	} else
-		initdbgmsg("%s required\n", __func__);
-
-	error_status_block_page = alloc_pages(GFP_KERNEL, order);
-	if (!error_status_block_page) {
-		pr_err("Unable to allocate error status block\n");
-		return -ENOMEM;
-	}
-
-	pg_pa = PFN_PHYS(page_to_pfn(error_status_block_page));
-	pg_va = page_address(error_status_block_page);
-
-	initdbgmsg("Allocated Error Status Address %llx (%llx) pages=%d\n",
-			(unsigned long long)pg_va, (unsigned long long)pg_pa, 1 << order);
-
-	for (i = 0; i < ghes_drv->source_count; i++) {
-		gsrc = &ghes_drv->source_list[i];
-
-		gsrc->esa_pa  = pg_pa + (gsrc->esa_pa & ~PAGE_MASK);
-		gsrc->esb_pa  = pg_pa + (gsrc->esb_pa & ~PAGE_MASK);
-		initdbgmsg("GHES adj: %s 0x%llx/0x%llx/0x%llx, ID:0x%x)\n", gsrc->name,
-				gsrc->esa_pa, gsrc->esb_pa, gsrc->ring_pa, gsrc->id);
-	}
-
-	return 0;
-}
-
 static int __init sdei_ghes_of_match_resource(struct platform_device *pdev)
 {
 	struct device_node *of_node;
@@ -441,7 +380,6 @@ static int __init sdei_ghes_of_match_resource(struct platform_device *pdev)
 
 		gsrc = &ghes_drv->source_list[i];
 
-		// Name
 		strncpy(gsrc->name, child_node->name, sizeof(gsrc->name) - 1);
 
 		// Error Status Address
@@ -502,30 +440,41 @@ static int __init sdei_ghes_of_match_resource(struct platform_device *pdev)
 	return 0;
 }
 
-static void __init sdei_ghes_set_name(struct mrvl_sdei_ghes_drv *ghes_drv)
+static int __init sdei_ghes_get_esa(struct acpi_hest_header *hest_hdr, void *data)
 {
-	u32 i;
-	struct device_node *of_node;
-	struct device_node *child_node;
-	struct mrvl_ghes_source *gsrc;
+	struct acpi_hest_generic *generic = (struct acpi_hest_generic *)hest_hdr;
+	u64 *esrc = data;
+	static int i;
 
-	of_node = of_find_matching_node(NULL, sdei_ghes_of_match);
-	i = 0;
+	initdbgmsg("%s 0x%llx: 0x%llx\n", __func__,
+			(long long)&generic->error_status_address.address,
+			(long long)generic->error_status_address.address);
+	esrc[i] = generic->error_status_address.address;
+	i++;
 
-	if (of_node) {
-		for_each_available_child_of_node(of_node, child_node) {
-			gsrc = &ghes_drv->source_list[i];
-			strncpy(gsrc->name, child_node->name, sizeof(gsrc->name) - 1);
-			initdbgmsg("%s %s\n", __func__, gsrc->name);
-			i++;
-		}
-	} else {
-		for (i = 0; i < ghes_drv->source_count; i++) {
-			gsrc = &ghes_drv->source_list[i];
-			sprintf(gsrc->name, "GHES%d", i);
-			initdbgmsg("%s %s\n", __func__, gsrc->name);
-		}
+	return 0;
+}
+
+static phys_addr_t __init sdei_ghes_get_error_source_address(struct mrvl_sdei_ghes_drv *ghes_drv)
+{
+	int i = 0;
+	u64 *esrc = NULL;
+	phys_addr_t ret = ~0ULL;
+
+	esrc = kcalloc(ghes_drv->source_count, sizeof(u64 *), GFP_KERNEL);
+	if (!esrc) {
+		initdbgmsg("%s Failed to allocate esrc\n", __func__);
+		return 0;
 	}
+
+	apei_hest_parse(sdei_ghes_get_esa, esrc);
+
+	for (i = 0; i < ghes_drv->source_count; i++) {
+		ret = ret > esrc[i] ? esrc[i] : ret;
+	}
+
+	kfree(esrc);
+	return ret;
 }
 
 static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
@@ -536,13 +485,13 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 	struct device *dev;
 	size_t i = 0;
 	size_t idx = 0;
+	phys_addr_t base = 0;
+	u32 core = 0;
 
 	dev = &pdev->dev;
 	ghes_drv = platform_get_drvdata(pdev);
 
-	initdbgmsg("%s: entry\n", __func__);
-
-	sdei_ghes_set_name(ghes_drv);
+	base = sdei_ghes_get_error_source_address(ghes_drv);
 
 	for (i = 0; i < ghes_drv->source_count; i++) {
 		gsrc = &ghes_drv->source_list[i];
@@ -555,7 +504,13 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 		}
 		initdbgmsg("%s Status Address %s [%llx - %llx, %lx, %lx]\n", __func__,
 				res->name, res->start, res->end, res->flags, res->desc);
-		gsrc->esa_pa = res->start;
+		/*
+		 * HEST define BASE address 'error status address' block
+		 * DSDT define offset from BASE for error address status/block/ring
+		 * driver make valid addresses base + offset
+		 * and next patch HEST with validated addresses
+		 */
+		gsrc->esa_pa = res->start + base;
 		idx++;
 
 		// Error Status Block Buffer
@@ -567,7 +522,7 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 		initdbgmsg("%s Status Block %s [%llx - %llx / %llx, %lx, %lx]\n", __func__,
 				res->name, res->start, res->end, resource_size(res),
 				res->flags, res->desc);
-		gsrc->esb_pa = res->start;
+		gsrc->esb_pa = res->start + base;
 		gsrc->esb_sz = resource_size(res);
 		idx++;
 
@@ -579,7 +534,7 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 		}
 		initdbgmsg("%s Status Ring %s [%llx - %llx, %lx, %lx]\n", __func__,
 				res->name, res->start, res->end, res->flags, res->desc);
-		gsrc->ring_pa = res->start;
+		gsrc->ring_pa = res->start + base;
 		gsrc->ring_sz = resource_size(res);
 		idx++;
 
@@ -594,8 +549,21 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 		gsrc->id = res->start;
 		idx++;
 
-		initdbgmsg("GHES: %s 0x%llx/0x%llx/0x%llx, ID:0x%x)\n", gsrc->name,
+		initdbgmsg("GHES: 0x%llx / 0x%llx / 0x%llx, ID:0x%x)\n",
 				gsrc->esa_pa, gsrc->esb_pa, gsrc->ring_pa, gsrc->id);
+	}
+
+	for (i = 0; i < ghes_drv->source_count; i++) {
+		gsrc = &ghes_drv->source_list[i];
+		if (gsrc->id >= OCTEONTX_SDEI_RAS_AP0_EVENT)
+			sprintf(gsrc->name, "core%d", core++);
+		else if (gsrc->id == OCTEONTX_SDEI_RAS_MDC_EVENT)
+			sprintf(gsrc->name, "MDC");
+		else if (gsrc->id == OCTEONTX_SDEI_RAS_MCC_EVENT)
+			sprintf(gsrc->name, cn10kx_model ? "DSS" : "MCC");
+		else if (gsrc->id == OCTEONTX_SDEI_RAS_LMC_EVENT)
+			sprintf(gsrc->name, cn10kx_model ? "TAD" : "LMC");
+		initdbgmsg("%s %s\n", __func__, gsrc->name);
 	}
 
 	return 0;
@@ -665,14 +633,19 @@ static void sdei_ghes_init_source(struct mrvl_sdei_ghes_drv *ghes_drv)
 	struct mrvl_ghes_source *gsrc;
 	size_t i;
 
-	initdbgmsg("%s: entry\n", __func__);
-
 	for (i = 0; i < ghes_drv->source_count; i++) {
 		gsrc = &ghes_drv->source_list[i];
 
 		gsrc->esb_va->block_status = 0;
 
 		*gsrc->esa_va = gsrc->esb_pa;
+
+		initdbgmsg("%s poll address 0x%llx: 0x%llx\n", __func__,
+				gsrc->esa_pa, gsrc->esb_pa);
+
+		devm_iounmap(ghes_drv->dev, gsrc->esa_va);
+		devm_release_mem_region(ghes_drv->dev, gsrc->esa_pa, sizeof(gsrc->esa_va));
+		acpi_os_map_iomem(gsrc->esa_pa, 8);
 	}
 }
 
@@ -708,49 +681,6 @@ static size_t sdei_ghes_count_source(struct mrvl_sdei_ghes_drv *ghes_drv)
 	initdbgmsg("%s %zu\n", __func__, count);
 
 	return count;
-}
-
-static int sdei_ghes_fetch_status_addr(struct acpi_hest_header *hest_hdr, void *data)
-{
-	struct acpi_hest_generic *generic = (struct acpi_hest_generic *)hest_hdr;
-	u64 **esrc = data;
-	static int i;
-
-	initdbgmsg("%s 0x%llx: 0x%llx\n", __func__,
-		   (long long)&generic->error_status_address.address,
-			(long long)generic->error_status_address.address);
-	initdbgmsg("%llx", (long long)&esrc[i]);
-	esrc[i] = &generic->error_status_address.address;
-	i++;
-
-	return 0;
-}
-
-static size_t sdei_ghes_patch_status_addr(struct mrvl_sdei_ghes_drv *ghes_drv)
-{
-	struct mrvl_ghes_source *gsrc;
-	int i = 0;
-	u64 **esrc = NULL;
-
-	initdbgmsg("%s entry\n", __func__);
-
-	esrc = kcalloc(ghes_drv->source_count, sizeof(u64 *), GFP_KERNEL);
-	if (!esrc) {
-		initdbgmsg("%s Failed to allocate esrc\n", __func__);
-		return -ENOMEM;
-	}
-
-	apei_hest_parse(sdei_ghes_fetch_status_addr, esrc);
-
-	for (i = 0; i < ghes_drv->source_count; i++) {
-		gsrc = &ghes_drv->source_list[i];
-		initdbgmsg("%s %s 0x%llx 0x%llx\n", __func__, gsrc->name,
-				(long long)esrc[i], (long long)gsrc->esa_pa);
-		*esrc[i] = gsrc->esa_pa;
-	}
-
-	kfree(esrc);
-	return 0;
 }
 
 static int sdei_ghes_alloc_source(struct device *dev,
@@ -794,13 +724,13 @@ static int __init sdei_ghes_of_alloc_hest(struct mrvl_sdei_ghes_drv *ghes_drv)
 
 	hdr = &hest->header;
 
-	strncpy(hdr->signature, ACPI_SIG_HEST, sizeof(hdr->signature));
+	strcpy(hdr->signature, ACPI_SIG_HEST);
 	hdr->length = size;
 	hdr->revision = 1;
-	strncpy(hdr->oem_id, OTX2_HEST_OEM_ID, sizeof(hdr->oem_id));
-	strncpy(hdr->oem_table_id, HEST_TBL_OEM_ID, sizeof(hdr->oem_table_id));
+	strcpy(hdr->oem_id, OTX2_HEST_OEM_ID);
+	strcpy(hdr->oem_table_id, HEST_TBL_OEM_ID);
 	hdr->oem_revision = 1;
-	strncpy(hdr->asl_compiler_id, OTX2_HEST_OEM_ID, sizeof(hdr->asl_compiler_id));
+	strcpy(hdr->asl_compiler_id, OTX2_HEST_OEM_ID);
 	hdr->asl_compiler_revision = 1;
 	p = (u8 *)hdr;
 	while (p < (u8 *)(hdr + 1))
@@ -855,9 +785,8 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 {
 	struct mrvl_sdei_ghes_drv *ghes_drv = NULL;
 	struct device *dev = &pdev->dev;
-	const struct acpi_device_id *acpi_id = NULL;
 	int ret = -ENODEV;
-	bool cn10kx_model = is_soc_cn10kx();
+	cn10kx_model = is_soc_cn10kx();
 
 #ifdef CONFIG_CRASH_DUMP
 	if (is_kdump_kernel())
@@ -890,23 +819,17 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 
 	if (has_acpi_companion(dev)) {
 		initdbgmsg("%s ACPI\n", __func__);
-		acpi_id = acpi_match_device(dev->driver->acpi_match_table, dev);
+		acpi_match_device(dev->driver->acpi_match_table, dev);
 		ret = sdei_ghes_acpi_match_resource(pdev);
 	} else {
 		initdbgmsg("%s DeviceTree\n", __func__);
+		acpi_permanent_mmap = true;
+		set_bit(EFI_MEMMAP, &efi.flags);
 		ret = sdei_ghes_of_match_resource(pdev);
 	}
 	if (ret < 0) {
 		dev_err(dev, "Failed parse match resources\n");
 		return ret;
-	}
-
-	if (!cn10kx_model) {
-		ret = sdei_ghes_adjust_error_status_block(ghes_drv);
-		if (ret) {
-			dev_err(dev, "Unable adjust status block.\n");
-			return ret;
-		}
 	}
 
 	ret = sdei_ghes_setup_resource(ghes_drv);
@@ -922,8 +845,6 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 			dev_err(dev, "Unable allocate HEST.\n");
 			goto exit0;
 		}
-	} else {
-		sdei_ghes_patch_status_addr(ghes_drv);
 	}
 
 	if (!cn10kx_model)
@@ -939,8 +860,7 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 	return 0;
 
 exit0:
-	if (error_status_block_page)
-		__free_pages(error_status_block_page, order);
+	dev_err(dev, "Error probe GHES.\n");
 	return ret;
 }
 
@@ -949,9 +869,6 @@ static int sdei_ghes_remove(struct platform_device *pdev)
 	initdbgmsg("%s: entry\n", __func__);
 
 	sdei_ghes_driver_deinit(pdev);
-
-	if (error_status_block_page)
-		__free_pages(error_status_block_page, order);
 
 	return 0;
 }

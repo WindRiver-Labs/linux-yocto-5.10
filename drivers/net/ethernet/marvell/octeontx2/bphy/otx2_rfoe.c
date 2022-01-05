@@ -625,6 +625,8 @@ static int otx2_rfoe_process_rx_flow(struct otx2_rfoe_ndev_priv *priv,
 	struct rx_ft_cfg *ft_cfg;
 	u64 mbt_cfg;
 	u16 nxt_buf;
+	int *mbt_last_idx = &priv->rfoe_common->rx_mbt_last_idx[pkt_type];
+	u16 *prv_nxt_buf = &priv->rfoe_common->nxt_buf[pkt_type];
 
 	ft_cfg = &priv->rx_ft_cfg[pkt_type];
 
@@ -640,33 +642,35 @@ static int otx2_rfoe_process_rx_flow(struct otx2_rfoe_ndev_priv *priv,
 	nxt_buf = (mbt_cfg >> 32) & 0xffff;
 
 	/* no mbt entries to process */
-	if ((ft_cfg->mbt_last_idx % ft_cfg->num_bufs) == nxt_buf) {
+	if (nxt_buf == *prv_nxt_buf) {
 		netif_dbg(priv, rx_status, priv->netdev,
 			  "no rx packets to process, rfoe=%d pkt_type=%d mbt_idx=%d nxt_buf=%d mbt_buf_sw_head=%d\n",
 			  priv->rfoe_num, pkt_type, ft_cfg->mbt_idx, nxt_buf,
-			  ft_cfg->mbt_last_idx);
+			  *mbt_last_idx);
 		return 0;
 	}
 
+	*prv_nxt_buf = nxt_buf;
+
 	/* get count of pkts to process, check ring wrap condition */
-	if (ft_cfg->mbt_last_idx > nxt_buf) {
-		count = ft_cfg->num_bufs - ft_cfg->mbt_last_idx;
+	if (*mbt_last_idx > nxt_buf) {
+		count = ft_cfg->num_bufs - *mbt_last_idx;
 		count += nxt_buf;
 	} else {
-		count = nxt_buf - ft_cfg->mbt_last_idx;
+		count = nxt_buf - *mbt_last_idx;
 	}
 
 	netif_dbg(priv, rx_status, priv->netdev,
 		  "rfoe=%d pkt_type=%d mbt_idx=%d nxt_buf=%d mbt_buf_sw_head=%d count=%d\n",
 		  priv->rfoe_num, pkt_type, ft_cfg->mbt_idx, nxt_buf,
-		  ft_cfg->mbt_last_idx, count);
+		  *mbt_last_idx, count);
 
 	while (likely((processed_pkts < budget) && (processed_pkts < count))) {
-		otx2_rfoe_process_rx_pkt(priv, ft_cfg, ft_cfg->mbt_last_idx);
+		otx2_rfoe_process_rx_pkt(priv, ft_cfg, *mbt_last_idx);
 
-		ft_cfg->mbt_last_idx++;
-		if (ft_cfg->mbt_last_idx == ft_cfg->num_bufs)
-			ft_cfg->mbt_last_idx = 0;
+		(*mbt_last_idx)++;
+		if (*mbt_last_idx == ft_cfg->num_bufs)
+			*mbt_last_idx = 0;
 
 		processed_pkts++;
 	}
@@ -1094,11 +1098,14 @@ static int otx2_rfoe_eth_open(struct net_device *netdev)
 
 	priv->ptp_tx_skb = NULL;
 
-	netif_carrier_on(netdev);
-	netif_start_queue(netdev);
-
+	spin_lock(&priv->lock);
 	clear_bit(RFOE_INTF_DOWN, &priv->state);
-	priv->link_state = 1;
+
+	if (priv->link_state == LINK_STATE_UP) {
+		netif_carrier_on(netdev);
+		netif_start_queue(netdev);
+	}
+	spin_unlock(&priv->lock);
 
 	return 0;
 }
@@ -1110,11 +1117,13 @@ static int otx2_rfoe_eth_stop(struct net_device *netdev)
 	struct ptp_tstamp_skb *ts_skb, *ts_skb2;
 	int idx;
 
+	spin_lock(&priv->lock);
 	set_bit(RFOE_INTF_DOWN, &priv->state);
 
 	netif_stop_queue(netdev);
 	netif_carrier_off(netdev);
-	priv->link_state = 0;
+
+	spin_unlock(&priv->lock);
 
 	for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
 		if (!(priv->pkt_type_mask & (1U << idx)))
@@ -1487,7 +1496,7 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			netif_carrier_off(netdev);
 			netif_stop_queue(netdev);
 			set_bit(RFOE_INTF_DOWN, &priv->state);
-			priv->link_state = 0;
+			priv->link_state = LINK_STATE_UP;
 
 			/* initialize global ctx */
 			drv_ctx = &rfoe_drv_ctx[intf_idx];
@@ -1646,4 +1655,30 @@ static void otx2_rfoe_debugfs_remove(struct otx2_rfoe_drv_ctx *ctx)
 {
 	if (ctx->debugfs)
 		otx2_bphy_debugfs_remove_file(ctx->debugfs);
+}
+
+void otx2_rfoe_set_link_state(struct net_device *netdev, u8 state)
+{
+	struct otx2_rfoe_ndev_priv *priv;
+
+	priv = netdev_priv(netdev);
+
+	spin_lock(&priv->lock);
+	if (priv->link_state != state) {
+		priv->link_state = state;
+		if (state == LINK_STATE_DOWN) {
+			netdev_info(netdev, "Link DOWN\n");
+			if (netif_running(netdev)) {
+				netif_carrier_off(netdev);
+				netif_stop_queue(netdev);
+			}
+		} else {
+			netdev_info(netdev, "Link UP\n");
+			if (netif_running(netdev)) {
+				netif_carrier_on(netdev);
+				netif_start_queue(netdev);
+			}
+		}
+	}
+	spin_unlock(&priv->lock);
 }

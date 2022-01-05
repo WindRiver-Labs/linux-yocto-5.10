@@ -303,7 +303,6 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 	struct rvu_hwinfo *hw = rvu->hw;
 	struct sdp_node_info *sdp_info;
 	int pkind, pf, vf, lbkid, vfid;
-	struct mac_ops *mac_ops;
 	u8 cgx_id, lmac_id;
 	bool from_vf;
 	int err;
@@ -336,13 +335,6 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 			rvu_npc_set_pkind(rvu, pkind, pfvf);
 		}
 
-		mac_ops = get_mac_ops(rvu_cgx_pdata(cgx_id, rvu));
-
-		/* By default we enable pause frames */
-		if ((pcifunc & RVU_PFVF_FUNC_MASK) == 0)
-			mac_ops->mac_enadis_pause_frm(rvu_cgx_pdata(cgx_id,
-								    rvu),
-						      lmac_id, true, true);
 		break;
 	case NIX_INTF_TYPE_LBK:
 		vf = (pcifunc & RVU_PFVF_FUNC_MASK) - 1;
@@ -566,7 +558,7 @@ static int rvu_nix_get_bpid(struct rvu *rvu, struct nix_bp_cfg_req *req,
 	 */
 	switch (type) {
 	case NIX_INTF_TYPE_CGX:
-		if ((req->chan_base + req->chan_cnt) > 15)
+		if ((req->chan_base + req->chan_cnt) > 16)
 			return -EINVAL;
 		rvu_get_cgx_lmac_id(pfvf->cgx_lmac, &cgx_id, &lmac_id);
 		/* Assign bpid based on cgx, lmac and chan id */
@@ -2155,8 +2147,8 @@ static int nix_smq_flush(struct rvu *rvu, int blkaddr,
 	/* enable cgx tx if disabled */
 	if (is_pf_cgxmapped(rvu, pf)) {
 		rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-		restore_tx_en = !cgx_lmac_tx_enable(rvu_cgx_pdata(cgx_id, rvu),
-						    lmac_id, true);
+		restore_tx_en = !rvu_cgx_config_tx(rvu_cgx_pdata(cgx_id, rvu),
+						   lmac_id, true);
 	}
 
 	cfg = rvu_read64(rvu, blkaddr, NIX_AF_SMQX_CFG(smq));
@@ -2181,7 +2173,7 @@ static int nix_smq_flush(struct rvu *rvu, int blkaddr,
 	rvu_cgx_enadis_rx_bp(rvu, pf, true);
 	/* restore cgx tx state */
 	if (restore_tx_en)
-		cgx_lmac_tx_enable(rvu_cgx_pdata(cgx_id, rvu), lmac_id, false);
+		rvu_cgx_config_tx(rvu_cgx_pdata(cgx_id, rvu), lmac_id, false);
 	return err;
 }
 
@@ -4050,7 +4042,7 @@ nix_config_link_credits(struct rvu *rvu, int blkaddr, int link,
 	/* Enable cgx tx if disabled for credits to be back */
 	if (is_pf_cgxmapped(rvu, pf)) {
 		rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-		restore_tx_en = !cgx_lmac_tx_enable(rvu_cgx_pdata(cgx_id, rvu),
+		restore_tx_en = !rvu_cgx_config_tx(rvu_cgx_pdata(cgx_id, rvu),
 						    lmac_id, true);
 	}
 
@@ -4064,8 +4056,8 @@ nix_config_link_credits(struct rvu *rvu, int blkaddr, int link,
 			    NIX_AF_TL1X_SW_XOFF(schq), BIT_ULL(0));
 	}
 
-	rc = -EBUSY;
-	poll_tmo = jiffies + usecs_to_jiffies(10000);
+	rc = NIX_AF_ERR_LINK_CREDITS;
+	poll_tmo = jiffies + usecs_to_jiffies(200000);
 	/* Wait for credits to return */
 	do {
 		if (time_after(jiffies, poll_tmo))
@@ -4092,7 +4084,7 @@ exit:
 
 	/* Restore state of cgx tx */
 	if (restore_tx_en)
-		cgx_lmac_tx_enable(rvu_cgx_pdata(cgx_id, rvu), lmac_id, false);
+		rvu_cgx_config_tx(rvu_cgx_pdata(cgx_id, rvu), lmac_id, false);
 
 	mutex_unlock(&rvu->rsrc_lock);
 	rvu_nix_txsch_unlock(nix_hw);
@@ -4214,6 +4206,11 @@ int rvu_mbox_handler_nix_set_rx_cfg(struct rvu *rvu, struct nix_rx_cfg *req,
 		cfg |= BIT_ULL(40);
 	else
 		cfg &= ~BIT_ULL(40);
+
+	if (req->len_verify & NIX_RX_DROP_RE)
+		cfg |= BIT_ULL(32);
+	else
+		cfg &= ~BIT_ULL(32);
 
 	if (req->csum_verify & BIT(0))
 		cfg |= BIT_ULL(37);
@@ -4786,6 +4783,12 @@ void rvu_nix_lf_teardown(struct rvu *rvu, u16 pcifunc, int blkaddr, int nixlf)
 	/* reset HW config done for Switch headers */
 	rvu_npc_set_parse_mode(rvu, pcifunc, OTX2_PRIV_FLAGS_DEFAULT,
 			       (PKIND_TX | PKIND_RX), 0, 0, 0, 0);
+
+	/* reset priority flow control config */
+	rvu_cgx_prio_flow_ctrl_cfg(rvu, pcifunc, 0, 0, 0);
+
+	/* reset 802.3x flow control config */
+	rvu_cgx_cfg_pause_frm(rvu, pcifunc, 0, 0);
 
 	nix_ctx_free(rvu, pfvf);
 
@@ -5576,6 +5579,7 @@ int rvu_nix_setup_ratelimit_aggr(struct rvu *rvu, u16 pcifunc,
 	aq_req.ctype = NIX_AQ_CTYPE_BANDPROF;
 	aq_req.op = NIX_AQ_INSTOP_WRITE;
 	memcpy(&aq_req.prof, &aq_rsp.prof, sizeof(struct nix_bandprof_s));
+	memset((char *)&aq_req.prof_mask, 0xff, sizeof(struct nix_bandprof_s));
 	/* Clear higher layer enable bit in the mid profile, just in case */
 	aq_req.prof.hl_en = 0;
 	aq_req.prof_mask.hl_en = 1;

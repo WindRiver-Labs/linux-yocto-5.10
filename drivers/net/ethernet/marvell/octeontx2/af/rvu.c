@@ -552,8 +552,11 @@ static void rvu_block_reset(struct rvu *rvu, int blkaddr, u64 rst_reg)
 
 	rvu_write64(rvu, blkaddr, rst_reg, BIT_ULL(0));
 	err = rvu_poll_reg(rvu, blkaddr, rst_reg, BIT_ULL(63), true);
-	if (err)
-		dev_err(rvu->dev, "HW block:%d reset failed\n", blkaddr);
+	if (err) {
+		dev_err(rvu->dev, "HW block:%d reset timeout retrying again\n", blkaddr);
+		while (rvu_poll_reg(rvu, blkaddr, rst_reg, BIT_ULL(63), true) == -EBUSY)
+			;
+	}
 }
 
 static void rvu_reset_all_blocks(struct rvu *rvu)
@@ -1212,12 +1215,6 @@ cpt:
 		goto sso_err;
 	}
 
-	err = rvu_cpt_init(rvu);
-	if (err) {
-		dev_err(rvu->dev, "%s: Failed to initialize cpt\n", __func__);
-		goto sso_err;
-	}
-
 	err = rvu_sdp_init(rvu);
 	if (err) {
 		dev_err(rvu->dev, "%s: Failed to initialize sdp\n", __func__);
@@ -1244,6 +1241,12 @@ cpt:
 	err = rvu_ree_init(rvu);
 	if (err) {
 		dev_err(rvu->dev, "%s: Failed to initialize ree\n", __func__);
+		goto nix_err;
+	}
+
+	err = rvu_cpt_init(rvu);
+	if (err) {
+		dev_err(rvu->dev, "%s: Failed to initialize cpt\n", __func__);
 		goto nix_err;
 	}
 
@@ -1630,7 +1633,7 @@ static int rvu_get_attach_blkaddr(struct rvu *rvu, int blktype,
 		break;
 	default:
 		return rvu_get_blkaddr(rvu, blktype, 0);
-	};
+	}
 
 	if (is_block_implemented(rvu->hw, blkaddr))
 		return blkaddr;
