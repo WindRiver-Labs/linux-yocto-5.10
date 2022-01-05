@@ -190,8 +190,11 @@
 
 #define CDNS_XSPI_CMD_FLD_DSEQ_CMD_3(op) ( \
 	FIELD_PREP(CDNS_XSPI_CMD_DSEQ_R3_DCNT_H, \
-		(op->data.nbytes >> 16) & 0xffff) | \
-	FIELD_PREP(CDNS_XSPI_CMD_DSEQ_R3_NUM_OF_DUMMY, op->dummy.nbytes * 8))
+		  (op->data.nbytes >> 16) & 0xffff) | \
+	FIELD_PREP(CDNS_XSPI_CMD_DSEQ_R3_NUM_OF_DUMMY, \
+		  op->dummy.buswidth != 0 ? \
+		  ((op->dummy.nbytes * 8) / op->dummy.buswidth) : \
+		  0))
 
 #define CDNS_XSPI_CMD_FLD_DSEQ_CMD_4(op, chipsel) ( \
 	FIELD_PREP(CDNS_XSPI_CMD_DSEQ_R4_BANK, chipsel) | \
@@ -240,7 +243,7 @@ struct cdns_xspi_dev {
 
 	int irq;
 	int current_cs;
-	bool skip_sim_check;
+	bool do_phy_init;
 
 	struct mutex lock;
 
@@ -253,6 +256,7 @@ struct cdns_xspi_dev {
 
 	u8 hw_num_banks;
 
+	int (*prepare_clock)(struct cdns_xspi_dev *dev, int req_clk);
 	struct cdns_xspi_platform_data *plat_data;
 };
 

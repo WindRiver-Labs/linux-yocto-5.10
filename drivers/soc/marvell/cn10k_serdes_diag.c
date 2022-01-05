@@ -13,7 +13,9 @@
 #include <linux/string.h>
 #include <linux/time.h>
 #include <linux/uaccess.h>
+#include <linux/ioctl.h>
 #include <linux/of.h>
+#include <linux/delay.h>
 #include <soc/marvell/octeontx/octeontx_smc.h>
 
 #define DRV_NAME "cn10k_serdes_diag"
@@ -22,8 +24,13 @@
 #define PLAT_OCTEONTX_SERDES_DBG_TX_TUNING	0xc2000d06
 #define PLAT_OCTEONTX_SERDES_DBG_LOOPBACK	0xc2000d07
 #define PLAT_OCTEONTX_SERDES_DBG_PRBS		0xc2000d08
+#define PLAT_OCTEONTX_SERDES_DBG_RX_TRAINING	0xc2000d09
+#define PLAT_OCTEONTX_SERDES_DBG_NOTIFY_ECP	0xc2000d0a
 
 #define PORT_LANES_MAX 4
+#define PRBS_SHOW_HEADER \
+	"port#:\tlane#:\tgserm#:\tg-lane#:\tlocked:\ttotal_bits:\terror_bits:\n"
+
 
 #define DEFINE_ATTRIBUTE(__name)					\
 static int __name ## _open(struct inode *inode, struct file *file)	\
@@ -57,6 +64,20 @@ static inline int _conv_arr ## _str2enum(const char *str)		\
 	return -1;							\
 }
 
+#define DEFINE_ENUM_2_STR_FUNC(_conv_arr)				\
+static inline const char *_conv_arr ## _enum2str(int val)		\
+{									\
+	size_t idx;							\
+	size_t len = ARRAY_SIZE(_conv_arr);				\
+									\
+	for (idx = 0; idx < len; idx++) {				\
+		if (_conv_arr[idx].e == val)				\
+			return _conv_arr[idx].s;			\
+	}								\
+									\
+	return NULL;							\
+}
+
 #define BUF_SZ 64
 static struct dentry *serdes_dbgfs_root;
 static char *serdes_tuning_shmem;
@@ -67,7 +88,8 @@ enum prbs_subcmd {
 	PRBS_START,
 	PRBS_SHOW,
 	PRBS_CLEAR,
-	PRBS_STOP
+	PRBS_STOP,
+	PRBS_INJECT
 };
 
 static struct {
@@ -78,22 +100,21 @@ static struct {
 	{PRBS_SHOW, "show"},
 	{PRBS_CLEAR, "clear"},
 	{PRBS_STOP, "stop"},
+	{PRBS_INJECT, "inject"}
 };
 
 DEFINE_STR_2_ENUM_FUNC(prbs_subcmd)
 
 enum prbs_optcmd {
-	PRBS_INJECT,
 	PRBS_CHECKER,
 	PRBS_GENERATOR,
-	PRBS_BOTH,
+	PRBS_BOTH
 };
 
 static struct {
 	enum prbs_optcmd e;
 	const char *s;
 } prbs_optcmd[] = {
-	{PRBS_INJECT, "inject"},
 	{PRBS_CHECKER, "check"},
 	{PRBS_GENERATOR, "gen"},
 	{PRBS_BOTH, "both"},
@@ -101,28 +122,84 @@ static struct {
 
 DEFINE_STR_2_ENUM_FUNC(prbs_optcmd)
 
+#define PAM4_PATTERN(_p) (_p << 8)
+
 enum prbs_pattern {
+	PRBS_1T = 1,
+	PRBS_2T = 2,
+	PRBS_4T = 4,
+	PRBS_5T = 5,
+
 	PRBS_7 = 7,
 	PRBS_9 = 9,
+	PRBS_10T = 10,
 	PRBS_11 = 11,
 	PRBS_15 = 15,
 	PRBS_16 = 16,
 	PRBS_23 = 23,
 	PRBS_31 = 31,
-	PRBS_32 = 32
+	PRBS_32 = 32,
+	PRBS_SSPRQ,
+	PRBS_K28_5,
+
+	PRBS_11_0 = PAM4_PATTERN(11),
+	PRBS_11_1,
+	PRBS_11_2,
+	PRBS_11_3,
+
+	PRBS_13_0 = PAM4_PATTERN(13),
+	PRBS_13_1,
+	PRBS_13_2,
+	PRBS_13_3,
 };
+
+#define PRBS(_p) {PRBS_ ## _p, #_p}
+
+static struct {
+	enum prbs_pattern e;
+	const char *s;
+} prbs_pattern[] = {
+	PRBS(1T),
+	PRBS(2T),
+	PRBS(4T),
+	PRBS(5T),
+
+	PRBS(7),
+	PRBS(9),
+	PRBS(10T),
+	PRBS(11),
+	PRBS(15),
+	PRBS(16),
+	PRBS(23),
+	PRBS(31),
+	PRBS(32),
+	PRBS(SSPRQ),
+	PRBS(K28_5),
+
+	PRBS(11_0),
+	PRBS(11_1),
+	PRBS(11_2),
+	PRBS(11_3),
+	PRBS(13_0),
+	PRBS(13_1),
+	PRBS(13_2),
+	PRBS(13_3),
+};
+DEFINE_STR_2_ENUM_FUNC(prbs_pattern)
+DEFINE_ENUM_2_STR_FUNC(prbs_pattern)
 
 struct prbs_error_stats {
 	u64 total_bits;
 	u64 error_bits;
+	int locked;
 };
 
 struct prbs_cmd_params {
 	int port;
 	int lane_idx;
 	int subcmd;
-	int gen_check;
-	int pattern;
+	int gen_pattern;
+	int check_pattern;
 	int inject_cnt;
 };
 
@@ -147,13 +224,16 @@ struct lpbk_cmd_params {
 	int type;
 };
 
-#define TX_EQ_PRMS_MAX 10
+#define TX_EQ_PRMS_MAX 16
 
 enum tx_param {
 	TX_PARAM_PRE2,
 	TX_PARAM_PRE1,
 	TX_PARAM_POST,
 	TX_PARAM_MAIN,
+	TX_POLARITY,
+	TX_GRAY_CODE,
+	TX_PRE_CODE,
 };
 
 struct tx_eq_params {
@@ -161,6 +241,9 @@ struct tx_eq_params {
 	u16 pre1;
 	u16 post;
 	u16 main;
+	int polarity;
+	int gray_code;
+	int pre_code;
 };
 
 static struct {
@@ -171,6 +254,9 @@ static struct {
 	{TX_PARAM_PRE1, "pre1"},
 	{TX_PARAM_POST, "post"},
 	{TX_PARAM_MAIN, "main"},
+	{TX_POLARITY,   "polarity"},
+	{TX_GRAY_CODE,  "graycode"},
+	{TX_PRE_CODE,   "precode"},
 };
 
 DEFINE_STR_2_ENUM_FUNC(tx_param)
@@ -184,12 +270,31 @@ static struct tx_eq_cmd_params {
 	u32 flags;
 } tx_eq_cmd;
 
-#define RX_EQ_PRMS_MAX 2
+#define RX_EQ_PRMS_MAX 8
 
 static struct rx_eq_cmd_params {
 	int port;
 	int lane_idx;
+	int update;
+	u32 flags;
 } rx_eq_cmd;
+
+enum rx_param {
+	RX_POLARITY,
+	RX_GRAY_CODE,
+	RX_PRE_CODE,
+};
+
+static struct {
+	enum rx_param e;
+	const char *s;
+} rx_param[] = {
+	{RX_POLARITY,   "polarity"},
+	{RX_GRAY_CODE,  "graycode"},
+	{RX_PRE_CODE,   "precode"},
+};
+
+DEFINE_STR_2_ENUM_FUNC(rx_param)
 
 #define DFE_TAPS_NUM 24
 #define CTLE_PARAMS_NUM 13
@@ -240,7 +345,39 @@ const char *ctle_params_names[] = {
 struct rx_eq_params {
 	s32 dfe_taps[DFE_TAPS_NUM];
 	u32 ctle_params[CTLE_PARAMS_NUM];
+	int polarity;
+	int gray_code;
+	int pre_code;
+	int squelch_detected;
 };
+
+#define RX_TR_PRMS_MAX 2
+
+struct rx_tr_cmd_params {
+	int port;
+	int lane_idx;
+};
+
+enum rx_tr_subcmd {
+	RX_TR_START,
+	RX_TR_CHECK,
+	RX_TR_STOP
+};
+
+enum ecp_notify_prbs_loopback_mode {
+	ECP_NOTIFY_LOOPBACK_NO_LOOPBACK,
+	ECP_NOTIFY_LOOPBACK_NEA,
+	ECP_NOTIFY_LOOPBACK_NED,
+	ECP_NOTIFY_LOOPBACK_FED,
+	ECP_NOTIFY_PRBS_MODE_GEN_ENA,
+	ECP_NOTIFY_PRBS_MODE_CHECK_ENA,
+	ECP_NOTIFY_PRBS_MODE_GEN_CHECK_ENA,
+	ECP_NOTIFY_PRBS_MODE_GEN_DIS,
+	ECP_NOTIFY_PRBS_MODE_CHECK_DIS,
+	ECP_NOTIFY_PRBS_MODE_GEN_CHECK_DIS
+};
+
+#define IOCTL_SEND_ECP_NOTIFICATION _IOWR('a', 'a', int)
 
 static int copy_input_str(const char __user *buffer, size_t count,
 			char *cmd_buf, size_t buf_sz)
@@ -337,6 +474,19 @@ static int serdes_dbg_rx_eq_read(struct seq_file *s, void *unused)
 		for (idx = 0; idx < CTLE_PARAMS_NUM; idx++)
 			seq_printf(s, "\t\t%s%d\n", ctle_params_names[idx],
 				rx_eq_params[lane_idx].ctle_params[idx]);
+
+		seq_printf(s, "\n\n\t\trx polarity:\t%d\n",
+		       rx_eq_params[lane_idx].polarity);
+
+		seq_printf(s, "\t\trx gray code:\t%d\n",
+		       rx_eq_params[lane_idx].gray_code);
+
+		seq_printf(s, "\t\trx pre code:\t%d\n",
+		       rx_eq_params[lane_idx].pre_code);
+
+		seq_printf(s, "\n\t\t%s detected\n",
+		       rx_eq_params[lane_idx].squelch_detected ?
+		       "Squelch" : "Signal");
 	}
 
 	return 0;
@@ -348,7 +498,7 @@ static int parse_rx_eq_params(const char __user *buffer, size_t count,
 	const char *argv[RX_EQ_PRMS_MAX] = {0};
 	char cmd_buf[BUF_SZ];
 	size_t argc;
-	int port, lane_idx;
+	int port, lane_idx, arg_idx;
 
 	if (copy_input_str(buffer, count, cmd_buf, BUF_SZ))
 		return -EINVAL;
@@ -364,15 +514,58 @@ static int parse_rx_eq_params(const char __user *buffer, size_t count,
 
 	port &= 0xff;
 
-	if (argc == 2) {
-		if (kstrtoint(argv[1], 10, &lane_idx))
-			return -EINVAL;
+	if (argc > 1 && !kstrtoint(argv[1], 10, &lane_idx)) {
+		arg_idx = 2;
 	} else {
 		lane_idx = 0xff;
+		arg_idx = 1;
 	}
 
 	params->port = port;
 	params->lane_idx = lane_idx;
+
+	if (arg_idx == argc)
+		return 0;
+
+	params->update = 1;
+	params->flags = 0;
+
+	/* Next parameters are optional and they should come in pairs
+	 * [name <value>], like: [precode <prec>].
+	 * The loop below is to parse each such pair.
+	 */
+	while (arg_idx < argc) {
+		int param;
+		int value;
+
+		param = rx_param_str2enum(argv[arg_idx]);
+		if (param == -1)
+			return -EINVAL;
+
+		arg_idx++;
+		if (arg_idx == argc || kstrtoint(argv[arg_idx], 0, &value))
+			return -EINVAL;
+
+		value &= 0xffff;
+		arg_idx++;
+
+		switch (param) {
+		case RX_PRE_CODE:
+			params->flags |= BIT(1) | (value & 1);
+			break;
+
+		case RX_GRAY_CODE:
+			params->flags |= BIT(3) | (value & 1) << 2;
+			break;
+
+		case RX_POLARITY:
+			params->flags |= BIT(5) | (value & 1) << 4;
+			break;
+
+		default:
+			return -EINVAL;
+		}
+	}
 
 	return 0;
 }
@@ -381,7 +574,10 @@ static ssize_t serdes_dbg_rx_eq_write(struct file *filp,
 					const char __user *buffer,
 					size_t count, loff_t *ppos)
 {
-	int port, lane_idx;
+	struct arm_smccc_res res;
+	int port, lane_idx, max_idx;
+	int lanes_num, gserm_idx, mapping;
+	int x1, x2;
 
 	if (parse_rx_eq_params(buffer, count, &rx_eq_cmd))
 		return -EINVAL;
@@ -389,15 +585,185 @@ static ssize_t serdes_dbg_rx_eq_write(struct file *filp,
 	port = rx_eq_cmd.port;
 	lane_idx = rx_eq_cmd.lane_idx;
 
-	if (lane_idx == 0xff)
-		pr_info("Rx Tuning: requested port=%d\n", port);
-	else
-		pr_info("Rx Tuning: requested port=%d, lane_idx=%d\n",
-			port, lane_idx);
+	if (!rx_eq_cmd.update) {
+		if (lane_idx == 0xff)
+			pr_info("Rx Tuning: requested port=%d\n", port);
+		else
+			pr_info("Rx Tuning: requested port=%d, lane_idx=%d\n",
+				port, lane_idx);
+
+		return count;
+	}
+
+	pr_info("SerDes Rx Tuning Parameters:\n");
+	pr_info("port#:\tlane#:\tgserm#:\tg-lane#:\tstatus:\n");
+
+	x1 = (lane_idx << 8) | port;
+	x2 = rx_eq_cmd.flags;
+
+	arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_RX_TUNING, x1, x2,
+		0, 0, 0, 0, 0, &res);
+	if (res.a0) {
+		pr_warn("Writing Rx Tuning parameters failed\n");
+		return count;
+	}
+
+	get_gserm_data(res.a2, &gserm_idx, &mapping, &lanes_num);
+	rx_eq_cmd.update = 0;
+
+	if (lane_idx == 0xff) {
+		lane_idx = 0;
+		max_idx = lanes_num;
+	} else {
+		max_idx = lane_idx + 1;
+	}
+
+	for (; lane_idx < max_idx; lane_idx++) {
+		int glane = (mapping >> 4 * lane_idx) & 0xf;
+
+		pr_info("%d\t%d\t%d\t%d\t\tUpdated\n",
+			port, lane_idx,
+			gserm_idx, glane);
+	}
 
 	return count;
 }
 DEFINE_ATTRIBUTE(serdes_dbg_rx_eq);
+
+
+static int serdes_dbg_rx_tr_read(struct seq_file *s, void *unused)
+{
+	return 0;
+}
+
+static int parse_rx_tr_params(const char __user *buffer, size_t count,
+				struct rx_tr_cmd_params *params)
+{
+	const char *argv[RX_TR_PRMS_MAX] = {0};
+	char cmd_buf[BUF_SZ];
+	size_t argc;
+	int port, lane_idx;
+
+	if (copy_input_str(buffer, count, cmd_buf, BUF_SZ))
+		return -EINVAL;
+
+	if (tokenize_input(cmd_buf, &argc, argv, RX_TR_PRMS_MAX))
+		return -EINVAL;
+
+	if (argc < 1)
+		return -EINVAL;
+
+	if (kstrtoint(argv[0], 10, &port))
+		return -EINVAL;
+
+	port &= 0xff;
+
+	if (argc > 1) {
+		if (kstrtoint(argv[1], 10, &lane_idx))
+			return -EINVAL;
+	} else {
+		lane_idx = 0xff;
+	}
+
+	lane_idx &= 0xff;
+
+	params->port = port;
+	params->lane_idx = lane_idx;
+
+	return 0;
+}
+
+static ssize_t serdes_dbg_rx_tr_write(struct file *filp,
+					const char __user *buffer,
+					size_t count, loff_t *ppos)
+{
+	int port, idx, lane_idx, max_idx;
+	struct rx_tr_cmd_params input;
+	int ongoing, failed = 0, tries = 30;
+	int lanes_num, gserm_idx, mapping, glane;
+	struct arm_smccc_res res;
+	s32 x1;
+
+	if (parse_rx_tr_params(buffer, count, &input))
+		return -EINVAL;
+
+	port = input.port;
+	lane_idx = input.lane_idx;
+	x1 = (lane_idx << 8) | port;
+
+	pr_info("SerDes Rx Training:\n");
+	pr_info("port#:\tlane#:\tgserm#:\tg-lane#:\tstatus:\n");
+
+	arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_RX_TRAINING,
+		x1, RX_TR_START, 0, 0, 0, 0, 0, &res);
+	if (res.a0) {
+		pr_warn("Triggering Rx Training failed\n");
+		return count;
+	}
+
+	get_gserm_data(res.a1, &gserm_idx, &mapping, &lanes_num);
+
+	if (lane_idx == 0xff) {
+		lane_idx = 0;
+		max_idx = lanes_num;
+		ongoing = (1 << lanes_num) - 1;
+	} else {
+		max_idx = lane_idx + 1;
+		ongoing = (1 << lane_idx);
+	}
+
+	while (ongoing && tries--) {
+		msleep(100);
+		for (idx = lane_idx; idx < max_idx; idx++) {
+			int completed, result;
+
+			if (!((ongoing >> idx) & 1))
+				continue;
+
+			x1 = (idx << 8) | port;
+			arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_RX_TRAINING,
+				      x1, RX_TR_CHECK, 0, 0, 0, 0, 0, &res);
+
+			completed = res.a2 & 1;
+			result = (res.a2 >> 1) & 1;
+
+			if (completed) {
+				ongoing &= ~(1 << idx);
+				if (result)
+					failed |= (1 << idx);
+			}
+		}
+	}
+
+	/* All the lanes that did not complete are
+	 * marked as failed.
+	 */
+	failed |= ongoing;
+
+	/* For all the lanes that failed to complete
+	 * need to call the stop_rx_training explicitly.
+	 */
+	for (idx = lane_idx; idx < max_idx; idx++) {
+		if ((ongoing >> idx) & 1) {
+			x1 = (idx << 8) | port;
+			arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_RX_TRAINING,
+				      x1, RX_TR_STOP, 0, 0, 0, 0, 0, &res);
+		}
+	}
+
+	for (idx = lane_idx; idx < max_idx; idx++) {
+		int res = (failed >> idx) & 1;
+
+		glane = (mapping >> 4 * idx) & 0xf;
+		pr_info("%d\t%d\t%d\t%d\t\t%s\n",
+			port, idx,
+			gserm_idx, glane,
+			res ? "FAILED" : "OK");
+	}
+
+	return count;
+}
+DEFINE_ATTRIBUTE(serdes_dbg_rx_tr);
 
 static int serdes_dbg_tx_eq_read(struct seq_file *s, void *unused)
 {
@@ -412,8 +778,7 @@ static int serdes_dbg_tx_eq_read(struct seq_file *s, void *unused)
 	x1 = (lane_idx << 8) | port;
 
 	seq_puts(s, "SerDes Tx Tuning Parameters:\n");
-	seq_puts(s, "port#:\tlane#:\tgserm#:\tg-lane#:"
-			"\tpre2:\tpre1:\tmain:\tpost:\n");
+	seq_puts(s, "port#:\tlane#:\tgserm#:\tg-lane#:\tpre2:\tpre1:\tmain:\tpost:\tpolarity:\tgray code:\tpre code:\n");
 
 	arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_TX_TUNING, x1, 0,
 		0, 0, 0, 0, 0, &res);
@@ -435,13 +800,16 @@ static int serdes_dbg_tx_eq_read(struct seq_file *s, void *unused)
 	for (; lane_idx < max_idx; lane_idx++) {
 		int glane = (mapping >> 4 * lane_idx) & 0xf;
 
-		seq_printf(s, "%d\t%d\t%d\t%d\t\t0x%x\t0x%x\t0x%x\t0x%x\n",
-		       port, lane_idx,
-		       gserm_idx, glane,
-		       tx_eq_params[lane_idx].pre2,
-		       tx_eq_params[lane_idx].pre1,
-		       tx_eq_params[lane_idx].main,
-		       tx_eq_params[lane_idx].post);
+		seq_printf(s, "%d\t%d\t%d\t%d\t\t%hd\t%hd\t%hd\t%hd\t%d\t\t%d\t\t%d\n",
+			   port, lane_idx,
+			   gserm_idx, glane,
+			   tx_eq_params[lane_idx].pre2,
+			   tx_eq_params[lane_idx].pre1,
+			   tx_eq_params[lane_idx].main,
+			   tx_eq_params[lane_idx].post,
+			   tx_eq_params[lane_idx].polarity,
+			   tx_eq_params[lane_idx].gray_code,
+			   tx_eq_params[lane_idx].pre_code);
 	}
 
 	return 0;
@@ -484,6 +852,8 @@ static int parse_tx_eq_params(const char __user *buffer, size_t count,
 
 	params->update = 1;
 	params->flags = 0;
+	params->pre2_pre1 = 0;
+	params->post_main = 0;
 
 	/* Next parameters are optional and they should come in pairs
 	 * [name <value>], like: [pre1 <pre1>].
@@ -523,6 +893,18 @@ static int parse_tx_eq_params(const char __user *buffer, size_t count,
 		case TX_PARAM_MAIN:
 			params->post_main |= value;
 			params->flags |= BIT(3);
+			break;
+
+		case TX_PRE_CODE:
+			params->flags |= BIT(5) | (value & 1) << 4;
+			break;
+
+		case TX_GRAY_CODE:
+			params->flags |= BIT(7) | (value & 1) << 6;
+			break;
+
+		case TX_POLARITY:
+			params->flags |= BIT(9) | (value & 1) << 8;
 			break;
 
 		default:
@@ -690,6 +1072,16 @@ static int serdes_dbg_prbs_read(struct seq_file *s, void *unused)
 	return 0;
 }
 
+static inline int _get_pattern(int argc, const char *argv[], int *arg_idx)
+{
+	int pattern;
+
+	pattern = prbs_pattern_str2enum(argv[*arg_idx]);
+	 (*arg_idx)++;
+
+	return pattern;
+}
+
 static int parse_prbs_params(const char __user *buffer, size_t count,
 				struct prbs_cmd_params *params)
 {
@@ -716,72 +1108,54 @@ static int parse_prbs_params(const char __user *buffer, size_t count,
 
 	params->port &= 0xff;
 
-	/* If subcmd is not PRBS_START, then the parsing is done */
-	if (params->subcmd != PRBS_START) {
-		params->gen_check = 0x3;
-		params->pattern = 0;
-		params->inject_cnt = 0;
+	if (params->subcmd != PRBS_START && params->subcmd != PRBS_STOP) {
+		if (params->subcmd == PRBS_INJECT) {
+			if (argc == 2 || kstrtoint(argv[2], 10, &params->inject_cnt))
+				return -1;
+		}
 		return 0;
 	}
 
-	/* If it is PRBS_START command, yet another mandatory
-	 * parameter is required: pattern
-	 */
-	if (argc < 3 || kstrtoint(argv[2], 10, &params->pattern))
-		return -EINVAL;
-
-	switch (params->pattern) {
-	/* Validate pattern against the list below */
-	case PRBS_7:
-	case PRBS_9:
-	case PRBS_11:
-	case PRBS_15:
-	case PRBS_16:
-	case PRBS_23:
-	case PRBS_31:
-	case PRBS_32:
-		break;
-
-	default:
-		return -EINVAL;
-	}
-
-	/* All other parameters are optional, thus enabled
-	 * generator and checker by default and setting
-	 * inject_cnt to zero just in case they are not
-	 * provided.
-	 */
-	params->inject_cnt = 0;
-	params->gen_check = PRBS_GENERATOR | PRBS_CHECKER;
-	arg_idx = 3;
-
+	arg_idx = 2;
 	while (arg_idx < argc) {
 		optcmd = prbs_optcmd_str2enum(argv[arg_idx]);
 		arg_idx++;
 
 		switch (optcmd) {
-		case PRBS_INJECT:
-			if (arg_idx == argc || kstrtoint(argv[arg_idx], 10,
-							&params->inject_cnt)) {
-				return -EINVAL;
-			}
-			arg_idx++;
-			break;
-
 		case PRBS_GENERATOR:
-			params->gen_check = PRBS_GENERATOR;
+			params->gen_pattern = params->subcmd == PRBS_START ?
+				_get_pattern(argc, argv, &arg_idx) : 1;
 			break;
 
 		case PRBS_CHECKER:
-			params->gen_check = PRBS_CHECKER;
+			params->check_pattern = params->subcmd == PRBS_START ?
+				_get_pattern(argc, argv, &arg_idx) : 1;
 			break;
 
 		case PRBS_BOTH:
+			params->gen_pattern = params->subcmd == PRBS_START ?
+				_get_pattern(argc, argv, &arg_idx) : 1;
+			params->check_pattern = params->gen_pattern;
 			break;
 
 		default:
-			return -EINVAL;
+			return -1;
 		}
+	}
+
+	if (params->gen_pattern == -1 || params->check_pattern == -1)
+		return -1;
+
+	if (params->subcmd == PRBS_STOP &&
+			!params->gen_pattern &&
+			!params->check_pattern) {
+
+		/*
+		 * In case of STOP cmd, if both gen and check
+		 * are not provided, then do stop both
+		 */
+		params->gen_pattern = 1;
+		params->check_pattern = 1;
 	}
 
 	return 0;
@@ -791,88 +1165,148 @@ static ssize_t serdes_dbg_prbs_write(struct file *filp,
 					const char __user *buffer,
 					size_t count, loff_t *ppos)
 {
+#define STRBUF_SZ 64
 	int lane_idx;
 	int lanes_num, gserm_idx, mapping;
-	struct prbs_cmd_params input;
+	struct prbs_cmd_params input = {0};
 	struct arm_smccc_res res;
-	int x1, x2, x3;
+	s32 x1, x2, x3, x4;
+	char strbuf[STRBUF_SZ] = {0};
 
 	if (parse_prbs_params(buffer, count, &input))
 		return -EINVAL;
 
-	x1 = (input.gen_check << 18) |
-		(input.subcmd << 16) |
-		(0xff << 8) | input.port;
+	x1 = (input.subcmd << 16) | (0xff << 8) | input.port;
 
-	x2 = input.pattern;
-	x3 = input.inject_cnt;
+	x2 = input.gen_pattern;
+	x3 = input.check_pattern;
+	x4 = input.inject_cnt;
 
 	arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_PRBS, x1, x2,
-		x3, 0, 0, 0, 0, &res);
+		x3, x4, 0, 0, 0, &res);
 	if (res.a0) {
-		pr_warn("Setting SerDes PRBS failed\n");
+		pr_warn("SerDes PRBS failed\n");
 		return count;
 	}
 
 	get_gserm_data(res.a2, &gserm_idx, &mapping, &lanes_num);
 
 	pr_info("SerDes PRBS:\n");
-	switch (input.subcmd) {
-	case PRBS_START:
-	{
-		pr_info("port#:\tlane#:\tgserm#:\tg-lane#:\tpattern:"
-					"\tgen/check:\tinject:\tcmd:\n");
+	if (input.subcmd == PRBS_SHOW) {
+		struct prbs_error_stats *error_stats;
+
+		pr_info(PRBS_SHOW_HEADER);
+
+		error_stats = (struct prbs_error_stats *)prbs_shmem;
+
 		for (lane_idx = 0; lane_idx < lanes_num; lane_idx++) {
 			int glane = (mapping >> 4 * lane_idx) & 0xf;
 
-			pr_info("%d\t%d\t%d\t%d\t\t%d\t\t%s\t\t%d\t%s\n",
+			pr_info("%d\t%d\t%d\t%d\t\t%d\t%llu\t\t%llu\n",
 			       input.port,
 			       lane_idx,
 			       gserm_idx,
 			       glane,
-			       input.pattern,
-			       prbs_optcmd[input.gen_check].s,
-			       input.inject_cnt,
-			       prbs_subcmd[input.subcmd].s);
-		}
-	}	break;
-
-	case PRBS_SHOW:
-	{
-		struct prbs_error_stats *error_stats =
-				(struct prbs_error_stats *)prbs_shmem;
-
-		pr_info("port#:\tlane#:\tgserm#:\tg-lane#:"
-				"\ttotal_bits:\terror_bits:\n");
-		for (lane_idx = 0; lane_idx < lanes_num; lane_idx++) {
-			int glane = (mapping >> 4 * lane_idx) & 0xf;
-
-			pr_info("%d\t%d\t%d\t%d\t\t%llu\t\t%llu\n",
-			       input.port,
-			       lane_idx,
-			       gserm_idx,
-			       glane,
+			       error_stats[lane_idx].locked,
 			       error_stats[lane_idx].total_bits,
 			       error_stats[lane_idx].error_bits);
 		}
-	}	break;
+		return count;
+	}
 
-	default:
-		pr_info("port#:\tlane#:\tgserm#:\tg-lane#:\tcmd:\n");
-		for (lane_idx = 0; lane_idx < lanes_num; lane_idx++) {
-			int glane = (mapping >> 4 * lane_idx) & 0xf;
+	pr_info("port#:\tlane#:\tgserm#:\tg-lane#:\tcmd:\n");
 
-			pr_info("%d\t%d\t%d\t%d\t\t%s\n",
-			       input.port, lane_idx,
-			       gserm_idx, glane,
-			       prbs_subcmd[input.subcmd].s);
+	switch (input.subcmd) {
+	case PRBS_START:
+		if (input.gen_pattern || input.check_pattern) {
+			char cbuf[16] = {0};
+			char gbuf[16] = {0};
+
+			if (input.gen_pattern) {
+				const char *ptrn =
+					prbs_pattern_enum2str(input.gen_pattern);
+
+				snprintf(gbuf, 16, " gen=%s",
+					ptrn ? ptrn : "");
+			}
+
+			if (input.check_pattern) {
+				const char *ptrn =
+					prbs_pattern_enum2str(input.check_pattern);
+
+				snprintf(cbuf, 16, " check=%s",
+					ptrn ? ptrn : "");
+			}
+
+			snprintf(strbuf, STRBUF_SZ, "(patterns:%s%s)", gbuf, cbuf);
 		}
 		break;
+	case PRBS_CLEAR:
+		snprintf(strbuf, STRBUF_SZ, "counters");
+		break;
+	case PRBS_STOP:
+		snprintf(strbuf, STRBUF_SZ, "%s%s%s",
+			input.gen_pattern ? " generator" : "",
+			input.gen_pattern && input.check_pattern ? "," : "",
+			input.check_pattern ? " checker" : "");
+		break;
+	case PRBS_INJECT:
+		snprintf(strbuf, STRBUF_SZ, "%d errors", input.inject_cnt);
+		break;
+	default:
+		break;
+	}
+
+	for (lane_idx = 0; lane_idx < lanes_num; lane_idx++) {
+		int glane = (mapping >> 4 * lane_idx) & 0xf;
+
+		pr_info("%d\t%d\t%d\t%d\t\t%s %s\n",
+		       input.port,
+		       lane_idx,
+		       gserm_idx,
+		       glane,
+		       prbs_subcmd[input.subcmd].s,
+		       strbuf);
 	}
 
 	return count;
 }
 DEFINE_ATTRIBUTE(serdes_dbg_prbs);
+
+static long notify_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct arm_smccc_res res;
+	s32 portm, evt;
+
+	switch (cmd) {
+	case IOCTL_SEND_ECP_NOTIFICATION:
+		portm = (arg >> 8) & 0xff;
+		evt = arg & 0xff;
+
+		/* Validate event */
+		if (evt > ECP_NOTIFY_PRBS_MODE_GEN_CHECK_DIS)
+			return -EINVAL;
+
+		arm_smccc_smc(PLAT_OCTEONTX_SERDES_DBG_NOTIFY_ECP, portm, evt,
+			0, 0, 0, 0, 0, &res);
+		if (res.a0) {
+			pr_warn("Sending ECP notification failed\n");
+			return -EINVAL;
+		}
+		break;
+	default:
+		pr_err("Unsupported IOCTL\n");
+		return -ENXIO;
+	}
+
+	return 0;
+}
+
+static const struct file_operations notify_fops = {
+	.owner			= THIS_MODULE,
+	.unlocked_ioctl		= notify_ioctl,
+	.llseek			= no_llseek,
+};
 
 static int serdes_dbg_setup_debugfs(void)
 {
@@ -881,22 +1315,32 @@ static int serdes_dbg_setup_debugfs(void)
 	serdes_dbgfs_root = debugfs_create_dir("serdes_diagnostics", NULL);
 
 	dbg_file = debugfs_create_file("prbs", 0644, serdes_dbgfs_root, NULL,
-				    &serdes_dbg_prbs_fops);
+				       &serdes_dbg_prbs_fops);
 	if (!dbg_file)
 		goto create_failed;
 
 	dbg_file = debugfs_create_file("loopback", 0644, serdes_dbgfs_root, NULL,
-				    &serdes_dbg_lpbk_fops);
+				       &serdes_dbg_lpbk_fops);
 	if (!dbg_file)
 		goto create_failed;
 
 	dbg_file = debugfs_create_file("rx_params", 0644, serdes_dbgfs_root, NULL,
-				    &serdes_dbg_rx_eq_fops);
+				       &serdes_dbg_rx_eq_fops);
+	if (!dbg_file)
+		goto create_failed;
+
+	dbg_file = debugfs_create_file("rx_training", 0644, serdes_dbgfs_root, NULL,
+				       &serdes_dbg_rx_tr_fops);
 	if (!dbg_file)
 		goto create_failed;
 
 	dbg_file = debugfs_create_file("tx_params", 0644, serdes_dbgfs_root, NULL,
-				    &serdes_dbg_tx_eq_fops);
+				       &serdes_dbg_tx_eq_fops);
+	if (!dbg_file)
+		goto create_failed;
+
+	dbg_file = debugfs_create_file("notify", 0644, serdes_dbgfs_root, NULL,
+				       &notify_fops);
 	if (!dbg_file)
 		goto create_failed;
 
