@@ -92,6 +92,18 @@
 			no-map;
 		};
 
+		mcu_m4fss_dma_memory_region: m4f-dma-memory@a4000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xa4000000 0x00 0x100000>;
+			no-map;
+		};
+
+		mcu_m4fss_memory_region: m4f-memory@a4100000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xa4100000 0x00 0xf00000>;
+			no-map;
+		};
+
 		rtos_ipc_memory_region: ipc-memories@a5000000 {
 			reg = <0x00 0xa5000000 0x00 0x00800000>;
 			alignment = <0x1000>;
@@ -233,16 +245,16 @@
 		interrupts = <24 0 2>, <25 1 3>;
 		interrupt-names = "tx_ts0", "tx_ts1";
 
-		dmas = <&main_pktdma 0xc200 0>, /* egress slice 0 */
-		       <&main_pktdma 0xc201 0>, /* egress slice 0 */
-		       <&main_pktdma 0xc202 0>, /* egress slice 0 */
-		       <&main_pktdma 0xc203 0>, /* egress slice 0 */
-		       <&main_pktdma 0xc204 0>, /* egress slice 1 */
-		       <&main_pktdma 0xc205 0>, /* egress slice 1 */
-		       <&main_pktdma 0xc206 0>, /* egress slice 1 */
-		       <&main_pktdma 0xc207 0>, /* egress slice 1 */
-		       <&main_pktdma 0x4200 0>, /* ingress slice 0 */
-		       <&main_pktdma 0x4201 0>, /* ingress slice 1 */
+		dmas = <&main_pktdma 0xc200 15>, /* egress slice 0 */
+		       <&main_pktdma 0xc201 15>, /* egress slice 0 */
+		       <&main_pktdma 0xc202 15>, /* egress slice 0 */
+		       <&main_pktdma 0xc203 15>, /* egress slice 0 */
+		       <&main_pktdma 0xc204 15>, /* egress slice 1 */
+		       <&main_pktdma 0xc205 15>, /* egress slice 1 */
+		       <&main_pktdma 0xc206 15>, /* egress slice 1 */
+		       <&main_pktdma 0xc207 15>, /* egress slice 1 */
+		       <&main_pktdma 0x4200 15>, /* ingress slice 0 */
+		       <&main_pktdma 0x4201 15>, /* ingress slice 1 */
 		       <&main_pktdma 0x4202 0>, /* mgmnt rsp slice 0 */
 		       <&main_pktdma 0x4203 0>; /* mgmnt rsp slice 1 */
 		dma-names = "tx0-0", "tx0-1", "tx0-2", "tx0-3",
@@ -267,50 +279,34 @@
 	};
 };
 
-&oc_sram {
-	main_r5fss0_core0_sram: r5f-sram@40000 {
-		reg = <0x40000 0x40000>;
-	};
-
-	main_r5fss0_core1_sram: r5f-sram@80000 {
-		reg = <0x80000 0x40000>;
-	};
-
-	main_r5fss1_core0_sram: r5f-sram@c0000 {
-		reg = <0xc0000 0x40000>;
-	};
-
-	main_r5fss1_core1_sram: r5f-sram@100000 {
-		reg = <0x100000 0x40000>;
-	};
-};
-
 &main_r5fss0_core0 {
 	mboxes = <&mailbox0_cluster2 &mbox_main_r5fss0_core0>;
 	memory-region = <&main_r5fss0_core0_dma_memory_region>,
 			<&main_r5fss0_core0_memory_region>;
-	sram = <&main_r5fss0_core0_sram>;
 };
 
 &main_r5fss0_core1 {
 	mboxes = <&mailbox0_cluster2 &mbox_main_r5fss0_core1>;
 	memory-region = <&main_r5fss0_core1_dma_memory_region>,
 			<&main_r5fss0_core1_memory_region>;
-	sram = <&main_r5fss0_core1_sram>;
 };
 
 &main_r5fss1_core0 {
 	mboxes = <&mailbox0_cluster4 &mbox_main_r5fss1_core0>;
 	memory-region = <&main_r5fss1_core0_dma_memory_region>,
 			<&main_r5fss1_core0_memory_region>;
-	sram = <&main_r5fss1_core0_sram>;
 };
 
 &main_r5fss1_core1 {
 	mboxes = <&mailbox0_cluster4 &mbox_main_r5fss1_core1>;
 	memory-region = <&main_r5fss1_core1_dma_memory_region>,
 			<&main_r5fss1_core1_memory_region>;
-	sram = <&main_r5fss1_core1_sram>;
+};
+
+&mcu_m4fss {
+	mboxes = <&mailbox0_cluster6 &mbox_m4_0>;
+	memory-region = <&mcu_m4fss_dma_memory_region>,
+			<&mcu_m4fss_memory_region>;
 };
 
 &main_pmx0 {

@@ -70,10 +70,16 @@ struct virt_cpsw_common {
 
 	struct virt_cpsw_tx_chn tx_chns;
 	struct napi_struct napi_tx;
+	struct hrtimer tx_hrtimer;
+	unsigned long tx_pace_timeout;
 	struct completion tdown_complete;
 	atomic_t tdown_cnt;
 	struct virt_cpsw_rx_chn rx_chns;
 	struct napi_struct napi_rx;
+	bool rx_irq_disabled;
+	struct hrtimer rx_hrtimer;
+	unsigned long rx_pace_timeout;
+	u32 mac_only_port;
 
 	const char *rdev_name;
 	struct rpmsg_remotedev *rdev;
@@ -84,6 +90,12 @@ struct virt_cpsw_common {
 	u32 rdev_tx_psil_dst_id;
 	u32 tx_psil_id_base;
 	u32 rdev_rx_flow_id;
+	struct notifier_block virt_cpsw_inetaddr_nb;
+	struct work_struct rx_mode_work;
+	struct workqueue_struct	*cmd_wq;
+	struct netdev_hw_addr_list mc_list;
+	unsigned int mac_only:1;
+	unsigned int mc_filter:1;
 };
 
 struct virt_cpsw_ndev_stats {
@@ -199,6 +211,10 @@ static int virt_cpsw_nuss_common_open(struct virt_cpsw_common *common,
 
 	napi_enable(&common->napi_tx);
 	napi_enable(&common->napi_rx);
+	if (common->rx_irq_disabled) {
+		common->rx_irq_disabled = false;
+		enable_irq(common->rx_chns.irq);
+	}
 
 	return 0;
 }
@@ -228,6 +244,7 @@ static void virt_cpsw_nuss_common_stop(struct virt_cpsw_common *common)
 				  virt_cpsw_nuss_tx_cleanup);
 	k3_udma_glue_disable_tx_chn(common->tx_chns.tx_chn);
 	napi_disable(&common->napi_tx);
+	hrtimer_cancel(&common->tx_hrtimer);
 
 	k3_udma_glue_rx_flow_disable(common->rx_chns.rx_chn, 0);
 	/* Need some delay to process RX ring before reset */
@@ -236,7 +253,11 @@ static void virt_cpsw_nuss_common_stop(struct virt_cpsw_common *common)
 				  &common->rx_chns,
 				  virt_cpsw_nuss_rx_cleanup, false);
 	napi_disable(&common->napi_rx);
+	hrtimer_cancel(&common->rx_hrtimer);
+	cancel_work_sync(&common->rx_mode_work);
 }
+
+static int virt_cpsw_nuss_del_mc(struct net_device *ndev, const u8 *addr);
 
 static int virt_cpsw_nuss_ndo_stop(struct net_device *ndev)
 {
@@ -254,6 +275,8 @@ static int virt_cpsw_nuss_ndo_stop(struct net_device *ndev)
 	if (ret)
 		dev_err(dev, "unregister_mac rpmsg - fail %d\n", ret);
 
+	__dev_mc_unsync(ndev, virt_cpsw_nuss_del_mc);
+	__hw_addr_init(&common->mc_list);
 	virt_cpsw_nuss_common_stop(common);
 
 	dev_info(common->dev, "virt_cpsw_nuss mac stopped\n");
@@ -434,6 +457,15 @@ static int virt_cpsw_nuss_rx_packets(struct virt_cpsw_common *common,
 	return ret;
 }
 
+static enum hrtimer_restart virt_cpsw_nuss_rx_timer_callback(struct hrtimer *timer)
+{
+	struct virt_cpsw_common *common =
+			container_of(timer, struct virt_cpsw_common, rx_hrtimer);
+
+	enable_irq(common->rx_chns.irq);
+	return HRTIMER_NORESTART;
+}
+
 static int virt_cpsw_nuss_rx_poll(struct napi_struct *napi_rx, int budget)
 {
 	struct virt_cpsw_common *common =
@@ -454,8 +486,18 @@ static int virt_cpsw_nuss_rx_poll(struct napi_struct *napi_rx, int budget)
 
 	dev_dbg(common->dev, "%s num_rx:%d %d\n", __func__, num_rx, budget);
 
-	if (num_rx < budget && napi_complete_done(napi_rx, num_rx))
-		enable_irq(common->rx_chns.irq);
+	if (num_rx < budget && napi_complete_done(napi_rx, num_rx)) {
+		if (common->rx_irq_disabled) {
+			common->rx_irq_disabled = false;
+			if (unlikely(common->rx_pace_timeout)) {
+				hrtimer_start(&common->rx_hrtimer,
+					      ns_to_ktime(common->rx_pace_timeout),
+					      HRTIMER_MODE_REL_PINNED);
+			} else {
+				enable_irq(common->rx_chns.irq);
+			}
+		}
+	}
 
 	return num_rx;
 }
@@ -509,7 +551,7 @@ static void virt_cpsw_nuss_tx_cleanup(void *data, dma_addr_t desc_dma)
 }
 
 static int virt_cpsw_nuss_tx_compl_packets(struct virt_cpsw_common *common,
-					   int chn, unsigned int budget)
+					   int chn, unsigned int budget, bool *tdown)
 {
 	struct cppi5_host_desc_t *desc_tx;
 	struct device *dev = common->dev;
@@ -535,6 +577,7 @@ static int virt_cpsw_nuss_tx_compl_packets(struct virt_cpsw_common *common,
 		if (desc_dma & 0x1) {
 			if (atomic_dec_and_test(&common->tdown_cnt))
 				complete(&common->tdown_complete);
+			*tdown = true;
 			break;
 		}
 
@@ -584,27 +627,46 @@ static int virt_cpsw_nuss_tx_compl_packets(struct virt_cpsw_common *common,
 	return num_tx;
 }
 
+static enum hrtimer_restart virt_cpsw_nuss_tx_timer_callback(struct hrtimer *timer)
+{
+	struct virt_cpsw_common *common =
+			container_of(timer, struct virt_cpsw_common, tx_hrtimer);
+
+	enable_irq(common->tx_chns.irq);
+	return HRTIMER_NORESTART;
+}
+
 static int virt_cpsw_nuss_tx_poll(struct napi_struct *napi_tx, int budget)
 {
 	struct virt_cpsw_common *common =
 			container_of(napi_tx, struct virt_cpsw_common, napi_tx);
+	bool tdown = false;
 	int num_tx;
 
 	/* process every unprocessed channel */
-	num_tx = virt_cpsw_nuss_tx_compl_packets(common, 0, budget);
+	num_tx = virt_cpsw_nuss_tx_compl_packets(common, 0, budget, &tdown);
 
-	if (num_tx < budget) {
-		napi_complete(napi_tx);
-		enable_irq(common->tx_chns.irq);
+	if (num_tx >= budget)
+		return budget;
+
+	if (napi_complete_done(napi_tx, num_tx)) {
+		if (unlikely(common->tx_pace_timeout && !tdown)) {
+			hrtimer_start(&common->tx_hrtimer,
+				      ns_to_ktime(common->tx_pace_timeout),
+				      HRTIMER_MODE_REL_PINNED);
+		} else {
+			enable_irq(common->tx_chns.irq);
+		}
 	}
 
-	return num_tx;
+	return 0;
 }
 
 static irqreturn_t virt_cpsw_nuss_rx_irq(int irq, void *dev_id)
 {
 	struct virt_cpsw_common *common = dev_id;
 
+	common->rx_irq_disabled = true;
 	disable_irq_nosync(irq);
 	napi_schedule(&common->napi_rx);
 
@@ -662,7 +724,7 @@ static netdev_tx_t virt_cpsw_nuss_ndo_xmit(struct sk_buff *skb,
 	cppi5_desc_set_pktids(&first_desc->hdr, 0, 0x3FFF);
 	cppi5_hdesc_set_pkttype(first_desc, 0x7);
 	/* target port has to be 0 */
-	cppi5_desc_set_tags_ids(&first_desc->hdr, 0, 0);
+	cppi5_desc_set_tags_ids(&first_desc->hdr, 0, common->mac_only_port);
 
 	cppi5_hdesc_attach_buf(first_desc, buf_dma, pkt_len, buf_dma, pkt_len);
 	swdata = cppi5_hdesc_get_swdata(first_desc);
@@ -804,6 +866,84 @@ static void virt_cpsw_nuss_ndo_get_stats(struct net_device *dev,
 	stats->tx_dropped	= dev->stats.tx_dropped;
 }
 
+static int virt_cpsw_nuss_add_mc(struct net_device *ndev, const u8 *addr)
+{
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+	struct rpmsg_remotedev_eth_switch_ops *rdev_ops;
+	struct device *dev;
+	int ret;
+
+	dev = common->dev;
+	rdev_ops = common->rdev_switch_ops;
+
+	ret = rdev_ops->filter_add_mc(common->rdev, addr, 0, common->rdev_rx_flow_id);
+	if (ret) {
+		dev_err(dev, "filter_add_mc rpmsg - fail %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int virt_cpsw_nuss_del_mc(struct net_device *ndev, const u8 *addr)
+{
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+	struct rpmsg_remotedev_eth_switch_ops *rdev_ops;
+	struct device *dev;
+	int ret;
+
+	dev = common->dev;
+	rdev_ops = common->rdev_switch_ops;
+
+	ret = rdev_ops->filter_del_mc(common->rdev, addr, 0, common->rdev_rx_flow_id);
+	if (ret) {
+		dev_err(dev, "filter_add_mc rpmsg - fail %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void virt_cpsw_nuss_ndo_set_rx_mode_work(struct work_struct *work)
+{
+	struct rpmsg_remotedev_eth_switch_ops *rdev_ops;
+	struct virt_cpsw_common *common;
+	struct net_device *ndev;
+	struct device *dev;
+	int ret;
+
+	common = container_of(work, struct virt_cpsw_common, rx_mode_work);
+	dev = common->dev;
+	rdev_ops = common->rdev_switch_ops;
+
+	if (common->mac_only) {
+		ret = rdev_ops->set_promisc_mode(common->rdev,
+						 common->ports.ndev->flags & IFF_PROMISC);
+		if (ret) {
+			dev_err(dev, "set_promisc rpmsg - fail %d\n", ret);
+			return;
+		}
+	} else if (common->mc_filter) {
+		ndev = common->ports.ndev;
+
+		/* make a mc list copy */
+		netif_addr_lock_bh(ndev);
+		__hw_addr_sync(&common->mc_list, &ndev->mc, ndev->addr_len);
+		netif_addr_unlock_bh(ndev);
+
+		__hw_addr_sync_dev(&common->mc_list, ndev,
+				   virt_cpsw_nuss_add_mc, virt_cpsw_nuss_del_mc);
+	}
+}
+
+static void virt_cpsw_nuss_ndo_set_rx_mode(struct net_device *ndev)
+{
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+
+	if (common->mac_only || common->mc_filter)
+		queue_work(common->cmd_wq, &common->rx_mode_work);
+}
+
 static const struct net_device_ops virt_cpsw_nuss_netdev_ops = {
 	.ndo_open		= virt_cpsw_nuss_ndo_open,
 	.ndo_stop		= virt_cpsw_nuss_ndo_stop,
@@ -812,6 +952,7 @@ static const struct net_device_ops virt_cpsw_nuss_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_tx_timeout		= virt_cpsw_nuss_ndo_host_tx_timeout,
+	.ndo_set_rx_mode	= virt_cpsw_nuss_ndo_set_rx_mode,
 };
 
 static void virt_cpsw_nuss_get_drvinfo(struct net_device *ndev,
@@ -911,12 +1052,40 @@ static void virt_cpsw_nuss_self_test(struct net_device *ndev,
 	}
 }
 
+static int virt_cpsw_nuss_get_coalesce(struct net_device *ndev, struct ethtool_coalesce *coal)
+{
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+
+	coal->rx_coalesce_usecs = common->rx_pace_timeout / 1000;
+	coal->tx_coalesce_usecs = common->tx_pace_timeout / 1000;
+	return 0;
+}
+
+static int virt_cpsw_nuss_set_coalesce(struct net_device *ndev, struct ethtool_coalesce *coal)
+{
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+
+	if (coal->rx_coalesce_usecs && coal->rx_coalesce_usecs < 20)
+		coal->rx_coalesce_usecs = 20;
+
+	if (coal->tx_coalesce_usecs && coal->tx_coalesce_usecs < 20)
+		coal->tx_coalesce_usecs = 20;
+
+	common->tx_pace_timeout = coal->tx_coalesce_usecs * 1000;
+	common->rx_pace_timeout = coal->rx_coalesce_usecs * 1000;
+
+	return 0;
+}
+
 const struct ethtool_ops virt_cpsw_nuss_ethtool_ops = {
 	.get_drvinfo		= virt_cpsw_nuss_get_drvinfo,
 	.get_sset_count		= virt_cpsw_nuss_get_sset_count,
 	.get_strings		= virt_cpsw_nuss_get_strings,
 	.self_test		= virt_cpsw_nuss_self_test,
 	.get_link		= ethtool_op_get_link,
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS,
+	.get_coalesce           = virt_cpsw_nuss_get_coalesce,
+	.set_coalesce           = virt_cpsw_nuss_set_coalesce,
 };
 
 static void virt_cpsw_nuss_free_tx_chns(void *data)
@@ -1135,18 +1304,30 @@ static int virt_cpsw_nuss_rdev_init(struct virt_cpsw_common *common)
 		dev_err(dev, "rpmsg attach - fail %d\n", ret);
 		return ret;
 	}
-	dev_dbg(dev, "rpmsg attach_ext - rx_mtu:%d features:%08X tx_mtu[0]:%d flow_idx:%d tx_cpsw_psil_dst_id:%d mac_addr:%pM\n",
+	dev_err(dev, "rpmsg attach_ext - rx_mtu:%d features:%08X tx_mtu[0]:%d flow_idx:%d tx_cpsw_psil_dst_id:%d mac_addr:%pM mac-only:%d\n",
 		attach_info.rx_mtu, attach_info.features,
 		attach_info.tx_mtu[0],
 		attach_info.flow_idx,
 		attach_info.tx_cpsw_psil_dst_id,
-		attach_info.mac_addr);
+		attach_info.mac_addr,
+		attach_info.mac_only_port);
 	common->rdev_features = attach_info.features;
 	common->rdev_mtu = VIRT_CPSW_MAX_PACKET_SIZE;
 	common->rdev_tx_psil_dst_id = attach_info.tx_cpsw_psil_dst_id &
 				     (~0x8000);
 	common->rdev_rx_flow_id = attach_info.flow_idx;
 	ether_addr_copy(common->rdev_mac_addr, attach_info.mac_addr);
+
+	if (common->rdev_features & RPMSG_KDRV_ETHSWITCH_FEATURE_MAC_ONLY) {
+		common->mac_only = true;
+		common->mac_only_port = attach_info.mac_only_port;
+	}
+
+	if (common->rdev_features & RPMSG_KDRV_ETHSWITCH_FEATURE_MC_FILTER)
+		common->mc_filter = true;
+
+	if (!common->mac_only && common->mac_only_port)
+		return -EINVAL;
 
 	return 0;
 }
@@ -1207,6 +1388,11 @@ static int virt_cpsw_nuss_init_ndev(struct virt_cpsw_common *common)
 	netif_napi_add(port->ndev, &common->napi_rx,
 		       virt_cpsw_nuss_rx_poll, NAPI_POLL_WEIGHT);
 
+	hrtimer_init(&common->tx_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	common->tx_hrtimer.function = &virt_cpsw_nuss_tx_timer_callback;
+	hrtimer_init(&common->rx_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	common->rx_hrtimer.function = &virt_cpsw_nuss_rx_timer_callback;
+
 	ret = register_netdev(port->ndev);
 	if (ret)
 		dev_err(dev, "error registering slave net device %d\n", ret);
@@ -1226,7 +1412,9 @@ static void virt_cpsw_nuss_cleanup_ndev(struct virt_cpsw_common *common)
 
 static bool virt_cpsw_dev_check(const struct net_device *ndev)
 {
-	return ndev->netdev_ops == &virt_cpsw_nuss_netdev_ops;
+	struct virt_cpsw_common *common = virt_ndev_to_common(ndev);
+
+	return ndev->netdev_ops == &virt_cpsw_nuss_netdev_ops && !common->mac_only;
 }
 
 static int virt_cpsw_inetaddr_event(struct notifier_block *unused,
@@ -1268,10 +1456,6 @@ static int virt_cpsw_inetaddr_event(struct notifier_block *unused,
 out:
 	return notifier_from_errno(ret);
 }
-
-static struct notifier_block virt_cpsw_inetaddr_nb __read_mostly = {
-	.notifier_call = virt_cpsw_inetaddr_event,
-};
 
 static const struct of_device_id virt_cpsw_virt_of_mtable[] = {
 	{ .compatible = "ti,j721e-cpsw-virt-mac", },
@@ -1332,6 +1516,13 @@ static int virt_cpsw_nuss_probe(struct platform_device *pdev)
 		return -ENXIO;
 
 	dev_set_drvdata(dev, common);
+	__hw_addr_init(&common->mc_list);
+	INIT_WORK(&common->rx_mode_work, virt_cpsw_nuss_ndo_set_rx_mode_work);
+	common->cmd_wq = create_singlethread_workqueue("virt_cpsw");
+	if (!common->cmd_wq) {
+		dev_err(dev, "failure requesting wq\n");
+		return -ENOMEM;
+	}
 
 	ret = virt_cpsw_nuss_init_ndev(common);
 	if (ret)
@@ -1361,14 +1552,18 @@ static int virt_cpsw_nuss_probe(struct platform_device *pdev)
 		goto unreg_ndev;
 	}
 
-	register_inetaddr_notifier(&virt_cpsw_inetaddr_nb);
+	if (!common->mac_only) {
+		common->virt_cpsw_inetaddr_nb.notifier_call = &virt_cpsw_inetaddr_event;
+		register_inetaddr_notifier(&common->virt_cpsw_inetaddr_nb);
+	}
 
 	dev_info(common->dev, "virt_cpsw_nuss mac loaded\n");
-	dev_info(dev, "rdev_features:%08X rdev_mtu:%d flow_id:%d tx_psil_dst_id:%04X\n",
+	dev_info(dev, "rdev_features:%08X rdev_mtu:%d flow_id:%d tx_psil_dst_id:%04X mac_only:%d\n",
 		 common->rdev_features,
 		 common->rdev_mtu,
 		 common->rdev_rx_flow_id,
-		 common->rdev_tx_psil_dst_id);
+		 common->rdev_tx_psil_dst_id,
+		 common->mac_only_port);
 	dev_info(dev, "local_mac_addr:%pM rdev_mac_addr:%pM\n",
 		 common->ports.local_mac_addr,
 		 common->rdev_mac_addr);
@@ -1386,12 +1581,15 @@ static int virt_cpsw_nuss_remove(struct platform_device *pdev)
 	struct device *dev = common->dev;
 	int ret;
 
-	unregister_inetaddr_notifier(&virt_cpsw_inetaddr_nb);
+	if (!common->mac_only)
+		unregister_inetaddr_notifier(&common->virt_cpsw_inetaddr_nb);
 
 	/* must unregister ndevs here because DD release_driver routine calls
 	 * dma_deconfigure(dev) before devres_release_all(dev)
 	 */
 	virt_cpsw_nuss_cleanup_ndev(common);
+	if (common->mac_only)
+		destroy_workqueue(common->cmd_wq);
 
 	ret = common->rdev_switch_ops->detach(common->rdev);
 	if (ret)
