@@ -42,6 +42,7 @@
 		      <0x0 0x40044000 0x0 0x3000>, /*ddrpll*/
 		      <0x0 0x40054000 0x0 0x3000>, /*armdfs*/
 		      <0x0 0x40058000 0x0 0x3000>; /*periphdfs*/
+		nxp,syscon-mc-me = <&mc_me>;
 		#clock-cells = <1>;
 		#reset-cells = <1>;
 	};
@@ -52,8 +53,9 @@
 	};
 
 	reset: rgm@40078000 {
-		compatible = "fsl,s32gen1-rgm", "fsl,s32r45-reset", "syscon";
+		compatible = "fsl,s32r45-reset", "syscon";
 		reg = <0x0 0x40078000 0x0 0x3000>;
+		nxp,syscon-mc-me = <&mc_me>;
 		#reset-cells = <1>;
 	};
 
@@ -233,11 +235,14 @@
 		compatible = "fsl,s32cc-dwmac";
 		reg = <0x0 0x44010000 0x0 0x2000>, /* gmac IP */
 		      <0x0 0x4007CA00 0x0 0x4>;    /* S32 CTRL_STS reg */
+		dma-coherent;
 		interrupt-parent = <&gic>;
 		interrupts = <0 220 4>;
 		interrupt-names = "macirq";
 		tx-fifo-depth = <20480>;
 		rx-fifo-depth = <20480>;
+		phy-names = "gmac_xpcs";
+		phys = <&serdes1 PHY_TYPE_XPCS 0 0>;
 		clocks = <&clks S32R45_SCMI_CLK_GMAC1_AXI>,
 			 <&clks S32R45_SCMI_CLK_GMAC1_AXI>,
 			 <&clks S32R45_SCMI_CLK_GMAC1_TX_SGMII>,

@@ -2,7 +2,7 @@
 /*
  * PCIe host controller driver for NXP S32Gen1 SoCs
  *
- * Copyright 2020-2021 NXP
+ * Copyright 2020-2022 NXP
  */
 
 #ifdef CONFIG_PCI_S32GEN1_DEBUG
@@ -243,7 +243,7 @@ static int s32gen1_check_serdes(struct device *dev)
 	}
 
 	serdes = nvmem_cell_read(serdes_cell, &read_len);
-	nvmem_cell_put(serdes_cell);
+	devm_nvmem_cell_put(dev, serdes_cell);
 	if (IS_ERR(serdes)) {
 		dev_err(dev, "Failed to read serdes cell\n");
 		return PTR_ERR(serdes);
@@ -1423,7 +1423,7 @@ static int wait_phy_data_link(struct s32gen1_pcie *s32_pp)
 
 	spin_until_cond(pcie_link_or_timeout(s32_pp, timeout));
 	if (!has_data_phy_link(s32_pp)) {
-		dev_err(s32_pp->pcie.dev, "Failed to stabilize PHY link\n");
+		dev_info(s32_pp->pcie.dev, "Failed to stabilize PHY link\n");
 		return -ETIMEDOUT;
 	}
 
