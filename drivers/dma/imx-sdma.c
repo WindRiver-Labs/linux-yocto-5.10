@@ -1639,7 +1639,7 @@ static int sdma_runtime_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sdma_engine *sdma = platform_get_drvdata(pdev);
-	int i, ret = 0;
+	int ret = 0;
 
 	/* Do nothing at HW level if audiomix which shared with audio driver
 	 * not off indeed.
@@ -1723,7 +1723,7 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
 			return ret;
 		ret = clk_enable(sdmac->sdma->clk_ahb);
 		if (ret)
-			goto disable_clk_ahb;
+			goto disable_clk_ipg;
 	}
 
 	ret = sdma_set_channel_priority(sdmac, prio);
