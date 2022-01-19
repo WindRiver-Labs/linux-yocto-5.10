@@ -54,9 +54,6 @@ static bool mc_rgm_readable_reg(struct device *dev, unsigned int reg)
 }
 
 static const struct regmap_config mc_rgm_regmap_config = {
-	.reg_bits = 32,
-	.val_bits = 32,
-	.reg_stride = 4,
 	.writeable_reg = mc_rgm_writeable_reg,
 	.readable_reg = mc_rgm_readable_reg,
 	.max_register = RGM_PSTAT(7),
@@ -77,12 +74,6 @@ static int s32gen1_mc_rgm_probe(struct platform_device *pdev)
 	if (IS_ERR(mc_rgm)) {
 		dev_err(&pdev->dev, "Cannot map 'RGM' resource\n");
 		return -ENODEV;
-	}
-
-	err = regmap_attach_dev(dev, mc_rgm, &mc_rgm_regmap_config);
-	if (err) {
-		dev_err(dev, "Failed to attach device to 'RGM' regmap.\n");
-		return err;
 	}
 
 	err = regmap_reinit_cache(mc_rgm, &mc_rgm_regmap_config);
@@ -107,7 +98,18 @@ static struct platform_driver s32gen1_mc_rgm_driver = {
 	.probe = s32gen1_mc_rgm_probe,
 };
 
-module_platform_driver(s32gen1_mc_rgm_driver);
+static int __init mc_rgm_module_init(void)
+{
+	return platform_driver_register(&s32gen1_mc_rgm_driver);
+}
+
+static void __exit mc_rgm_module_cleanup(void)
+{
+	platform_driver_unregister(&s32gen1_mc_rgm_driver);
+}
+
+arch_initcall(mc_rgm_module_init);
+module_exit(mc_rgm_module_cleanup);
 
 MODULE_AUTHOR("Andra Ilie <andra.ilie@nxp.com>");
 MODULE_DESCRIPTION("S32GEN1 MC_RGM regmap driver");
