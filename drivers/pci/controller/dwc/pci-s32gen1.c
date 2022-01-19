@@ -712,7 +712,7 @@ static void s32gen1_pcie_stop_link(struct dw_pcie *pcie)
 	s32gen1_pcie_disable_ltssm(s32_pp);
 }
 
-#ifdef CONFIG_PCI_MSI
+#ifdef CONFIG_PCI_S32GEN1_EP_MSI
 /* msi IRQ handler
  * irq - interrupt number
  * arg - pointer to the "struct pcie_port" object
@@ -894,6 +894,7 @@ out_unlock_rescan:
 	return IRQ_HANDLED;
 }
 
+#if defined(CONFIG_PCI_S32GEN1_EP_MSI) || defined(CONFIG_PCI_DW_DMA)
 #define MAX_IRQ_NAME_SIZE 32
 static int s32gen1_pcie_config_irq(int *irq_id, char *irq_name,
 		struct platform_device *pdev,
@@ -924,6 +925,7 @@ static int s32gen1_pcie_config_irq(int *irq_id, char *irq_name,
 
 	return 0;
 }
+#endif
 
 static int s32gen1_pcie_config_hp_irq(struct s32gen1_pcie *s32_pp,
 				      struct platform_device *pdev)
