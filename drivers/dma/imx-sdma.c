@@ -2260,9 +2260,6 @@ static void sdma_load_firmware(const struct firmware *fw, void *context)
 			goto err_firmware;
 
 		memcpy(sdma->fw_data, fw->data, fw->size);
-
-		if (!sdma->drvdata->pm_runtime)
-			pm_runtime_get_sync(sdma->dev);
 	}
 
 err_firmware:
