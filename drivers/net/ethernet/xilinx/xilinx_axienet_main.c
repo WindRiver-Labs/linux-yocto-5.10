@@ -53,8 +53,9 @@
 #include "xilinx_tsn_timer.h"
 #endif
 /* Descriptors defines for Tx and Rx DMA */
-#define TX_BD_NUM_DEFAULT		64
-#define RX_BD_NUM_DEFAULT		128
+#define TX_BD_NUM_DEFAULT		128
+#define RX_BD_NUM_DEFAULT		1024
+#define TX_BD_NUM_MIN			(MAX_SKB_FRAGS + 1)
 #define TX_BD_NUM_MAX			4096
 #define RX_BD_NUM_MAX			4096
 
@@ -516,7 +517,8 @@ static inline int axienet_mrmac_gt_reset(struct net_device *ndev)
 
 int __axienet_device_reset(struct axienet_dma_q *q)
 {
-	u32 timeout;
+	u32 value;
+	int ret;
 
 	/* Reset Axi DMA. This would reset Axi Ethernet core as well. The reset
 	 * process of Axi DMA takes a while to complete as all pending
@@ -749,7 +751,6 @@ static int axienet_free_tx_chain(struct net_device *ndev, u32 first_bd,
 		if (cur_p->tx_skb && (status & XAXIDMA_BD_STS_COMPLETE_MASK))
 			dev_kfree_skb_irq((struct sk_buff *)cur_p->tx_skb);
 
-		cur_p->cntrl = 0;
 		cur_p->app0 = 0;
 		cur_p->app1 = 0;
 		cur_p->app2 = 0;
@@ -1423,6 +1424,18 @@ out:
 		q->tx_bd_tail = 0;
 
 	spin_unlock_irqrestore(&q->tx_lock, flags);
+
+	/* Stop queue if next transmit may not have space */
+	if (axienet_check_tx_bd_space(lp, MAX_SKB_FRAGS + 1)) {
+		netif_stop_queue(ndev);
+
+		/* Matches barrier in axienet_start_xmit_done */
+		smp_mb();
+
+		/* Space might have just been freed - check again */
+		if (!axienet_check_tx_bd_space(lp, MAX_SKB_FRAGS + 1))
+			netif_wake_queue(ndev);
+	}
 
 	return NETDEV_TX_OK;
 }
@@ -2478,7 +2491,8 @@ static int axienet_ethtools_set_ringparam(struct net_device *ndev,
 	if (ering->rx_pending > RX_BD_NUM_MAX ||
 	    ering->rx_mini_pending ||
 	    ering->rx_jumbo_pending ||
-	    ering->rx_pending > TX_BD_NUM_MAX)
+	    ering->tx_pending < TX_BD_NUM_MIN ||
+	    ering->tx_pending > TX_BD_NUM_MAX)
 		return -EINVAL;
 
 	if (netif_running(ndev))
