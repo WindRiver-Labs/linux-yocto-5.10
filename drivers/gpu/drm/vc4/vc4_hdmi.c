@@ -1974,6 +1974,8 @@ static int vc4_hdmi_cec_init(struct vc4_hdmi *vc4_hdmi)
 	if (ret < 0)
 		goto err_remove_handlers;
 
+	pm_runtime_put(&vc4_hdmi->pdev->dev);
+
 	return 0;
 
 err_remove_handlers:
