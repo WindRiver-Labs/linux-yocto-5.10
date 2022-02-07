@@ -260,32 +260,9 @@ static int imx_get_temp(struct thermal_zone_device *tz, int *temp)
 	u32 val;
 	int ret;
 
-	regmap_read(map, soc_data->sensor_ctrl, &val);
-	run_measurement = val & soc_data->power_down_mask;
-	if (!run_measurement) {
-		/* Check if a measurement is currently in progress */
-		regmap_read(map, soc_data->temp_data, &val);
-		wait = !(val & soc_data->temp_valid_mask);
-	} else {
-		/*
-		 * Every time we measure the temperature, we will power on the
-		 * temperature sensor, enable measurements, take a reading,
-		 * disable measurements, power off the temperature sensor.
-		 */
-		regmap_write(map, soc_data->sensor_ctrl + REG_CLR,
-			    soc_data->power_down_mask);
-		regmap_write(map, soc_data->sensor_ctrl + REG_SET,
-			    soc_data->measure_temp_mask);
-
-		wait = true;
-	}
-
-	/*
-	 * According to the temp sensor designers, it may require up to ~17us
-	 * to complete a measurement.
-	 */
-	if (wait)
-		usleep_range(20, 50);
+	ret = pm_runtime_resume_and_get(data->dev);
+	if (ret < 0)
+		return ret;
 
 	regmap_read(map, soc_data->temp_data, &val);
 
@@ -426,8 +403,6 @@ static int imx_get_trend(struct thermal_zone_device *tz,
 		*trend = THERMAL_TREND_RAISE_FULL;
 	else
 		*trend = THERMAL_TREND_DROP_FULL;
-
-	pm_runtime_put(data->dev);
 
 	return 0;
 }
