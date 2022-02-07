@@ -925,32 +925,6 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 #endif
 
 /**
- * axienet_check_tx_bd_space - Checks if a BD/group of BDs are currently busy
- * @lp:		Pointer to the axienet_local structure
- * @num_frag:	The number of BDs to check for
- *
- * Return: 0, on success
- *	    NETDEV_TX_BUSY, if any of the descriptors are not free
- *
- * This function is invoked before BDs are allocated and transmission starts.
- * This function returns 0 if a BD or group of BDs can be allocated for
- * transmission. If the BD or any of the BDs are not free the function
- * returns a busy status. This is invoked from axienet_start_xmit.
- */
-static inline int axienet_check_tx_bd_space(struct axienet_local *lp,
-					    int num_frag)
-{
-	struct axidma_bd *cur_p;
-
-	/* Ensure we see all descriptor updates from device or TX IRQ path */
-	rmb();
-	cur_p = &lp->tx_bd_v[(lp->tx_bd_tail + num_frag) % lp->tx_bd_num];
-	if (cur_p->cntrl)
-		return NETDEV_TX_BUSY;
-	return 0;
-}
-
-/**
  * axienet_start_xmit_done - Invoked once a transmit is completed by the
  * Axi DMA Tx channel.
  * @ndev:	Pointer to the net_device structure
@@ -1465,14 +1439,14 @@ out:
 	spin_unlock_irqrestore(&q->tx_lock, flags);
 
 	/* Stop queue if next transmit may not have space */
-	if (axienet_check_tx_bd_space(lp, MAX_SKB_FRAGS + 1)) {
+	if (axienet_check_tx_bd_space(q, MAX_SKB_FRAGS + 1)) {
 		netif_stop_queue(ndev);
 
 		/* Matches barrier in axienet_start_xmit_done */
 		smp_mb();
 
 		/* Space might have just been freed - check again */
-		if (!axienet_check_tx_bd_space(lp, MAX_SKB_FRAGS + 1))
+		if (!axienet_check_tx_bd_space(q, MAX_SKB_FRAGS + 1))
 			netif_wake_queue(ndev);
 	}
 
@@ -1551,8 +1525,8 @@ static int axienet_recv(struct net_device *ndev, int budget,
 
 		/* Ensure we see complete descriptor update */
 		dma_rmb();
-		phys = desc_get_phys_addr(lp, cur_p);
-		dma_unmap_single(ndev->dev.parent, phys, lp->max_frm_size,
+		dma_unmap_single(ndev->dev.parent, cur_p->phys,
+				 lp->max_frm_size,
 				 DMA_FROM_DEVICE);
 
 		skb = (struct sk_buff *)(cur_p->sw_id_offset);
