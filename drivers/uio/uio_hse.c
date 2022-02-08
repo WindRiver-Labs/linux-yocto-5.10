@@ -601,7 +601,7 @@ static int hse_uio_probe(struct platform_device *pdev)
 	drv->rmem = devm_ioremap(dev, rmem->base, rmem->size);
 	if (IS_ERR_OR_NULL(drv->rmem))
 		return -EINVAL;
-	memcpy_fromio(drv->intl, drv->rmem, sizeof(struct hse_uio_intl));
+	drv->intl = (struct hse_uio_intl __force *)drv->rmem;
 
 	/* expose HSE reserved memory to upper layer */
 	drv->info.mem[HSE_UIO_MAP_RMEM].name = "hse-reserved-memory";
