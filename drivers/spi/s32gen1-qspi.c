@@ -6,8 +6,6 @@
 #include <linux/mtd/spi-nor.h>
 #include <linux/types.h>
 #include <linux/mm.h>
-#include <linux/cache.h>
-#include <asm/cacheflush.h>
 #include <linux/ktime.h>
 #include <linux/math64.h>
 #include <asm/div64.h>
@@ -1018,20 +1016,11 @@ static int qspi_read_mem(struct fsl_qspi *q,
 	u64 mb_int, mb_frac;
 	u32 us_passed, rem;
 
-	if (!q->ahb_addr) {
-		q->ahb_addr = ioremap_cache(QUADSPI_AHB_BASE,
-				q->devtype_data->ahb_buf_size);
-		if (!q->ahb_addr)
-			return -ENOMEM;
-	}
-
 	while (qspi_readl(q, base + QUADSPI_SR) & QUADSPI_SR_BUSY_MASK)
 		;
 	mcr_reg = clear_fifos(q);
 	qspi_writel(q, lut_cfg << QUADSPI_BFGENCR_SEQID_SHIFT,
 			base + QUADSPI_BFGENCR);
-
-	__inval_dcache_area((void __force *)q->ahb_addr + op->addr.val, op->data.nbytes);
 
 	/* Read out the data directly from the AHB buffer. */
 	ktime_get_ts64(&start);
