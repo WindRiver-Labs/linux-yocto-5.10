@@ -125,7 +125,7 @@ static __always_inline int trace_get_context_bit(void)
 	return bit;
 }
 
-static __always_inline int trace_test_and_set_recursion(int start)
+static __always_inline int __trace_test_and_set_recursion(int start, bool safe)
 {
 	unsigned int val = current->trace_recursion;
 	int bit;
@@ -137,7 +137,7 @@ static __always_inline int trace_test_and_set_recursion(int start)
 		 * a switch between contexts. Allow for a single recursion.
 		 */
 		bit = start + TRACE_CTX_TRANSITION;
-		if (trace_recursion_test(bit))
+		if (safe || trace_recursion_test(bit))
 			return -1;
 		trace_recursion_set(bit);
 		barrier();
@@ -149,6 +149,26 @@ static __always_inline int trace_test_and_set_recursion(int start)
 	barrier();
 
 	return bit;
+}
+
+static __always_inline int trace_test_and_set_recursion(int start)
+{
+	return __trace_test_and_set_recursion(start, false);
+}
+
+/*
+ * The safe version does not let any recursion happen.
+ * The unsafe version will allow for a single recursion to deal with
+ * the period during a context switch from normal to interrupt to NMI
+ * that may be in the wrong context. But if the caller is expecting
+ * this to be safe for grabbing locks, it must use the safe version
+ * otherwise it could cause a deadlock. But it may still miss events
+ * in the period of context switches, but if it is grabbing locks
+ * it shouldn't be tracing in that period anyway.
+ */
+static __always_inline int trace_test_and_set_recursion_safe(int start)
+{
+	return __trace_test_and_set_recursion(start, true);
 }
 
 static __always_inline void trace_clear_recursion(int bit)
@@ -168,12 +188,43 @@ static __always_inline void trace_clear_recursion(int bit)
  * Use this for ftrace callbacks. This will detect if the function
  * tracing recursed in the same context (normal vs interrupt),
  *
+ * Note, this may allow one nested level of recursion, because of the
+ * way interrupts are tracked. If a trace happens at the start of
+ * an interrupt before the interrupts state is set, it needs to allow
+ * one recursion to handle this case.
+ *
+ * If this is used to protect locks, use the
+ * ftrace_test_recursion_trylock_safe() version instead.
+ *
  * Returns: -1 if a recursion happened.
  *           >= 0 if no recursion
  */
 static __always_inline int ftrace_test_recursion_trylock(void)
 {
 	return trace_test_and_set_recursion(TRACE_FTRACE_START);
+}
+
+/**
+ * ftrace_test_recursion_trylock_safe - tests for recursion in same context
+ *
+ * Use this for ftrace callbacks. This will detect if the function
+ * tracing recursed in the same context (normal vs interrupt),
+ *
+ * Use this version if you depend on it for grabbing locks.
+ * You should also not be tracing in NMI either.
+ *
+ * This version is the same as the ftrace_test_recursion_trylock() except that
+ * it does not allow any recursion. It may produce a false positive if
+ * a trace occurs at the start of an interrupt but before the interrupt
+ * state is set. Any event that happens in that case will be considered
+ * a "recursion".
+ *
+ * Returns: -1 if a recursion happened.
+ *           >= 0 if no recursion
+ */
+static __always_inline int ftrace_test_recursion_trylock_safe(void)
+{
+	return trace_test_and_set_recursion_safe(TRACE_FTRACE_START);
 }
 
 /**

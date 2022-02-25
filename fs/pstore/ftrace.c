@@ -41,7 +41,11 @@ static void notrace pstore_ftrace_call(unsigned long ip,
 	if (unlikely(oops_in_progress))
 		return;
 
-	bit = ftrace_test_recursion_trylock();
+	/* Locking is not safe to be taken in NMI */
+	if (in_nmi())
+		return;
+
+	bit = ftrace_test_recursion_trylock_safe();
 	if (bit < 0)
 		return;
 
@@ -59,6 +63,7 @@ static void notrace pstore_ftrace_call(unsigned long ip,
 
 static struct ftrace_ops pstore_ftrace_ops __read_mostly = {
 	.func	= pstore_ftrace_call,
+	.flags  = FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static DEFINE_MUTEX(pstore_ftrace_lock);
