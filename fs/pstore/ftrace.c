@@ -28,6 +28,7 @@ static void notrace pstore_ftrace_call(unsigned long ip,
 				       struct ftrace_ops *op,
 				       struct pt_regs *regs)
 {
+	int bit;
 	unsigned long flags;
 	struct pstore_ftrace_record rec = {};
 	struct pstore_record record = {
@@ -40,6 +41,14 @@ static void notrace pstore_ftrace_call(unsigned long ip,
 	if (unlikely(oops_in_progress))
 		return;
 
+	/* Locking is not safe to be taken in NMI */
+	if (in_nmi())
+		return;
+
+	bit = ftrace_test_recursion_trylock_safe();
+	if (bit < 0)
+		return;
+
 	local_irq_save(flags);
 
 	rec.ip = ip;
@@ -49,10 +58,12 @@ static void notrace pstore_ftrace_call(unsigned long ip,
 	psinfo->write(&record);
 
 	local_irq_restore(flags);
+	ftrace_test_recursion_unlock(bit);
 }
 
 static struct ftrace_ops pstore_ftrace_ops __read_mostly = {
 	.func	= pstore_ftrace_call,
+	.flags  = FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static DEFINE_MUTEX(pstore_ftrace_lock);
