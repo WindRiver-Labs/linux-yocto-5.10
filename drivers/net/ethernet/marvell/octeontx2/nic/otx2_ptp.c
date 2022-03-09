@@ -45,34 +45,6 @@ static int ptp_set_thresh(struct otx2_ptp *ptp, u64 thresh)
 	return otx2_sync_mbox_msg(&ptp->nic->mbox);
 }
 
-static u64 ptp_cc_read(const struct cyclecounter *cc)
-{
-	struct otx2_ptp *ptp = container_of(cc, struct otx2_ptp, cycle_counter);
-	struct ptp_req *req;
-	struct ptp_rsp *rsp;
-	int err;
-
-	if (!ptp->nic)
-		return 0;
-
-	req = otx2_mbox_alloc_msg_ptp_op(&ptp->nic->mbox);
-	if (!req)
-		return 0;
-
-	req->op = PTP_OP_GET_CLOCK;
-
-	err = otx2_sync_mbox_msg(&ptp->nic->mbox);
-	if (err)
-		return 0;
-
-	rsp = (struct ptp_rsp *)otx2_mbox_get_rsp(&ptp->nic->mbox.mbox, 0,
-						  &req->hdr);
-	if (IS_ERR(rsp))
-		return 0;
-
-	return rsp->clk;
-}
-
 static u64 ptp_tstmp_read(struct otx2_ptp *ptp)
 {
 	struct ptp_req *req;
@@ -100,17 +72,50 @@ static u64 ptp_tstmp_read(struct otx2_ptp *ptp)
 	return rsp->clk;
 }
 
+static void otx2_get_ptpclock(struct otx2_nic *pfvf, u64 *tstamp)
+{
+	struct ptp_req *req;
+	struct ptp_rsp *rsp;
+
+	mutex_lock(&pfvf->mbox.lock);
+
+	req = otx2_mbox_alloc_msg_ptp_op(&pfvf->mbox);
+	if (!req) {
+		mutex_unlock(&pfvf->mbox.lock);
+		return;
+	}
+
+	req->op = PTP_OP_GET_CLOCK;
+
+	if (!otx2_sync_mbox_msg(&pfvf->mbox)) {
+		rsp = (struct ptp_rsp *)otx2_mbox_get_rsp(&pfvf->mbox.mbox, 0,
+							  &req->hdr);
+		*tstamp = rsp->clk;
+	}
+
+	mutex_unlock(&pfvf->mbox.lock);
+}
+
 static int otx2_ptp_adjtime(struct ptp_clock_info *ptp_info, s64 delta)
 {
 	struct otx2_ptp *ptp = container_of(ptp_info, struct otx2_ptp,
 					    ptp_info);
 	struct otx2_nic *pfvf = ptp->nic;
+	struct ptp_req *req;
+	int err;
 
 	mutex_lock(&pfvf->mbox.lock);
-	timecounter_adjtime(&ptp->time_counter, delta);
+	req = otx2_mbox_alloc_msg_ptp_op(&pfvf->mbox);
+	if (!req) {
+		mutex_unlock(&pfvf->mbox.lock);
+		return -ENOMEM;
+	}
+	req->op = PTP_OP_ADJ_CLOCK;
+	req->delta = delta;
+	err = otx2_sync_mbox_msg(&pfvf->mbox);
 	mutex_unlock(&pfvf->mbox.lock);
+	return err;
 
-	return 0;
 }
 
 static int otx2_ptp_gettime(struct ptp_clock_info *ptp_info,
@@ -119,13 +124,10 @@ static int otx2_ptp_gettime(struct ptp_clock_info *ptp_info,
 	struct otx2_ptp *ptp = container_of(ptp_info, struct otx2_ptp,
 					    ptp_info);
 	struct otx2_nic *pfvf = ptp->nic;
-	u64 nsec;
+	u64 tstamp;
 
-	mutex_lock(&pfvf->mbox.lock);
-	nsec = timecounter_read(&ptp->time_counter);
-	mutex_unlock(&pfvf->mbox.lock);
-
-	*ts = ns_to_timespec64(nsec);
+	otx2_get_ptpclock(pfvf, &tstamp);
+	*ts = ns_to_timespec64(tstamp);
 
 	return 0;
 }
@@ -136,15 +138,21 @@ static int otx2_ptp_settime(struct ptp_clock_info *ptp_info,
 	struct otx2_ptp *ptp = container_of(ptp_info, struct otx2_ptp,
 					    ptp_info);
 	struct otx2_nic *pfvf = ptp->nic;
-	u64 nsec;
-
-	nsec = timespec64_to_ns(ts);
+	struct ptp_req *req;
+	int err;
 
 	mutex_lock(&pfvf->mbox.lock);
-	timecounter_init(&ptp->time_counter, &ptp->cycle_counter, nsec);
-	mutex_unlock(&pfvf->mbox.lock);
+	req = otx2_mbox_alloc_msg_ptp_op(&pfvf->mbox);
+	if (!req) {
+		mutex_unlock(&pfvf->mbox.lock);
+		return -ENOMEM;
+	}
 
-	return 0;
+	req->op = PTP_OP_SET_CLOCK;
+	req->nsec = timespec64_to_ns(ts);
+	err = otx2_sync_mbox_msg(&pfvf->mbox);
+	mutex_unlock(&pfvf->mbox.lock);
+	return err;
 }
 
 static int otx2_ptp_verify_pin(struct ptp_clock_info *ptp, unsigned int pin,
@@ -175,7 +183,7 @@ static void otx2_ptp_extts_check(struct work_struct *work)
 	if (tstmp != ptp->last_extts) {
 		event.type = PTP_CLOCK_EXTTS;
 		event.index = 0;
-		event.timestamp = timecounter_cyc2time(&ptp->time_counter, tstmp);
+		event.timestamp = ptp->convert_tx_ptp_tstmp(tstmp);
 		ptp_clock_event(ptp->ptp_clock, &event);
 		ptp->last_extts = tstmp;
 
@@ -188,6 +196,15 @@ static void otx2_ptp_extts_check(struct work_struct *work)
 		}
 	}
 	schedule_delayed_work(&ptp->extts_work, msecs_to_jiffies(200));
+}
+
+static void otx2_sync_tstamp(struct work_struct *work)
+{
+	struct otx2_ptp *ptp = container_of(work, struct otx2_ptp,
+					    synctstamp_work.work);
+
+	otx2_get_ptpclock(ptp->nic, &ptp->tstamp);
+	schedule_delayed_work(&ptp->synctstamp_work, msecs_to_jiffies(500));
 }
 
 static int otx2_ptp_enable(struct ptp_clock_info *ptp_info,
@@ -220,7 +237,6 @@ static int otx2_ptp_enable(struct ptp_clock_info *ptp_info,
 int otx2_ptp_init(struct otx2_nic *pfvf)
 {
 	struct otx2_ptp *ptp_ptr;
-	struct cyclecounter *cc;
 	struct ptp_req *req;
 	int err;
 
@@ -253,15 +269,6 @@ int otx2_ptp_init(struct otx2_nic *pfvf)
 	}
 
 	ptp_ptr->nic = pfvf;
-
-	cc = &ptp_ptr->cycle_counter;
-	cc->read = ptp_cc_read;
-	cc->mask = CYCLECOUNTER_MASK(64);
-	cc->mult = 1;
-	cc->shift = 0;
-
-	timecounter_init(&ptp_ptr->time_counter, &ptp_ptr->cycle_counter,
-			 ktime_to_ns(ktime_get_real()));
 
 	snprintf(ptp_ptr->extts_config.name, sizeof(ptp_ptr->extts_config.name), "TSTAMP");
 	ptp_ptr->extts_config.index = 0;
@@ -301,6 +308,8 @@ int otx2_ptp_init(struct otx2_nic *pfvf)
 		ptp_ptr->convert_tx_ptp_tstmp = &cn10k_ptp_convert_timestamp;
 	}
 
+	INIT_DELAYED_WORK(&ptp_ptr->synctstamp_work, otx2_sync_tstamp);
+
 	pfvf->ptp = ptp_ptr;
 
 error:
@@ -314,6 +323,8 @@ void otx2_ptp_destroy(struct otx2_nic *pfvf)
 
 	if (!ptp)
 		return;
+
+	cancel_delayed_work(&pfvf->ptp->synctstamp_work);
 
 	ptp_clock_unregister(ptp->ptp_clock);
 	kfree(ptp);
@@ -329,17 +340,6 @@ int otx2_ptp_clock_index(struct otx2_nic *pfvf)
 	return ptp_clock_index(pfvf->ptp->ptp_clock);
 }
 EXPORT_SYMBOL_GPL(otx2_ptp_clock_index);
-
-int otx2_ptp_tstamp2time(struct otx2_nic *pfvf, u64 tstamp, u64 *tsns)
-{
-	if (!pfvf->ptp)
-		return -ENODEV;
-
-	*tsns = timecounter_cyc2time(&pfvf->ptp->time_counter, tstamp);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(otx2_ptp_tstamp2time);
 
 MODULE_AUTHOR("Sunil Goutham <sgoutham@marvell.com>");
 MODULE_DESCRIPTION("Marvell RVU NIC PTP Driver");
