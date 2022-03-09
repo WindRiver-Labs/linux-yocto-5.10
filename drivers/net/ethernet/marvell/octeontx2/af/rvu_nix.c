@@ -1942,7 +1942,8 @@ static int nix_check_txschq_alloc_req(struct rvu *rvu, int lvl, u16 pcifunc,
 		free_cnt = rvu_rsrc_free_count(&txsch->schq);
 	}
 
-	if (free_cnt < req_schq || req_schq > MAX_TXSCHQ_PER_FUNC)
+	if (free_cnt < req_schq || req->schq[lvl] > MAX_TXSCHQ_PER_FUNC ||
+	    req->schq_contig[lvl] > MAX_TXSCHQ_PER_FUNC)
 		return NIX_AF_ERR_TLX_ALLOC_FAIL;
 
 	/* If contiguous queues are needed, check for availability */
@@ -4461,8 +4462,14 @@ static int rvu_nix_block_init(struct rvu *rvu, struct nix_hw *nix_hw)
 	/* Restore CINT timer delay to HW reset values */
 	rvu_write64(rvu, blkaddr, NIX_AF_CINT_DELAY, 0x0ULL);
 
+	cfg = rvu_read64(rvu, blkaddr, NIX_AF_SEB_CFG);
+
 	/* For better performance use NDC TX instead of NDC RX for SQ's SQEs" */
-	rvu_write64(rvu, blkaddr, NIX_AF_SEB_CFG, 0x1ULL);
+	cfg |= 1ULL;
+	if (!is_rvu_otx2(rvu))
+		cfg |= NIX_PTP_1STEP_EN;
+
+	rvu_write64(rvu, blkaddr, NIX_AF_SEB_CFG, cfg);
 
 	if (!is_rvu_otx2(rvu))
 		rvu_nix_block_cn10k_init(rvu, nix_hw);
@@ -5693,5 +5700,18 @@ int rvu_mbox_handler_nix_bandprof_get_hwinfo(struct rvu *rvu, struct msg_req *re
 	tu = rvu_read64(rvu, blkaddr, NIX_AF_PL_TS) & GENMASK_ULL(9, 0);
 	rsp->policer_timeunit = (tu + 1) * 100;
 
+	return 0;
+}
+
+int rvu_mbox_handler_nix_rx_sw_sync(struct rvu *rvu, struct msg_req *req,
+				    struct msg_rsp *rsp)
+{
+	int blkaddr;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, req->hdr.pcifunc);
+	if (blkaddr < 0)
+		return NIX_AF_ERR_AF_LF_INVALID;
+
+	nix_rx_sync(rvu, blkaddr);
 	return 0;
 }

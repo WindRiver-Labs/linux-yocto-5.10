@@ -211,6 +211,7 @@ M(SSO_HW_RELEASE_XAQ,	0x611, sso_hw_release_xaq_aura,			\
 				sso_release_xaq, msg_rsp)	\
 M(SSO_CONFIG_LSW,	0x612, ssow_config_lsw,			\
 				ssow_config_lsw, msg_rsp)	\
+M(SSO_HWS_CHNG_MSHIP,   0x613, ssow_chng_mship, ssow_chng_mship, msg_rsp)\
 /* TIM mbox IDs (range 0x800 - 0x9FF) */				\
 M(TIM_LF_ALLOC,		0x800, tim_lf_alloc,				\
 				tim_lf_alloc_req, tim_lf_alloc_rsp)	\
@@ -345,7 +346,8 @@ M(NIX_BANDPROF_GET_HWINFO, 0x801f, nix_bandprof_get_hwinfo, msg_req,		\
 M(NIX_CPT_BP_ENABLE,    0x8020, nix_cpt_bp_enable, nix_bp_cfg_req,	    \
 				nix_bp_cfg_rsp)				    \
 M(NIX_CPT_BP_DISABLE,   0x8021, nix_cpt_bp_disable, nix_bp_cfg_req,	    \
-				msg_rsp)
+				msg_rsp)				    \
+M(NIX_RX_SW_SYNC,	0x8022, nix_rx_sw_sync, msg_req, msg_rsp)
 
 /* Messages initiated by AF (range 0xC00 - 0xDFF) */
 #define MBOX_UP_CGX_MESSAGES						\
@@ -1408,6 +1410,15 @@ struct ssow_config_lsw {
 	u8 wqe_release;
 };
 
+struct ssow_chng_mship {
+	struct mbox_msghdr hdr;
+	u8 set;
+	u8 enable;
+	u8 hws;
+	u16 nb_hwgrps;
+	u16 hwgrps[MAX_RVU_BLKLF_CNT];
+};
+
 struct sso_grp_qos_cfg {
 	struct mbox_msghdr hdr;
 	u16 grp;
@@ -1987,6 +1998,8 @@ enum ptp_op {
 	PTP_OP_GET_CLOCK = 1,
 	PTP_OP_GET_TSTMP = 2,
 	PTP_OP_SET_THRESH = 3,
+	PTP_OP_SET_CLOCK = 4,
+	PTP_OP_ADJ_CLOCK = 5,
 };
 
 struct ptp_req {
@@ -1995,6 +2008,8 @@ struct ptp_req {
 	s64 scaled_ppm;
 	u8 is_pmu;
 	u64 thresh;
+	u64 nsec;
+	s64 delta;
 };
 
 struct ptp_rsp {
