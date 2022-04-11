@@ -1619,8 +1619,9 @@ static int axienet_recv(struct net_device *ndev, int budget,
 		netif_receive_skb(skb);
 #endif
 
-		size += length;
-		packets++;
+			size += length;
+			packets++;
+		}
 
 		/* Ensure that the skb is completely updated
 		 * prio to mapping the DMA
