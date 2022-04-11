@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/suspend.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 
@@ -70,6 +71,7 @@ struct imx_mu_priv {
 	const struct imx_mu_dcfg	*dcfg;
 	struct clk		*clk;
 	int			irq;
+	bool			suspend;
 
 	u32 xcr;
 
@@ -456,6 +458,9 @@ static irqreturn_t imx_mu_isr(int irq, void *p)
 		return IRQ_NONE;
 	}
 
+	if (priv->suspend)
+		pm_system_wakeup();
+
 	return IRQ_HANDLED;
 }
 
@@ -504,6 +509,8 @@ static int imx_mu_startup(struct mbox_chan *chan)
 	default:
 		break;
 	}
+
+	priv->suspend = true;
 
 	return 0;
 }
@@ -749,6 +756,8 @@ static int imx_mu_probe(struct platform_device *pdev)
 		goto disable_runtime_pm;
 
 	clk_disable_unprepare(priv->clk);
+
+	priv->suspend = false;
 
 	return 0;
 
