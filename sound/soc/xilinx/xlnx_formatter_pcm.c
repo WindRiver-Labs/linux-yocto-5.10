@@ -105,6 +105,7 @@ struct xlnx_pcm_drv_data {
 	struct clk *mm2s_axis_clk;
 	struct clk *s2mm_axis_clk;
 	struct clk *aud_mclk;
+	unsigned int sysclk;
 };
 
 /*
@@ -626,6 +627,7 @@ static int xlnx_formatter_pcm_new(struct snd_soc_component *component,
 
 static struct snd_soc_component_driver xlnx_asoc_component = {
 	.name = DRV_NAME,
+	.set_sysclk	= xlnx_formatter_set_sysclk,
 	.open = xlnx_formatter_pcm_open,
 	.close = xlnx_formatter_pcm_close,
 	.hw_params = xlnx_formatter_pcm_hw_params,
