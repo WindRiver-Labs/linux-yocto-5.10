@@ -316,7 +316,7 @@ err:
 	return ret;
 }
 
-static int sp804_wdt_axxia_remove(struct amba_device *adev)
+static void sp804_wdt_axxia_remove(struct amba_device *adev)
 {
 	struct sp804_wdt_axxia *wdt = amba_get_drvdata(adev);
 	unsigned int mask, value;
@@ -330,8 +330,6 @@ static int sp804_wdt_axxia_remove(struct amba_device *adev)
 	value = 0;
 	regmap_update_bits(wdt->syscon, SYSCON_CTL_RST_REG, mask, value);
 	regmap_write(wdt->syscon, SYSCON_CTL_WR_KEY, 0x0);
-
-	return 0;
 }
 
 static int __maybe_unused sp804_wdt_axxia_suspend(struct device *dev)
