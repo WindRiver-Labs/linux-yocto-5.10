@@ -510,6 +510,7 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	 * MULT_FACT_100NS = 1
 	 */
 	plat->mult_fact_100ns = 1;
+	plat->sph_disable = 1;
 
 	plat->rx_sched_algorithm = MTL_RX_ALGORITHM_SP;
 
