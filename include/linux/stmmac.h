@@ -210,5 +210,6 @@ struct plat_stmmacenet_data {
 	u8 vlan_fail_q;
 	unsigned int eee_usecs_rate;
 	u32 quirk_mask_id;
+	bool sph_disable;
 };
 #endif
