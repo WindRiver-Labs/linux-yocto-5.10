@@ -203,7 +203,7 @@ M(SSO_GRP_SET_PRIORITY,	0x605, sso_grp_set_priority,			\
 				sso_grp_priority, msg_rsp)		\
 M(SSO_GRP_GET_PRIORITY,	0x606, sso_grp_get_priority,			\
 				sso_info_req, sso_grp_priority)	\
-M(SSO_WS_CACHE_INV,	0x607, sso_ws_cache_inv, msg_req, msg_rsp)	\
+M(SSO_WS_CACHE_INV,	0x607, sso_ws_cache_inv, ssow_lf_inv_req, msg_rsp)\
 M(SSO_GRP_QOS_CONFIG,	0x608, sso_grp_qos_config, sso_grp_qos_cfg, msg_rsp)\
 M(SSO_GRP_GET_STATS,	0x609, sso_grp_get_stats, sso_info_req, sso_grp_stats)\
 M(SSO_HWS_GET_STATS,	0x610, sso_hws_get_stats, sso_info_req, sso_hws_stats)\
@@ -1399,6 +1399,12 @@ struct ssow_lf_free_req {
 	u16 hws;
 };
 
+struct ssow_lf_inv_req {
+	struct mbox_msghdr hdr;
+	u16 nb_hws;
+	u16 hws[MAX_RVU_BLKLF_CNT];
+};
+
 struct ssow_config_lsw {
 	struct mbox_msghdr hdr;
 #define SSOW_LSW_DIS		0
@@ -1717,6 +1723,7 @@ enum tim_af_status {
 	TIM_AF_INVALID_ENABLE_DONTFREE		= -815,
 	TIM_AF_ENA_DONTFRE_NSET_PERIODIC	= -816,
 	TIM_AF_RING_ALREADY_DISABLED		= -817,
+	TIM_AF_LF_START_SYNC_FAIL		= -818,
 };
 
 enum tim_clk_srcs {

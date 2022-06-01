@@ -248,6 +248,9 @@ int cgx_lmac_addr_set(u8 cgx_id, u8 lmac_id, u8 *mac_addr)
 	int index, id;
 	u64 cfg;
 
+	if (!lmac)
+		return -ENODEV;
+
 	/* access mac_ops to know csr_offset */
 	mac_ops = cgx_dev->mac_ops;
 
@@ -497,7 +500,7 @@ int cgx_set_pkind(void *cgxd, u8 lmac_id, int pkind)
 	if (!is_lmac_valid(cgx, lmac_id))
 		return -ENODEV;
 
-	cgx_write(cgx, lmac_id, CGXX_CMRX_RX_ID_MAP, (pkind & 0x3F));
+	cgx_write(cgx, lmac_id, cgx->mac_ops->rxid_map_offset, (pkind & 0x3F));
 	return 0;
 }
 
@@ -508,7 +511,7 @@ int cgx_get_pkind(void *cgxd, u8 lmac_id, int *pkind)
 	if (!is_lmac_valid(cgx, lmac_id))
 		return -ENODEV;
 
-	*pkind = cgx_read(cgx, lmac_id, CGXX_CMRX_RX_ID_MAP);
+	*pkind = cgx_read(cgx, lmac_id, cgx->mac_ops->rxid_map_offset);
 	*pkind = *pkind & 0x3F;
 	return 0;
 }
@@ -555,15 +558,16 @@ void cgx_lmac_promisc_config(int cgx_id, int lmac_id, bool enable)
 {
 	struct cgx *cgx = cgx_get_pdata(cgx_id);
 	struct lmac *lmac = lmac_pdata(lmac_id, cgx);
-	u16 max_dmac = lmac->mac_to_index_bmap.max;
 	struct mac_ops *mac_ops;
+	u16 max_dmac;
 	int index, i;
 	u64 cfg = 0;
 	int id;
 
-	if (!cgx)
+	if (!cgx || !lmac)
 		return;
 
+	max_dmac = lmac->mac_to_index_bmap.max;
 	id = get_sequence_id_of_lmac(cgx, lmac_id);
 
 	mac_ops = cgx->mac_ops;
@@ -1679,10 +1683,13 @@ static int cgx_fwi_link_change(struct cgx *cgx, int lmac_id, bool enable)
 	u64 req = 0;
 	u64 resp;
 
-	if (enable)
+	if (enable) {
 		req = FIELD_SET(CMDREG_ID, CGX_CMD_LINK_BRING_UP, req);
-	else
+		/* set maximum time firmware poll for Link as 1000 ms */
+		req = FIELD_SET(LINKCFG_TIMEOUT, 1000, req);
+	} else {
 		req = FIELD_SET(CMDREG_ID, CGX_CMD_LINK_BRING_DOWN, req);
+	}
 
 	return cgx_fwi_cmd_generic(req, &resp, cgx, lmac_id);
 }
@@ -1754,6 +1761,21 @@ int cgx_lmac_linkup_start(void *cgxd)
 		return -ENODEV;
 
 	queue_work(cgx->cgx_cmd_workq, &cgx->cgx_cmd_work);
+
+	return 0;
+}
+
+int cgx_lmac_reset(void *cgxd, int lmac_id)
+{
+	struct cgx *cgx = cgxd;
+	u64 cfg;
+
+	if (!is_lmac_valid(cgx, lmac_id))
+		return -ENODEV;
+
+	/* Resetting PFC related CSRs */
+	cfg = 0xff;
+	cgx_write(cgxd, lmac_id, CGXX_CMRX_RX_LOGL_XON, cfg);
 
 	return 0;
 }
@@ -1990,13 +2012,14 @@ struct mac_ops		cgx_mac_ops    = {
 	.mac_tx_enable =		cgx_lmac_tx_enable,
 	.pfc_config =                   cgx_lmac_pfc_config,
 	.mac_get_pfc_frm_cfg   =        cgx_lmac_get_pfc_frm_cfg,
+	.mac_reset   =        cgx_lmac_reset,
 };
 
 static int cgx_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
+	int err = 0, nvec;
 	struct cgx *cgx;
-	int err, nvec;
 
 	cgx = devm_kzalloc(dev, sizeof(*cgx), GFP_KERNEL);
 	if (!cgx)
@@ -2010,6 +2033,10 @@ static int cgx_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		cgx->mac_ops = rpm_get_mac_ops();
 	else
 		cgx->mac_ops = &cgx_mac_ops;
+
+	cgx->mac_ops->rxid_map_offset =
+		(pdev->subsystem_device == PCI_SUBSYS_DEVID_CNF10KB_RPM) ?
+		RPMX_CMRX_RX_ID_MAP : CGXX_CMRX_RX_ID_MAP;
 
 	err = pci_enable_device(pdev);
 	if (err) {
@@ -2039,7 +2066,6 @@ static int cgx_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 /* Skip probe if CGX is not mapped to NIX */
 	if (!is_cgx_mapped_to_nix(pdev->subsystem_device, cgx->cgx_id)) {
 		dev_notice(dev, "CGX %d not mapped to NIX, skipping probe\n", cgx->cgx_id);
-		err = -ENOMEM;
 		goto err_release_regions;
 	}
 
@@ -2098,11 +2124,11 @@ static void cgx_remove(struct pci_dev *pdev)
 {
 	struct cgx *cgx = pci_get_drvdata(pdev);
 
-	if (cgx) {
-		cgx_lmac_exit(cgx);
-		list_del(&cgx->cgx_list);
-	}
+	if (!cgx)
+		return;
 
+	cgx_lmac_exit(cgx);
+	list_del(&cgx->cgx_list);
 	pci_free_irq_vectors(pdev);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);

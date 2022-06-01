@@ -1,9 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Supports OcteonTX2 Generic Hardware Error Source[s] (GHES).
- * GHES ACPI HEST & DT
+ * Copyright (C) 2022 Marvell.
  *
- * Copyright (C) 2021 Marvell.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/io.h>
@@ -18,24 +19,18 @@
 #include <acpi/apei.h>
 #include <linux/pci.h>
 #include <linux/crash_dump.h>
-#include <soc/marvell/octeontx/octeontx_smc.h>
 #include <asm/cputype.h>
-#include "otx2-sdei-ghes.h"
+#include <linux/edac.h>
+#include <soc/marvell/octeontx/octeontx_smc.h>
+#include "octeontx_edac.h"
+#include "edac_mc.h"
 
 #define DRV_NAME       "sdei-ghes"
 
-#define initerrmsg(fmt, ...) pr_err(DRV_NAME ":" fmt, __VA_ARGS__)
-#ifdef CONFIG_OCTEONTX2_SDEI_GHES_DEBUG
-#  define initdbgmsg(fmt, ...) pr_info(DRV_NAME ":" fmt, __VA_ARGS__)
-#  define dbgmsg(dev, ...) dev_info((dev), __VA_ARGS__)
-#else
-#  define initdbgmsg(fmt, ...) (void)(fmt)
-#  define dbgmsg(dev, ...) (void)(dev)
-#endif // CONFIG_OCTEONTX2_SDEI_GHES_DEBUG
+#define initdbgmsg(fmt, ...) pr_devel(DRV_NAME ":" fmt, __VA_ARGS__)
 
 #define OTX2_HEST_OEM_ID	"MRVL  "
 #define HEST_TBL_OEM_ID		"OTX2    "
-
 
 static const struct of_device_id sdei_ghes_of_match[] = {
 	{ .compatible = "marvell,sdei-ghes", },
@@ -63,6 +58,52 @@ static const struct pci_device_id sdei_ghes_mrvl_pci_tbl[] = {
 	{ 0, },
 };
 
+#define to_mci(k) container_of(k, struct mem_ctl_info, dev)
+
+#define TEMPLATE_SHOW(reg)					\
+static ssize_t reg##_show(struct device *dev,	\
+			       struct device_attribute *attr,	\
+			       char *data)			\
+{								\
+	struct mem_ctl_info *mci = to_mci(dev);			\
+	struct octeontx_edac_pvt *pvt = mci->pvt_info;		\
+	return sprintf(data, "%016llu\n", (u64)pvt->reg);	\
+}
+
+#define TEMPLATE_STORE(reg)					\
+static ssize_t reg##_store(struct device *dev,	\
+			       struct device_attribute *attr,	\
+			       const char *data, size_t count)	\
+{								\
+	struct mem_ctl_info *mci = to_mci(dev);			\
+	struct octeontx_edac_pvt *pvt = mci->pvt_info;		\
+	if (isdigit(*data)) {					\
+		if (!kstrtoul(data, 0, &pvt->reg))		\
+			return count;				\
+	}							\
+	return 0;						\
+}
+
+TEMPLATE_SHOW(inject);
+TEMPLATE_STORE(inject);
+TEMPLATE_SHOW(address);
+TEMPLATE_STORE(address);
+TEMPLATE_SHOW(error_type);
+TEMPLATE_STORE(error_type);
+
+static DEVICE_ATTR_RW(inject);
+static DEVICE_ATTR_RW(error_type);
+static DEVICE_ATTR_RW(address);
+
+static struct attribute *octeontx_dev_attrs[] = {
+	&dev_attr_inject.attr,
+	&dev_attr_error_type.attr,
+	&dev_attr_address.attr,
+	NULL
+};
+
+ATTRIBUTE_GROUPS(octeontx_dev);
+
 static bool cn10kx_model;
 static u8 tmp[256];
 
@@ -75,19 +116,15 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	struct mrvl_ghes_source *gsrc;
 	u32 head, tail;
 
-	pr_notice("%s event id 0x%x\n", __func__, event_id);
-
-	if (!arg) {
-		initerrmsg("%s Failed callback\n", __func__);
+	if (!arg)
 		return -1;
-	}
 
 	gsrc = arg;
 
 	head = gsrc->ring->head;
 	tail = gsrc->ring->tail;
 
-	initerrmsg("%s to %llx, head=%d (%llx), tail=%d (%llx), size=%d, sign=%x\n", __func__,
+	initdbgmsg("%s to %llx, head=%d (%llx), tail=%d (%llx), size=%d, sign=%x\n", __func__,
 			(long long)gsrc->esb_va, head,
 			(long long)&gsrc->ring->head, tail, (long long)&gsrc->ring->tail,
 			gsrc->ring->size, *(int *)((&gsrc->ring->size) + 1));
@@ -96,14 +133,13 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	rmb();
 
 	if (head == tail) {
-		initerrmsg("event 0x%x ring is empty, head=%d, size=%d\n",
+		initdbgmsg("event 0x%x ring is empty, head=%d, size=%d\n",
 				event_id, head, gsrc->ring->size);
 		return -1;
 	}
 
 	ring_rec = &gsrc->ring->records[tail];
 
-	memset(tmp, 0, sizeof(tmp));
 	estatus = (struct acpi_hest_generic_status *)tmp;
 	gdata = (struct acpi_hest_generic_data *)(estatus + 1);
 	esb_err = (gdata + 1);
@@ -119,6 +155,8 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	if (ring_rec->fru_text[0]) {
 		gdata->validation_bits = ACPI_HEST_GEN_VALID_FRU_STRING;
 		memcpy_fromio(gdata->fru_text, ring_rec->fru_text, sizeof(gdata->fru_text));
+		memcpy_fromio(((struct mrvl_mem_error_raport *)(tmp))->fru_text,
+				ring_rec->fru_text, sizeof(ring_rec->fru_text));
 	}
 	gdata->error_severity = estatus->error_severity;
 
@@ -140,6 +178,30 @@ static int sdei_ghes_callback(u32 event_id, struct pt_regs *regs, void *arg)
 	gsrc->ring->tail = tail;
 
 	return 0;
+}
+
+static void octeontx_edac_check(struct mem_ctl_info *mci)
+{
+	struct mrvl_ghes_source *gsrc;
+	enum hw_event_mc_err_type type;
+	struct acpi_hest_generic_status *estatus;
+	unsigned long address;
+	struct mrvl_mem_error_raport *rec;
+
+	gsrc = mci->pvt_info;
+	estatus = gsrc->esb_va;
+
+	if (!estatus->error_severity)
+		return;
+
+	type = (estatus->error_severity == CPER_SEV_CORRECTED) ?
+			HW_EVENT_ERR_CORRECTED : HW_EVENT_ERR_FATAL;
+	rec = (struct mrvl_mem_error_raport *)tmp;
+	address = rec->cper.physical_addr;
+	edac_mc_handle_error(type, mci, 1, address >> PAGE_SHIFT, address & ~(PAGE_MASK),
+			0, -1, -1, -1, rec->fru_text, mci->ctl_name);
+
+	estatus->error_severity = 0;
 }
 
 static int sdei_ras_core_callback(uint32_t event_id, struct pt_regs *regs, void *arg)
@@ -229,7 +291,7 @@ static void dev_enable_msix_t9x(struct pci_dev *pdev)
 	initdbgmsg("%s: entry\n", __func__);
 
 	if ((pdev->msi_enabled) || (pdev->msix_enabled)) {
-		initerrmsg("MSI(%d) or MSIX(%d) already enabled\n",
+		initdbgmsg("MSI(%d) or MSIX(%d) already enabled\n",
 				pdev->msi_enabled, pdev->msix_enabled);
 		return;
 	}
@@ -244,7 +306,7 @@ static void dev_enable_msix_t9x(struct pci_dev *pdev)
 		initdbgmsg("Set MSI-X Enable for PCI dev %04d:%02d.%d\n",
 			   pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 	} else {
-		initerrmsg("PCI dev %04d:%02d.%d missing MSIX capabilities\n",
+		initdbgmsg("PCI dev %04d:%02d.%d missing MSIX capabilities\n",
 			   pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 	}
 }
@@ -346,6 +408,11 @@ static int sdei_ghes_driver_deinit(struct platform_device *pdev)
 		if (ret < 0)
 			dev_err(dev, "Error %d unregistering SDEI gsrc 0x%x (%s)\n",
 				ret, gsrc->id, gsrc->name);
+
+		if (gsrc->mci) {
+			edac_mc_free(gsrc->mci);
+			put_device(&gsrc->dev);
+		}
 	}
 
 	return 0;
@@ -472,9 +539,8 @@ static phys_addr_t __init sdei_ghes_get_error_source_address(struct mrvl_sdei_gh
 
 	apei_hest_parse(sdei_ghes_get_esa, esrc);
 
-	for (i = 0; i < ghes_drv->source_count; i++) {
+	for (i = 0; i < ghes_drv->source_count; i++)
 		ret = ret > esrc[i] ? esrc[i] : ret;
-	}
 
 	kfree(esrc);
 	return ret;
@@ -561,11 +627,11 @@ static int __init sdei_ghes_acpi_match_resource(struct platform_device *pdev)
 		if (gsrc->id >= OCTEONTX_SDEI_RAS_AP0_EVENT)
 			sprintf(gsrc->name, "core%d", core++);
 		else if (gsrc->id == OCTEONTX_SDEI_RAS_MDC_EVENT)
-			sprintf(gsrc->name, "MDC");
+			sprintf(gsrc->name, "mdc");
 		else if (gsrc->id == OCTEONTX_SDEI_RAS_MCC_EVENT)
-			sprintf(gsrc->name, cn10kx_model ? "DSS" : "MCC");
+			sprintf(gsrc->name, cn10kx_model ? "dss" : "mcc");
 		else if (gsrc->id == OCTEONTX_SDEI_RAS_LMC_EVENT)
-			sprintf(gsrc->name, cn10kx_model ? "TAD" : "LMC");
+			sprintf(gsrc->name, cn10kx_model ? "tad" : "lmc");
 		initdbgmsg("%s %s\n", __func__, gsrc->name);
 	}
 
@@ -611,8 +677,7 @@ static int  sdei_ghes_setup_resource(struct mrvl_sdei_ghes_drv *ghes_drv)
 		if (pfn_valid(PHYS_PFN(gsrc->ring_pa))) {
 			gsrc->ring = phys_to_virt(gsrc->ring_pa);
 			initdbgmsg("%s ring buffer direct map\n", __func__);
-		}
-		else {
+		} else {
 			if (!devm_request_mem_region(dev, gsrc->ring_pa, gsrc->ring_sz, gsrc->name))
 				return -EFAULT;
 			gsrc->ring = devm_ioremap(dev, gsrc->ring_pa, gsrc->ring_sz);
@@ -784,11 +849,74 @@ static int __init sdei_ghes_of_alloc_hest(struct mrvl_sdei_ghes_drv *ghes_drv)
 	return 0;
 }
 
-static int __init sdei_ghes_probe(struct platform_device *pdev)
+static int octeontx_edac_mc_create(struct mrvl_sdei_ghes_drv *ghes_drv)
+{
+	struct mem_ctl_info *mci;
+	struct edac_mc_layer layer;
+	struct mrvl_ghes_source *gsrc;
+	int mc = 0;
+	int i = 0;
+	int err = 0;
+
+	opstate_init();
+
+	for (i = 0; i < ghes_drv->source_count; i++) {
+		gsrc = &ghes_drv->source_list[i];
+
+		gsrc->mci = NULL;
+		if (gsrc->id >= OCTEONTX_SDEI_RAS_AP0_EVENT)
+			continue;
+
+		memset(tmp, 0, sizeof(tmp));
+		memcpy_toio(gsrc->esb_va, tmp, gsrc->esb_sz);
+
+		device_initialize(&gsrc->dev);
+		dev_set_name(&gsrc->dev, gsrc->name);
+		err = device_add(&gsrc->dev);
+		if (err < 0) {
+			dev_err(&gsrc->dev, "failure: create device %s\n", dev_name(&gsrc->dev));
+			put_device(&gsrc->dev);
+			return err;
+		}
+
+		layer.type = EDAC_MC_LAYER_CHIP_SELECT;
+		layer.size = 1;
+		layer.is_virt_csrow = false;
+
+		mci = edac_mc_alloc(mc++, 1, &layer, sizeof(struct octeontx_edac_pvt));
+		if (!mci)
+			return -ENXIO;
+
+		mci->pdev = &gsrc->dev;
+		mci->dev_name = dev_name(&gsrc->dev);
+		dev_set_name(&mci->dev, "mrvl_mdc");
+
+		mci->mod_name = "octeontx-edac";
+		mci->ctl_name = gsrc->name;
+		mci->edac_check = octeontx_edac_check;
+		mci->ctl_page_to_phys = NULL;
+		mci->pvt_info = gsrc;
+		mci->error_desc.grain = 0;
+
+		if (edac_mc_add_mc_with_groups(mci, octeontx_dev_groups)) {
+			dev_err(&gsrc->dev, "edac_mc_add_mc() failed\n");
+			edac_mc_free(mci);
+			return -ENXIO;
+		}
+
+		gsrc->mci = mci;
+	}
+
+	return 0;
+}
+
+static int __init edac_ghes_mrvl_probe(struct platform_device *pdev)
 {
 	struct mrvl_sdei_ghes_drv *ghes_drv = NULL;
 	struct device *dev = &pdev->dev;
 	int ret = -ENODEV;
+	int i;
+
 	cn10kx_model = is_soc_cn10kx();
 
 #ifdef CONFIG_CRASH_DUMP
@@ -836,9 +964,8 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 	}
 
 	ret = sdei_ghes_setup_resource(ghes_drv);
-	if (ret) {
+	if (ret)
 		goto exit0;
-	}
 
 	sdei_ghes_init_source(ghes_drv);
 
@@ -853,6 +980,10 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 	if (!cn10kx_model)
 		sdei_ghes_msix_init_t9x();
 
+	ret = octeontx_edac_mc_create(ghes_drv);
+	if (ret)
+		goto exit1;
+
 	ret = sdei_ghes_driver_init(pdev);
 	if (ret) {
 		dev_err(dev, "Error initializing SDEI GHES support.\n");
@@ -862,12 +993,19 @@ static int __init sdei_ghes_probe(struct platform_device *pdev)
 
 	return 0;
 
+exit1:
+	for (i = 0; i < ghes_drv->source_count; i++)
+		if (ghes_drv->source_list[i].mci) {
+			edac_mc_free(ghes_drv->source_list[i].mci);
+			put_device(&ghes_drv->source_list[i].dev);
+		}
+
 exit0:
 	dev_err(dev, "Error probe GHES.\n");
 	return ret;
 }
 
-static int sdei_ghes_remove(struct platform_device *pdev)
+static int edac_ghes_mrvl_remove(struct platform_device *pdev)
 {
 	initdbgmsg("%s: entry\n", __func__);
 
@@ -888,13 +1026,12 @@ static struct platform_driver sdei_ghes_drv_probe = {
 		.of_match_table   = sdei_ghes_of_match,
 		.acpi_match_table = ACPI_PTR(sdei_ghes_acpi_match),
 	},
-	.probe    = sdei_ghes_probe,
-	.remove   = sdei_ghes_remove,
+	.probe    = edac_ghes_mrvl_probe,
+	.remove   = edac_ghes_mrvl_remove,
 	.id_table = sdei_ghes_pdev_match,
 };
 module_platform_driver(sdei_ghes_drv_probe);
 
-
-MODULE_DESCRIPTION("OcteonTX2 SDEI GHES Driver");
+MODULE_AUTHOR("Marvell International Ltd.");
+MODULE_DESCRIPTION("Marvell EDAC memory driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:" DRV_NAME);

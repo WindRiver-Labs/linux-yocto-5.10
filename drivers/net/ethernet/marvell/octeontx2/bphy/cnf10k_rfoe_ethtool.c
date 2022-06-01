@@ -56,21 +56,21 @@ static void cnf10k_rfoe_update_lmac_stats(struct cnf10k_rfoe_ndev_priv *priv)
 	struct otx2_rfoe_stats *stats = &priv->stats;
 
 	stats->EthIfInFrames = readq(priv->rfoe_reg_base +
-				     RFOEX_RX_RPM_PKT_STAT(priv->rfoe_num,
-							   priv->lmac_id));
+				     CNF10K_RFOEX_RX_RPM_PKT_STAT(priv->rfoe_num,
+								  priv->lmac_id));
 	stats->EthIfInOctets = readq(priv->rfoe_reg_base +
-				     RFOEX_RX_RPM_OCTS_STAT(priv->rfoe_num,
-							    priv->lmac_id));
+				     CNF10K_RFOEX_RX_RPM_OCTS_STAT(priv->rfoe_num,
+								   priv->lmac_id));
 	stats->EthIfOutFrames = readq(priv->rfoe_reg_base +
-				      RFOEX_TX_PKT_STAT(priv->rfoe_num,
-							priv->lmac_id));
+				      CNF10K_RFOEX_TX_PKT_STAT(priv->rfoe_num,
+							       priv->lmac_id));
 	stats->EthIfOutOctets = readq(priv->rfoe_reg_base +
-				      RFOEX_TX_OCTS_STAT(priv->rfoe_num,
-							 priv->lmac_id));
+				      CNF10K_RFOEX_TX_OCTS_STAT(priv->rfoe_num,
+								priv->lmac_id));
 	stats->EthIfInUnknownVlan =
 				readq(priv->rfoe_reg_base +
-				      RFOEX_RX_VLAN_DROP_STAT(priv->rfoe_num,
-							      priv->lmac_id));
+				      CNF10K_RFOEX_RX_VLAN_DROP_STAT(priv->rfoe_num,
+								     priv->lmac_id));
 }
 
 static void cnf10k_rfoe_get_ethtool_stats(struct net_device *netdev,
@@ -110,10 +110,11 @@ static int cnf10k_rfoe_get_ts_info(struct net_device *netdev,
 
 	info->phc_index =  ptp_clock_index(priv->ptp_clock);
 
-	info->tx_types = (1 << HWTSTAMP_TX_OFF) | (1 << HWTSTAMP_TX_ON);
+	info->tx_types = BIT(HWTSTAMP_TX_OFF) | BIT(HWTSTAMP_TX_ON) |
+			 BIT(HWTSTAMP_TX_ONESTEP_SYNC);
 
-	info->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
-			   (1 << HWTSTAMP_FILTER_ALL);
+	info->rx_filters = BIT(HWTSTAMP_FILTER_NONE) |
+			   BIT(HWTSTAMP_FILTER_ALL);
 
 	return 0;
 }

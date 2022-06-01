@@ -17,6 +17,9 @@
 #define MIO_PTP_TIMESTAMP		0x20
 #define MIO_PTP_PPS_THRESH_HI		0x58ULL
 #define MIO_PTP_CLOCK_COMP		0x18ULL
+#define MIO_PTP_CLOCK_SEC		0xD0ULL
+
+#define CYCLE_MULT			1000
 
 /* max tx job entries */
 #define MAX_TX_JOB_ENTRIES		64
@@ -35,6 +38,30 @@
 enum state {
 	PTP_TX_IN_PROGRESS = 1,
 	RFOE_INTF_DOWN,
+};
+
+enum rfoe_rx_dir_ctl_pkt_type_e {
+	ROE		= 0x0,
+	CHI		= 0x1,
+	ALT		= 0x2,
+	ECPRI		= 0x3,
+	GENERIC		= 0x8,
+};
+
+enum rfoe_rx_pkt_err_e {
+	RE_NONE		= 0x0,
+	RE_PARTIAL	= 0x1,
+	RE_JABBER	= 0x2,
+	RE_FCS		= 0x7,
+	RE_FCS_RCV	= 0x8,
+	RE_TERMINATE	= 0x9,
+	RE_RX_CTL	= 0xB,
+	RE_SKIP		= 0xC,
+};
+
+enum rfoe_rx_pkt_logger_idx_e {
+	RX_PKT		= 0x0,
+	TX_PKT		= 0x1,
 };
 
 /* rfoe rx ind register configuration */
@@ -127,6 +154,85 @@ struct otx2_rfoe_link_event {
 	u8				rfoe_num;
 	u8				lmac_id;
 	u8				link_state;
+};
+
+/* PTP clock time operates by adding a constant increment every clock
+ * cycle. That increment is expressed (MIO_PTP_CLOCK_COMP) as a Q32.32
+ * number of nanoseconds (32 integer bits and 32 fractional bits). The
+ * value must be equal to 1/(PTP clock frequency in Hz). If the PTP clock
+ * freq is 1 GHz, there is no issue but for other input clock frequency
+ * values for example 950 MHz which is SLCK or 153.6 MHz (bcn_clk/2) the
+ * MIO_PTP_CLOCK_COMP register value can't be expressed exactly and there
+ * will be error accumulated over the time depending on the direction the
+ * PTP_CLOCK_COMP value is rounded. The accumulated error will be around
+ * -70ps or +150ps per second in case of 950 MHz.
+ *
+ * To solve this issue, the driver calculates the PTP timestamps using
+ * BCN clock as reference as per the algorithm proposed as given below.
+ *
+ * Set PTP tick (= MIO_PTP_CLOCK_COMP) to 1.0 ns
+ * Sample once, at exactly the same time, BCN and PTP to (BCN0, PTP0).
+ * Calculate (applying BCN-to-PTP epoch difference and an OAM parameter
+ *            secondaryBcnOffset)
+ * PTPbase[ns] = NanoSec(BCN0) + NanoSec(315964819[s]) - secondaryBcnOffset[ns]
+ * When reading packet timestamp (tick count) PTPn, convert it to nanoseconds.
+ * PTP pkt timestamp = PTPbase[ns] + (PTPn - PTP0) / (PTP Clock in GHz)
+ *
+ * The intermediate values generated need to be of pico-second precision to
+ * achieve PTP accuracy < 1ns. The calculations should not overflow 64-bit
+ * value at anytime. Added timer to adjust the PTP and BCN base values
+ * periodically to fix the overflow issue.
+ */
+#define PTP_CLK_FREQ_GHZ		95	/* Clock freq GHz dividend */
+#define PTP_CLK_FREQ_DIV		100	/* Clock freq GHz divisor */
+#define PTP_OFF_RESAMPLE_THRESH		1800	/* resample period in seconds */
+#define PICO_SEC_PER_NSEC		1000	/* pico seconds per nano sec */
+#define UTC_GPS_EPOCH_DIFF		315964819UL /* UTC - GPS epoch secs */
+
+/* PTP clk freq in GHz represented as integer numbers.
+ * This information is passed to netdev by the ODP BPHY
+ * application via ioctl. The values are used in PTP
+ * timestamp calculation algorithm.
+ *
+ * For 950MHz PTP clock =0.95GHz, the values are:
+ *     clk_freq_ghz = 95
+ *     clk_freq_div = 100
+ *
+ * For 153.6MHz PTP clock =0.1536GHz, the values are:
+ *     clk_freq_ghz = 1536
+ *     clk_freq_div = 10000
+ *
+ */
+struct ptp_clk_cfg {
+	int clk_freq_ghz;	/* ptp clk freq */
+	int clk_freq_div;	/* ptp clk divisor */
+};
+
+struct bcn_sec_offset_cfg {
+	u8				rfoe_num;
+	u8				lmac_id;
+	s32				sec_bcn_offset;
+};
+
+struct ptp_bcn_ref {
+	u64				ptp0_ns;	/* PTP nanosec */
+	u64				bcn0_n1_ns;	/* BCN N1 nanosec */
+	u64				bcn0_n2_ps;	/* BCN N2 picosec */
+};
+
+struct ptp_bcn_off_cfg {
+	struct ptp_bcn_ref		old_ref;
+	struct ptp_bcn_ref		new_ref;
+	struct ptp_clk_cfg		clk_cfg;
+	struct timer_list		ptp_timer;
+	int				use_ptp_alg;
+	u8				refcnt;
+	/* protection lock for updating ref */
+	spinlock_t			lock;
+};
+
+struct rfoe_rx_ind_vlanx_fwd {
+	u64 fwd			: 64;
 };
 
 #endif
