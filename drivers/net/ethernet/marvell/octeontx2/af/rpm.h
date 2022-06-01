@@ -12,11 +12,13 @@
 
 /* PCI device IDs */
 #define PCI_DEVID_CN10K_RPM		0xA060
+#define PCI_SUBSYS_DEVID_CNF10KB_RPM	0xBC00
 
 /* Registers */
 #define RPMX_CMRX_CFG			0x00
 #define RPMX_RX_TS_PREPEND              BIT_ULL(22)
 #define RPMX_TX_PTP_1S_SUPPORT          BIT_ULL(17)
+#define RPMX_CMRX_RX_ID_MAP		0x80
 #define RPMX_CMRX_SW_INT                0x180
 #define RPMX_CMRX_SW_INT_W1S            0x188
 #define RPMX_CMRX_SW_INT_ENA_W1S        0x198
@@ -50,6 +52,7 @@
 #define RPMX_MTI_MAC100X_CL1213_QUANTA_THRESH		0x8138
 #define RPMX_MTI_MAC100X_CL1415_QUANTA_THRESH		0x8140
 #define RPM_DEFAULT_PAUSE_TIME			0xFFFF
+#define RPMX_CMRX_RX_LOGL_XON		0x4100
 #define RPMX_CMR_RX_OVR_BP		0x4120
 #define RPMX_CMR_RX_OVR_BP_EN(x)	BIT_ULL((x) + 8)
 #define RPMX_CMR_RX_OVR_BP_BP(x)	BIT_ULL((x) + 4)
@@ -96,4 +99,5 @@ int rpm_lmac_pfc_config(void *rpmd, int lmac_id, u8 tx_pause, u8 rx_pause,
 			u16 pfc_en);
 int rpm_lmac_get_pfc_frm_cfg(void *rpmd, int lmac_id, u8 *tx_pause,
 			     u8 *rx_pause);
+int rpm_lmac_reset(void *rpmd, int lmac_id);
 #endif /* RPM_H */

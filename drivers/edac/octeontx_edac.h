@@ -1,13 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Supports OcteonTX2 Generic Hardware Error Source[s] (GHES).
- * GHES ACPI HEST & DT
+/* SPDX-License-Identifier: GPL-2.0
  *
- * Copyright (C) 2021 Marvell.
+ * Copyright (C) 2022 Marvell.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
-#ifndef __OTX2_SDEI_GHES_H__
-#define __OTX2_SDEI_GHES_H__
+#ifndef __OCTEONTX_EDAC_H__
+#define __OCTEONTX_EDAC_H__
 
 #define OCTEONTX_SDEI_RAS_MDC_EVENT		0x40000000
 #define OCTEONTX_SDEI_RAS_MCC_EVENT		0x40000001
@@ -18,6 +19,8 @@
 
 #define SDEI_GHES_EVENT_NAME_MAX_CHARS 16
 
+#define OTX2_GHES_ERR_REC_FRU_TEXT_LEN 32
+
 struct mrvl_core_error_raport {
 	struct acpi_hest_generic_status estatus;
 	struct acpi_hest_generic_data   gdata;
@@ -26,6 +29,14 @@ struct mrvl_core_error_raport {
 //	struct cper_arm_ctx_info        ctx;
 //	uint64_t                        reg[0];
 };
+
+struct mrvl_mem_error_raport {
+	struct acpi_hest_generic_status estatus;
+	struct acpi_hest_generic_data   gdata;
+	struct cper_sec_mem_err_old     cper;
+	char fru_text[OTX2_GHES_ERR_REC_FRU_TEXT_LEN];
+};
+
 
 /*
  * Describes an error source per ACPI 18.3.2.6 (Generic Hardware Error Source).
@@ -57,6 +68,8 @@ struct mrvl_ghes_source {
 	size_t                          ring_sz;
 	size_t                          esb_sz;
 	u32                             id;
+	struct device                   dev;
+	struct mem_ctl_info             *mci;
 };
 
 /**
@@ -74,8 +87,6 @@ struct mrvl_sdei_ghes_drv {
 };
 
 #define OTX2_GHES_ERR_RING_SIG ((int)'M' << 24 | 'R' << 16 | 'V' << 8 | 'L')
-
-#define OTX2_GHES_ERR_REC_FRU_TEXT_LEN 32
 
 struct processor_error {
 	struct cper_sec_proc_arm desc;
@@ -95,8 +106,8 @@ struct otx2_ghes_err_record {
 
 /* This is shared with Linux sdei-ghes driver */
 struct otx2_ghes_err_ring {
-	uint32_t volatile head;
-	uint32_t volatile tail;
+	uint32_t head;
+	uint32_t tail;
 	uint32_t size;       /* ring size */
 	uint32_t sig;        /* set to OTX2_GHES_ERR_RING_SIG if initialized */
 	uint32_t reg;
@@ -104,4 +115,10 @@ struct otx2_ghes_err_ring {
 	struct otx2_ghes_err_record records[1] __aligned(8);
 };
 
-#endif // __OTX2_SDEI_GHES_H__
+struct octeontx_edac_pvt {
+	unsigned long inject;
+	unsigned long error_type;
+	unsigned long address;
+};
+
+#endif // __OCTEONTX_EDAC_H__

@@ -7,6 +7,15 @@
 #include "cnf10k_rfoe.h"
 #include "cnf10k_bphy_hw.h"
 
+#define PTP_PORT               0x13F
+/* Original timestamp offset starts at 34 byte in PTP Sync packet and its
+ * divided as 6 byte seconds field and 4 byte nano seconds field.
+ * Silicon supports only 4 byte seconds field so adjust seconds field
+ * offset with 2
+ */
+#define PTP_SYNC_SEC_OFFSET    36
+#define PTP_SYNC_NSEC_OFFSET   40
+
 /* global driver ctx */
 struct cnf10k_rfoe_drv_ctx cnf10k_rfoe_drv_ctx[CNF10K_RFOE_MAX_INTF];
 
@@ -69,15 +78,21 @@ void cnf10k_bphy_rfoe_cleanup(void)
 		drv_ctx = &cnf10k_rfoe_drv_ctx[i];
 		if (drv_ctx->valid) {
 			netdev = drv_ctx->netdev;
+			netif_stop_queue(netdev);
 			priv = netdev_priv(netdev);
+			--(priv->ptp_cfg->refcnt);
+			if (!priv->ptp_cfg->refcnt) {
+				del_timer_sync(&priv->ptp_cfg->ptp_timer);
+				kfree(priv->ptp_cfg);
+			}
 			cnf10k_rfoe_ptp_destroy(priv);
-			unregister_netdev(netdev);
 			for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
 				if (!(priv->pkt_type_mask & (1U << idx)))
 					continue;
 				ft_cfg = &priv->rx_ft_cfg[idx];
 				netif_napi_del(&ft_cfg->napi);
 			}
+			unregister_netdev(netdev);
 			--(priv->rfoe_common->refcnt);
 			if (priv->rfoe_common->refcnt == 0)
 				kfree(priv->rfoe_common);
@@ -87,17 +102,154 @@ void cnf10k_bphy_rfoe_cleanup(void)
 	}
 }
 
+void cnf10k_rfoe_calc_ptp_ts(struct cnf10k_rfoe_ndev_priv *priv, u64 *ts)
+{
+	u64 ptp_diff_nsec, ptp_diff_psec;
+	struct ptp_bcn_off_cfg *ptp_cfg;
+	struct ptp_clk_cfg *clk_cfg;
+	struct ptp_bcn_ref *ref;
+	unsigned long flags;
+	u64 timestamp = *ts;
+
+	ptp_cfg = priv->ptp_cfg;
+	if (!ptp_cfg->use_ptp_alg)
+		return;
+	clk_cfg = &ptp_cfg->clk_cfg;
+
+	spin_lock_irqsave(&ptp_cfg->lock, flags);
+
+	if (likely(timestamp > ptp_cfg->new_ref.ptp0_ns))
+		ref = &ptp_cfg->new_ref;
+	else
+		ref = &ptp_cfg->old_ref;
+
+	/* calculate ptp timestamp diff in pico sec */
+	ptp_diff_psec = ((timestamp - ref->ptp0_ns) * PICO_SEC_PER_NSEC *
+			 clk_cfg->clk_freq_div) / clk_cfg->clk_freq_ghz;
+	ptp_diff_nsec = (ptp_diff_psec + ref->bcn0_n2_ps + 500) /
+			PICO_SEC_PER_NSEC;
+	timestamp = ref->bcn0_n1_ns - priv->sec_bcn_offset + ptp_diff_nsec;
+
+	spin_unlock_irqrestore(&ptp_cfg->lock, flags);
+
+	*ts = timestamp;
+}
+
+static void cnf10k_rfoe_ptp_offset_timer(struct timer_list *t)
+{
+	struct ptp_bcn_off_cfg *ptp_cfg = from_timer(ptp_cfg, t, ptp_timer);
+	u64 mio_ptp_ts, ptp_ts_diff, ptp_diff_nsec, ptp_diff_psec;
+	struct ptp_clk_cfg *clk_cfg = &ptp_cfg->clk_cfg;
+	unsigned long expires, flags;
+
+	spin_lock_irqsave(&ptp_cfg->lock, flags);
+
+	memcpy(&ptp_cfg->old_ref, &ptp_cfg->new_ref,
+	       sizeof(struct ptp_bcn_ref));
+
+	mio_ptp_ts = readq(ptp_reg_base + MIO_PTP_CLOCK_HI);
+	ptp_ts_diff = mio_ptp_ts - ptp_cfg->new_ref.ptp0_ns;
+	ptp_diff_psec = (ptp_ts_diff * PICO_SEC_PER_NSEC *
+			 clk_cfg->clk_freq_div) / clk_cfg->clk_freq_ghz;
+	ptp_diff_nsec = ptp_diff_psec / PICO_SEC_PER_NSEC;
+	ptp_cfg->new_ref.ptp0_ns += ptp_ts_diff;
+	ptp_cfg->new_ref.bcn0_n1_ns += ptp_diff_nsec;
+	ptp_cfg->new_ref.bcn0_n2_ps += ptp_diff_psec -
+				       (ptp_diff_nsec * PICO_SEC_PER_NSEC);
+
+	spin_unlock_irqrestore(&ptp_cfg->lock, flags);
+
+	expires = jiffies + PTP_OFF_RESAMPLE_THRESH * HZ;
+	mod_timer(&ptp_cfg->ptp_timer, expires);
+}
+
+static bool cnf10k_validate_network_transport(struct sk_buff *skb)
+{
+	if ((ip_hdr(skb)->protocol == IPPROTO_UDP) ||
+	    (ipv6_hdr(skb)->nexthdr == IPPROTO_UDP)) {
+		struct udphdr *udph = udp_hdr(skb);
+
+		if (udph->source == htons(PTP_PORT) &&
+		    udph->dest == htons(PTP_PORT))
+			return true;
+	}
+
+	return false;
+}
+
+static bool cnf10k_ptp_is_sync(struct sk_buff *skb, int *offset, int *udp_csum)
+{
+	struct ethhdr   *eth = (struct ethhdr *)(skb->data);
+	u8 *data = skb->data, *msgtype;
+	u16 proto = eth->h_proto;
+	int network_depth = 0;
+
+	if (eth_type_vlan(eth->h_proto))
+		proto = __vlan_get_protocol(skb, eth->h_proto, &network_depth);
+
+	switch (htons(proto)) {
+	case ETH_P_1588:
+		if (network_depth)
+			*offset = network_depth;
+		else
+			*offset = ETH_HLEN;
+		break;
+	case ETH_P_IP:
+	case ETH_P_IPV6:
+		if (!cnf10k_validate_network_transport(skb))
+			return false;
+
+		*udp_csum = 1;
+		*offset = skb_transport_offset(skb) + sizeof(struct udphdr);
+	}
+
+	msgtype = data + *offset;
+
+	/* Check PTP messageId is SYNC or not */
+	return (*msgtype & 0xf) == 0;
+}
+
+static void cnf10k_rfoe_prepare_onestep_ptp_header(struct cnf10k_rfoe_ndev_priv *priv,
+						   struct cnf10k_tx_action_s *tx_mem,
+						   struct sk_buff *skb,
+						   int ptp_offset, int udp_csum)
+{
+	u64 sec, nsec, sec1;
+
+	sec = ntohl(readq(priv->ptp_reg_base + MIO_PTP_CLOCK_SEC) & 0xFFFFFFFFUL);
+	nsec = ntohl(readq(priv->ptp_reg_base + MIO_PTP_CLOCK_HI));
+	sec1 = ntohl(readq(priv->ptp_reg_base + MIO_PTP_CLOCK_SEC) & 0xFFFFFFFFUL);
+	/* check nsec rollover */
+	if (sec1 > sec) {
+		nsec = ntohl(readq(priv->ptp_reg_base + MIO_PTP_CLOCK_HI));
+		sec = sec1;
+	}
+
+	memcpy((u8 *)skb->data + ptp_offset + PTP_SYNC_SEC_OFFSET,
+	       &sec, 4);
+	memcpy((u8 *)skb->data + ptp_offset + PTP_SYNC_NSEC_OFFSET,
+	       &nsec, 4);
+	/* Point to correction field in PTP packet */
+	ptp_offset += 8;
+	tx_mem->start_offset = ptp_offset;
+	tx_mem->udp_csum_crt = udp_csum;
+	tx_mem->base_ns  = nsec;
+	tx_mem->step_type = 1;
+}
+
 /* submit pending ptp tx requests */
 static void cnf10k_rfoe_ptp_submit_work(struct work_struct *work)
 {
 	struct cnf10k_rfoe_ndev_priv *priv = container_of(work,
 						struct cnf10k_rfoe_ndev_priv,
 						ptp_queue_work);
-	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
-	struct mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
-	struct mhab_job_desc_cfg *jd_cfg_ptr;
+	struct cnf10k_mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
+	struct cnf10k_mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
+	struct cnf10k_mhab_job_desc_cfg *jd_cfg_ptr;
+	struct cnf10k_psm_cmd_addjob_s *psm_cmd_lo;
 	struct rfoe_tx_ptp_tstmp_s *tx_tstmp;
-	struct psm_cmd_addjob_s *psm_cmd_lo;
+	struct cnf10k_tx_action_s tx_mem;
+	int ptp_offset = 0, udp_csum = 0;
 	struct tx_job_queue_cfg *job_cfg;
 	struct tx_job_entry *job_entry;
 	struct ptp_tstamp_skb *ts_skb;
@@ -108,6 +260,7 @@ static void cnf10k_rfoe_ptp_submit_work(struct work_struct *work)
 	unsigned long flags;
 	u64 regval;
 
+	memset(&tx_mem, 0, sizeof(tx_mem));
 	job_cfg = &priv->tx_ptp_job_cfg;
 
 	spin_lock_irqsave(&job_cfg->lock, flags);
@@ -168,24 +321,35 @@ static void cnf10k_rfoe_ptp_submit_work(struct work_struct *work)
 		  job_entry->job_cmd_lo, job_entry->job_cmd_hi,
 		  job_entry->jd_iova_addr);
 
+	if (priv->ptp_onestep_sync &&
+	    cnf10k_ptp_is_sync(skb, &ptp_offset, &udp_csum))
+		cnf10k_rfoe_prepare_onestep_ptp_header(priv, &tx_mem, skb,
+						       ptp_offset, udp_csum);
+
 	priv->ptp_tx_skb = skb;
-	psm_cmd_lo = (struct psm_cmd_addjob_s *)&job_entry->job_cmd_lo;
+	psm_cmd_lo = (struct cnf10k_psm_cmd_addjob_s *)&job_entry->job_cmd_lo;
 	priv->ptp_job_tag = psm_cmd_lo->jobtag;
 
 	/* update length and block size in jd dma cfg word */
 	jd_cfg_ptr_iova = *(u64 *)((u8 *)job_entry->jd_ptr + 8);
 	jd_cfg_ptr = otx2_iova_to_virt(priv->iommu_domain, jd_cfg_ptr_iova);
 	jd_cfg_ptr->cfg3.pkt_len = skb->len;
-	jd_dma_cfg_word_0 = (struct mhbw_jd_dma_cfg_word_0_s *)
+	jd_dma_cfg_word_0 = (struct cnf10k_mhbw_jd_dma_cfg_word_0_s *)
 				job_entry->rd_dma_ptr;
 	jd_dma_cfg_word_0->block_size = (((skb->len + 15) >> 4) * 4);
 
 	/* copy packet data to rd_dma_ptr start addr */
-	jd_dma_cfg_word_1 = (struct mhbw_jd_dma_cfg_word_1_s *)
+	jd_dma_cfg_word_1 = (struct cnf10k_mhbw_jd_dma_cfg_word_1_s *)
 				((u8 *)job_entry->rd_dma_ptr + 8);
 	memcpy(otx2_iova_to_virt(priv->iommu_domain,
 				 jd_dma_cfg_word_1->start_addr),
-	       skb->data, skb->len);
+				 &tx_mem, sizeof(tx_mem));
+	memcpy(otx2_iova_to_virt(priv->iommu_domain,
+				 jd_dma_cfg_word_1->start_addr)
+				 + sizeof(tx_mem), skb->data,
+				 skb->len);
+	jd_cfg_ptr->cfg3.pkt_len = skb->len + sizeof(tx_mem);
+	jd_dma_cfg_word_0->block_size = (((skb->len + 15 + sizeof(tx_mem)) >> 4) * 4);
 
 	/* make sure that all memory writes are completed */
 	dma_wmb();
@@ -223,6 +387,9 @@ static void cnf10k_rfoe_ptp_tx_work(struct work_struct *work)
 		goto submit_next_req;
 	}
 
+	if (!(skb_shinfo(priv->ptp_tx_skb)->tx_flags & SKBTX_IN_PROGRESS))
+		goto submit_next_req;
+
 	/* make sure that all memory writes by rfoe are completed */
 	dma_rmb();
 
@@ -250,6 +417,7 @@ static void cnf10k_rfoe_ptp_tx_work(struct work_struct *work)
 
 	/* update timestamp value in skb */
 	timestamp = tx_tstmp->ptp_timestamp;
+	cnf10k_rfoe_calc_ptp_ts(priv, &timestamp);
 
 	memset(&ts, 0, sizeof(ts));
 	ts.hwtstamp = ns_to_ktime(timestamp);
@@ -259,7 +427,8 @@ submit_next_req:
 	priv->ptp_ring_cfg.ptp_ring_idx++;
 	if (priv->ptp_ring_cfg.ptp_ring_idx >= priv->ptp_ring_cfg.ptp_ring_size)
 		priv->ptp_ring_cfg.ptp_ring_idx = 0;
-	if (priv->ptp_tx_skb)
+	if (priv->ptp_tx_skb &&
+	    (skb_shinfo(priv->ptp_tx_skb)->tx_flags & SKBTX_IN_PROGRESS))
 		dev_kfree_skb_any(priv->ptp_tx_skb);
 	priv->ptp_tx_skb = NULL;
 	clear_bit_unlock(PTP_TX_IN_PROGRESS, &priv->state);
@@ -311,7 +480,7 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 				       int mbt_buf_idx)
 {
 	struct otx2_bphy_cdev_priv *cdev_priv = priv->cdev_priv;
-	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
+	struct cnf10k_mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
 	u64 tstamp = 0, mbt_state, jdt_iova_addr;
 	struct rfoe_psw_w2_ecpri_s *ecpri_psw_w2;
 	struct rfoe_psw_w2_roe_s *rfoe_psw_w2;
@@ -328,9 +497,9 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 	/* read mbt state */
 	spin_lock(&cdev_priv->mbt_lock);
 	writeq(mbt_buf_idx, (priv->rfoe_reg_base +
-			 RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
+			 CNF10K_RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
 	mbt_state = readq(priv->rfoe_reg_base +
-			  RFOEX_RX_IND_MBT_SEG_STATE(priv->rfoe_num));
+			  CNF10K_RFOEX_RX_IND_MBT_SEG_STATE(priv->rfoe_num));
 	spin_unlock(&cdev_priv->mbt_lock);
 
 	if ((mbt_state >> 16 & 0xf) != 0) {
@@ -367,7 +536,7 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 		jdt_iova_addr = (u64)psw->jd_ptr;
 		rfoe_psw_w2 = (struct rfoe_psw_w2_roe_s *)&psw->proto_sts_word;
 		lmac_id = rfoe_psw_w2->lmac_id;
-		tstamp = psw->ptp_timestamp;
+		tstamp = be64_to_cpu(*(__be64 *)&psw->ptp_timestamp);
 	} else {
 		/* check that the psw type is correct: */
 		if (unlikely(psw->pkt_type != ECPRI)) {
@@ -379,7 +548,7 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 		ecpri_psw_w2 = (struct rfoe_psw_w2_ecpri_s *)
 					&psw->proto_sts_word;
 		lmac_id = ecpri_psw_w2->lmac_id;
-		tstamp = psw->ptp_timestamp;
+		tstamp = be64_to_cpu(*(__be64 *)&psw->ptp_timestamp);
 	}
 
 	netif_dbg(priv, rx_status, priv->netdev,
@@ -388,7 +557,7 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 
 	/* read jd ptr from psw */
 	jdt_ptr = otx2_iova_to_virt(priv->iommu_domain, jdt_iova_addr);
-	jd_dma_cfg_word_0 = (struct mhbw_jd_dma_cfg_word_0_s *)
+	jd_dma_cfg_word_0 = (struct cnf10k_mhbw_jd_dma_cfg_word_0_s *)
 			((u8 *)jdt_ptr + ft_cfg->jd_rd_offset);
 	len = (jd_dma_cfg_word_0->block_size) << 2;
 	netif_dbg(priv, rx_status, priv->netdev, "jd rd_dma len = %d\n", len);
@@ -454,8 +623,10 @@ static void cnf10k_rfoe_process_rx_pkt(struct cnf10k_rfoe_ndev_priv *priv,
 		skb_trim(skb, ptp_message_len);
 	}
 
-	if (priv2->rx_hw_tstamp_en)
+	if (priv2->rx_hw_tstamp_en) {
+		cnf10k_rfoe_calc_ptp_ts(priv, &tstamp);
 		skb_hwtstamps(skb)->hwtstamp = ns_to_ktime(tstamp);
+	}
 
 	netif_receive_skb(skb);
 
@@ -490,9 +661,9 @@ static int cnf10k_rfoe_process_rx_flow(struct cnf10k_rfoe_ndev_priv *priv,
 	/* read mbt nxt_buf */
 	writeq(ft_cfg->mbt_idx,
 	       priv->rfoe_reg_base +
-	       RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num));
+	       CNF10K_RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num));
 	mbt_cfg = readq(priv->rfoe_reg_base +
-			RFOEX_RX_IND_MBT_CFG(priv->rfoe_num));
+			CNF10K_RFOEX_RX_IND_MBT_CFG(priv->rfoe_num));
 	spin_unlock(&cdev_priv->mbt_lock);
 
 	nxt_buf = (mbt_cfg >> 32) & 0xffff;
@@ -661,8 +832,13 @@ static int cnf10k_rfoe_config_hwtstamp(struct net_device *netdev,
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
+		if (priv->ptp_onestep_sync)
+			priv->ptp_onestep_sync = 0;
 		priv->tx_hw_tstamp_en = 0;
 		break;
+	case HWTSTAMP_TX_ONESTEP_SYNC:
+		priv->ptp_onestep_sync = 1;
+		/* fall through */
 	case HWTSTAMP_TX_ON:
 		priv->tx_hw_tstamp_en = 1;
 		break;
@@ -712,16 +888,19 @@ static int cnf10k_rfoe_ioctl(struct net_device *netdev, struct ifreq *req,
 	}
 }
 
+
 /* netdev xmit */
 static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 					      struct net_device *netdev)
 {
+	struct cnf10k_mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
+	struct cnf10k_mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
 	struct cnf10k_rfoe_ndev_priv *priv = netdev_priv(netdev);
-	struct mhbw_jd_dma_cfg_word_0_s *jd_dma_cfg_word_0;
-	struct mhbw_jd_dma_cfg_word_1_s *jd_dma_cfg_word_1;
-	struct mhab_job_desc_cfg *jd_cfg_ptr;
+	struct cnf10k_mhab_job_desc_cfg *jd_cfg_ptr;
+	struct cnf10k_psm_cmd_addjob_s *psm_cmd_lo;
 	struct rfoe_tx_ptp_tstmp_s *tx_tstmp;
-	struct psm_cmd_addjob_s *psm_cmd_lo;
+	struct cnf10k_tx_action_s tx_mem;
+	int ptp_offset = 0, udp_csum = 0;
 	struct tx_job_queue_cfg *job_cfg;
 	struct tx_job_entry *job_entry;
 	struct ptp_tstamp_skb *ts_skb;
@@ -731,6 +910,7 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 	struct ethhdr *eth;
 	int pkt_type = 0;
 
+	memset(&tx_mem, 0, sizeof(tx_mem));
 	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) {
 		if (!priv->tx_hw_tstamp_en) {
 			netif_dbg(priv, tx_queued, priv->netdev,
@@ -844,13 +1024,23 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 		  job_entry->jd_iova_addr);
 
 	/* hw timestamp */
+
 	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) &&
 	    priv->tx_hw_tstamp_en) {
+		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
+		if (priv->ptp_onestep_sync &&
+		    cnf10k_ptp_is_sync(skb, &ptp_offset, &udp_csum)) {
+			cnf10k_rfoe_prepare_onestep_ptp_header(priv,
+							       &tx_mem, skb,
+							       ptp_offset,
+							       udp_csum);
+			skb_shinfo(skb)->tx_flags &= ~SKBTX_IN_PROGRESS;
+		}
+
 		if (list_empty(&priv->ptp_skb_list.list) &&
 		    !test_and_set_bit_lock(PTP_TX_IN_PROGRESS, &priv->state)) {
-			skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 			priv->ptp_tx_skb = skb;
-			psm_cmd_lo = (struct psm_cmd_addjob_s *)
+			psm_cmd_lo = (struct cnf10k_psm_cmd_addjob_s *)
 						&job_entry->job_cmd_lo;
 			priv->ptp_job_tag = psm_cmd_lo->jobtag;
 
@@ -878,7 +1068,6 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 			ts_skb->skb = skb;
 			list_add_tail(&ts_skb->list, &priv->ptp_skb_list.list);
 			priv->ptp_skb_list.count++;
-			skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 			priv->stats.ptp_tx_packets++;
 			priv->stats.tx_bytes += skb->len;
 			/* sw timestamp */
@@ -901,7 +1090,7 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 	jd_cfg_ptr_iova = *(u64 *)((u8 *)job_entry->jd_ptr + 8);
 	jd_cfg_ptr = otx2_iova_to_virt(priv->iommu_domain, jd_cfg_ptr_iova);
 	jd_cfg_ptr->cfg3.pkt_len = skb->len;
-	jd_dma_cfg_word_0 = (struct mhbw_jd_dma_cfg_word_0_s *)
+	jd_dma_cfg_word_0 = (struct cnf10k_mhbw_jd_dma_cfg_word_0_s *)
 						job_entry->rd_dma_ptr;
 	jd_dma_cfg_word_0->block_size = (((skb->len + 15) >> 4) * 4);
 
@@ -915,11 +1104,23 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 	}
 
 	/* copy packet data to rd_dma_ptr start addr */
-	jd_dma_cfg_word_1 = (struct mhbw_jd_dma_cfg_word_1_s *)
+	jd_dma_cfg_word_1 = (struct cnf10k_mhbw_jd_dma_cfg_word_1_s *)
 					((u8 *)job_entry->rd_dma_ptr + 8);
-	memcpy(otx2_iova_to_virt(priv->iommu_domain,
-				 jd_dma_cfg_word_1->start_addr),
-	       skb->data, skb->len);
+	if (pkt_type == PACKET_TYPE_PTP) {
+		memcpy(otx2_iova_to_virt(priv->iommu_domain,
+					 jd_dma_cfg_word_1->start_addr),
+					 &tx_mem, sizeof(tx_mem));
+		memcpy(otx2_iova_to_virt(priv->iommu_domain,
+					 jd_dma_cfg_word_1->start_addr)
+					 + sizeof(tx_mem), skb->data,
+					 skb->len);
+		jd_cfg_ptr->cfg3.pkt_len = skb->len + sizeof(tx_mem);
+		jd_dma_cfg_word_0->block_size = (((skb->len + 15 + sizeof(tx_mem)) >> 4) * 4);
+	} else {
+		memcpy(otx2_iova_to_virt(priv->iommu_domain,
+					 jd_dma_cfg_word_1->start_addr),
+					 skb->data, skb->len);
+	}
 
 	/* make sure that all memory writes are completed */
 	dma_wmb();
@@ -954,6 +1155,13 @@ exit:
 	spin_unlock_irqrestore(&job_cfg->lock, flags);
 
 	return NETDEV_TX_OK;
+}
+
+static int cnf10k_change_mtu(struct net_device *netdev, int new_mtu)
+{
+	netdev->mtu = new_mtu;
+
+	return 0;
 }
 
 /* netdev open */
@@ -1026,7 +1234,7 @@ static int cnf10k_rfoe_init(struct net_device *netdev)
 
 	/* Enable VLAN TPID match */
 	writeq(0x18100, (priv->rfoe_reg_base +
-			 RFOEX_RX_VLANX_CFG(priv->rfoe_num, 0)));
+			 CNF10K_RFOEX_RX_VLANX_CFG(priv->rfoe_num, 0)));
 	netdev->features |= NETIF_F_HW_VLAN_CTAG_FILTER;
 
 	return 0;
@@ -1059,9 +1267,9 @@ static int cnf10k_rfoe_vlan_rx_configure(struct net_device *netdev, u16 vid,
 
 	/* read current fwd mask */
 	writeq(index, (priv->rfoe_reg_base +
-		       RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
+		       CNF10K_RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
 	fwd.fwd = readq(priv->rfoe_reg_base +
-			RFOEX_RX_IND_VLANX_FWD(priv->rfoe_num, 0));
+			CNF10K_RFOEX_RX_IND_VLANX_FWD(priv->rfoe_num, 0));
 
 	if (forward)
 		fwd.fwd |= mask;
@@ -1070,9 +1278,9 @@ static int cnf10k_rfoe_vlan_rx_configure(struct net_device *netdev, u16 vid,
 
 	/* write the new fwd mask */
 	writeq(index, (priv->rfoe_reg_base +
-		       RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
+		       CNF10K_RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
 	writeq(fwd.fwd, (priv->rfoe_reg_base +
-			 RFOEX_RX_IND_VLANX_FWD(priv->rfoe_num, 0)));
+			 CNF10K_RFOEX_RX_IND_VLANX_FWD(priv->rfoe_num, 0)));
 
 out:
 	spin_unlock_irqrestore(&cdev_priv->mbt_lock, flags);
@@ -1097,6 +1305,7 @@ static const struct net_device_ops cnf10k_rfoe_netdev_ops = {
 	.ndo_open		= cnf10k_rfoe_eth_open,
 	.ndo_stop		= cnf10k_rfoe_eth_stop,
 	.ndo_start_xmit		= cnf10k_rfoe_eth_start_xmit,
+	.ndo_change_mtu		= cnf10k_change_mtu,
 	.ndo_do_ioctl		= cnf10k_rfoe_ioctl,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -1158,9 +1367,9 @@ static void cnf10k_rfoe_fill_rx_ft_cfg(struct cnf10k_rfoe_ndev_priv *priv,
 		spin_lock(&cdev_priv->mbt_lock);
 		writeq(ft_cfg->jdt_idx,
 		       (priv->rfoe_reg_base +
-			RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
+			CNF10K_RFOEX_RX_INDIRECT_INDEX_OFFSET(priv->rfoe_num)));
 		jdt_cfg0 = readq(priv->rfoe_reg_base +
-				 RFOEX_RX_IND_JDT_CFG0(priv->rfoe_num));
+				 CNF10K_RFOEX_RX_IND_JDT_CFG0(priv->rfoe_num));
 		spin_unlock(&cdev_priv->mbt_lock);
 		ft_cfg->jd_rd_offset = ((jdt_cfg0 >> 27) & 0x3f) * 8;
 		ft_cfg->pkt_offset = (u8)((jdt_cfg0 >> 52) & 0x1f);
@@ -1220,6 +1429,7 @@ int cnf10k_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 	struct tx_ptp_ring_cfg *ptp_ring_cfg;
 	struct tx_job_queue_cfg *tx_cfg;
 	struct cnf10k_rx_ft_cfg *ft_cfg;
+	struct ptp_bcn_off_cfg *ptp_cfg;
 	struct net_device *netdev;
 	u8 pkt_type_mask;
 
@@ -1238,6 +1448,14 @@ int cnf10k_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 		dev_err(cdev->dev, "unsupported chip version\n");
 		return -EINVAL;
 	}
+
+	ptp_cfg = kzalloc(sizeof(*ptp_cfg), GFP_KERNEL);
+	if (!ptp_cfg)
+		return -ENOMEM;
+	timer_setup(&ptp_cfg->ptp_timer, cnf10k_rfoe_ptp_offset_timer, 0);
+	ptp_cfg->clk_cfg.clk_freq_ghz = PTP_CLK_FREQ_GHZ;
+	ptp_cfg->clk_cfg.clk_freq_div = PTP_CLK_FREQ_DIV;
+	spin_lock_init(&ptp_cfg->lock);
 
 	for (i = 0; i < BPHY_MAX_RFOE_MHAB; i++) {
 		priv2 = NULL;
@@ -1299,11 +1517,18 @@ int cnf10k_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 						    NULL);
 			priv->iommu_domain =
 				iommu_get_domain_for_dev(&priv->pdev->dev);
+			if (!priv->iommu_domain) {
+				ret = -ENODEV;
+				goto err_exit;
+			}
+
 			priv->bphy_reg_base = bphy_reg_base;
 			priv->psm_reg_base = psm_reg_base;
 			priv->rfoe_reg_base = rfoe_reg_base;
 			priv->bcn_reg_base = bcn_reg_base;
 			priv->ptp_reg_base = ptp_reg_base;
+			priv->ptp_cfg = ptp_cfg;
+			++(priv->ptp_cfg->refcnt);
 
 			/* Initialise PTP TX work queue */
 			INIT_WORK(&priv->ptp_tx_work, cnf10k_rfoe_ptp_tx_work);
@@ -1371,7 +1596,7 @@ int cnf10k_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			netdev->watchdog_timeo = (15 * HZ);
 			netdev->mtu = 1500U;
 			netdev->min_mtu = ETH_MIN_MTU;
-			netdev->max_mtu = 1500U;
+			netdev->max_mtu = CNF10K_RFOE_MAX_MTU;
 			ret = register_netdev(netdev);
 			if (ret < 0) {
 				dev_err(cdev->dev,
@@ -1422,6 +1647,8 @@ err_exit:
 			drv_ctx->valid = 0;
 		}
 	}
+	del_timer_sync(&ptp_cfg->ptp_timer);
+	kfree(ptp_cfg);
 
 	return ret;
 }

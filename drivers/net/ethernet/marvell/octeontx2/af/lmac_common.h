@@ -72,6 +72,10 @@ struct mac_ops {
 	/* RPM & CGX differs in number of Receive/transmit stats */
 	u8			rx_stats_cnt;
 	u8			tx_stats_cnt;
+	/* Unlike T106 which shares same CSR offset with CGX
+	 * T105N has different csr offset
+	 */
+	u64			rxid_map_offset;
 
 	/* Incase of RPM get number of lmacs from RPMX_CMR_RX_LMACS[LMAC_EXIST]
 	 * number of setbits in lmac_exist tells number of lmacs
@@ -112,6 +116,7 @@ struct mac_ops {
 
 	int                     (*mac_get_pfc_frm_cfg)(void *cgxd, int lmac_id,
 						       u8 *tx_pause, u8 *rx_pause);
+	int			(*mac_reset)(void *cgxd, int lmac_id);
 
 };
 

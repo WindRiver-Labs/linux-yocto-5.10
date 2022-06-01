@@ -2734,6 +2734,7 @@ static void rvu_npa_lf_mapped_sso_lf_teardown(struct rvu *rvu, u16 pcifunc)
 		if ((regval & 0xFFFF) != pcifunc)
 			continue;
 
+		sso_pcifunc = sso_block->fn_map[lf];
 		regval = rvu_read64(rvu, blkaddr, sso_block->lfcfg_reg |
 				    (lf << sso_block->lfshift));
 		rvu_sso_lf_drain_queues(rvu, sso_pcifunc, lf, regval & 0xF);
@@ -2875,6 +2876,7 @@ static void __rvu_flr_handler(struct rvu *rvu, u16 pcifunc)
 	 * Since LF is detached use LF number as -1.
 	 */
 	rvu_npc_free_mcam_entries(rvu, pcifunc, -1);
+	rvu_mac_reset(rvu, pcifunc);
 
 	mutex_unlock(&rvu->flr_lock);
 }

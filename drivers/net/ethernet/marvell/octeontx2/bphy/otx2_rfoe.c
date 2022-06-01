@@ -139,6 +139,7 @@ void otx2_bphy_rfoe_cleanup(void)
 		if (drv_ctx->valid) {
 			otx2_rfoe_debugfs_remove(drv_ctx);
 			netdev = drv_ctx->netdev;
+			netif_stop_queue(netdev);
 			priv = netdev_priv(netdev);
 			--(priv->ptp_cfg->refcnt);
 			if (!priv->ptp_cfg->refcnt) {
@@ -146,13 +147,13 @@ void otx2_bphy_rfoe_cleanup(void)
 				kfree(priv->ptp_cfg);
 			}
 			otx2_rfoe_ptp_destroy(priv);
-			unregister_netdev(netdev);
 			for (idx = 0; idx < PACKET_TYPE_MAX; idx++) {
 				if (!(priv->pkt_type_mask & (1U << idx)))
 					continue;
 				ft_cfg = &priv->rx_ft_cfg[idx];
 				netif_napi_del(&ft_cfg->napi);
 			}
+			unregister_netdev(netdev);
 			--(priv->rfoe_common->refcnt);
 			if (priv->rfoe_common->refcnt == 0)
 				kfree(priv->rfoe_common);
@@ -1097,6 +1098,14 @@ exit:
 	return NETDEV_TX_OK;
 }
 
+static int otx2_rfoe_change_mtu(struct net_device *netdev, int new_mtu)
+{
+	netdev->mtu = new_mtu;
+
+	netdev_info(netdev, "changed MTU to %d\n", new_mtu);
+	return 0;
+}
+
 /* netdev open */
 static int otx2_rfoe_eth_open(struct net_device *netdev)
 {
@@ -1241,6 +1250,7 @@ static const struct net_device_ops otx2_rfoe_netdev_ops = {
 	.ndo_open		= otx2_rfoe_eth_open,
 	.ndo_stop		= otx2_rfoe_eth_stop,
 	.ndo_start_xmit		= otx2_rfoe_eth_start_xmit,
+	.ndo_change_mtu		= otx2_rfoe_change_mtu,
 	.ndo_do_ioctl		= otx2_rfoe_ioctl,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -1493,7 +1503,7 @@ int otx2_rfoe_parse_and_init_intf(struct otx2_bphy_cdev_priv *cdev,
 			netdev->watchdog_timeo = (15 * HZ);
 			netdev->mtu = 1500U;
 			netdev->min_mtu = ETH_MIN_MTU;
-			netdev->max_mtu = 1500U;
+			netdev->max_mtu = OTX2_RFOE_MAX_MTU;
 			ret = register_netdev(netdev);
 			if (ret < 0) {
 				dev_err(cdev->dev,

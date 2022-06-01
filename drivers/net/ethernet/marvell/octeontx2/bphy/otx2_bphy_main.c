@@ -20,6 +20,7 @@
 #include "otx2_cpri.h"
 #include "otx2_bphy_debugfs.h"
 #include "cnf10k_rfoe.h"
+#include "cnf10k_cpri.h"
 
 MODULE_AUTHOR("Marvell International Ltd.");
 MODULE_DESCRIPTION(DRV_STRING);
@@ -48,8 +49,8 @@ void __iomem *cpri_reg_base;
 static irqreturn_t cnf10k_gpint2_intr_handler(int irq, void *dev_id)
 {
 	struct otx2_bphy_cdev_priv *cdev_priv;
+	int rfoe_num, cpri_num;
 	u32 status, intr_mask;
-	int rfoe_num;
 
 	cdev_priv = (struct otx2_bphy_cdev_priv *)dev_id;
 
@@ -64,6 +65,16 @@ static irqreturn_t cnf10k_gpint2_intr_handler(int irq, void *dev_id)
 		intr_mask = CNF10K_RFOE_RX_INTR_MASK(rfoe_num);
 		if (status & intr_mask)
 			cnf10k_rfoe_rx_napi_schedule(rfoe_num, status);
+	}
+
+	/* cpri intr processing */
+	for (cpri_num = 0; cpri_num < OTX2_BPHY_CPRI_MAX_MHAB; cpri_num++) {
+		intr_mask = CNF10K_CPRI_RX_INTR_MASK(cpri_num);
+		if (status & intr_mask) {
+			/* clear UL ETH interrupt */
+			writeq(0x1, cpri_reg_base + CPRIX_ETH_UL_INT(cpri_num));
+			cnf10k_cpri_rx_napi_schedule(cpri_num, status);
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -234,9 +245,23 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 				0xFFFFFFFF;
 		writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(1));
 
-		otx2_bphy_rfoe_cleanup();
-		if (cpri_available())
-			otx2_bphy_cpri_cleanup();
+		if (CHIP_CNF10K(cdev->hw_version)) {
+			if (cdev->gpint2_irq) {
+				/* Disable GPINT Rx and Tx interrupts */
+				writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1C(2));
+				/* clear interrupt status */
+				status = readq(bphy_reg_base + PSM_INT_GP_SUM_W1C(2)) &
+						0xFFFFFFFF;
+				writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(2));
+			}
+			cnf10k_bphy_rfoe_cleanup();
+			if (cpri_available())
+				cnf10k_bphy_cpri_cleanup();
+		} else {
+			otx2_bphy_rfoe_cleanup();
+			if (cpri_available())
+				otx2_bphy_cpri_cleanup();
+		}
 
 		cdev->odp_intf_cfg = 0;
 
@@ -274,7 +299,10 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 	}
 	case OTX2_RFOE_IOCTL_PTP_OFFSET:
 	{
+		u32 bcn_capture_off = 0, bcn_capture_n1_n2_off = 0, bcn_capture_ptp_off = 0;
 		u64 bcn_n1, bcn_n2, bcn_n1_ns, bcn_n2_ps, ptp0_ns, regval;
+		struct cnf10k_rfoe_drv_ctx *cnf10k_drv_ctx = NULL;
+		struct cnf10k_rfoe_ndev_priv *cnf10k_priv;
 		struct otx2_rfoe_drv_ctx *drv_ctx = NULL;
 		struct otx2_rfoe_ndev_priv *priv;
 		struct ptp_bcn_off_cfg *ptp_cfg;
@@ -300,29 +328,52 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 			ret = -EINVAL;
 			goto out;
 		}
-		for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
-			drv_ctx = &rfoe_drv_ctx[idx];
-			if (drv_ctx->valid)
-				break;
+		if (CHIP_CNF10K(cdev->hw_version)) {
+			for (idx = 0; idx < cdev->tot_rfoe_intf; idx++) {
+				cnf10k_drv_ctx = &cnf10k_rfoe_drv_ctx[idx];
+				if (cnf10k_drv_ctx->valid) {
+					netdev = cnf10k_drv_ctx->netdev;
+					cnf10k_priv = netdev_priv(netdev);
+					ptp_cfg = cnf10k_priv->ptp_cfg;
+					bcn_capture_off = CNF10K_BCN_CAPTURE_CFG;
+					bcn_capture_n1_n2_off = CNF10K_BCN_CAPTURE_N1_N2;
+					bcn_capture_ptp_off = CNF10K_BCN_CAPTURE_PTP;
+					break;
+				}
+			}
+			if (idx >= cdev->tot_rfoe_intf) {
+				dev_err(cdev->dev, "drv ctx not found\n");
+				ret = -EINVAL;
+				goto out;
+			}
+		} else {
+			for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
+				drv_ctx = &rfoe_drv_ctx[idx];
+				if (drv_ctx->valid) {
+					netdev = drv_ctx->netdev;
+					priv = netdev_priv(netdev);
+					ptp_cfg = priv->ptp_cfg;
+					bcn_capture_off = BCN_CAPTURE_CFG;
+					bcn_capture_n1_n2_off = BCN_CAPTURE_N1_N2;
+					bcn_capture_ptp_off = BCN_CAPTURE_PTP;
+					break;
+				}
+			}
+			if (idx >= RFOE_MAX_INTF) {
+				dev_err(cdev->dev, "drv ctx not found\n");
+				ret = -EINVAL;
+				goto out;
+			}
 		}
-		if (idx >= RFOE_MAX_INTF) {
-			dev_err(cdev->dev, "drv ctx not found\n");
-			ret = -EINVAL;
-			goto out;
-		}
-		netdev = drv_ctx->netdev;
-		priv = netdev_priv(netdev);
-		ptp_cfg = priv->ptp_cfg;
 		ptp_cfg->clk_cfg.clk_freq_ghz = clk_cfg.clk_freq_ghz;
 		ptp_cfg->clk_cfg.clk_freq_div = clk_cfg.clk_freq_div;
 		/* capture ptp and bcn timestamp using BCN_CAPTURE_CFG */
-		writeq((CAPT_EN | CAPT_TRIG_SW),
-		       priv->bcn_reg_base + BCN_CAPTURE_CFG);
+		writeq(CAPT_EN | CAPT_TRIG_SW, bcn_reg_base + bcn_capture_off);
 		/* poll for capt_en to become 0 */
-		while ((readq(priv->bcn_reg_base + BCN_CAPTURE_CFG) & CAPT_EN))
+		while ((readq(bcn_reg_base + bcn_capture_off) & CAPT_EN))
 			cpu_relax();
-		ptp0_ns = readq(priv->bcn_reg_base + BCN_CAPTURE_PTP);
-		regval = readq(priv->bcn_reg_base + BCN_CAPTURE_N1_N2);
+		ptp0_ns = readq(bcn_reg_base + bcn_capture_ptp_off);
+		regval = readq(bcn_reg_base + bcn_capture_n1_n2_off);
 		bcn_n1 = (regval >> 24) & 0xFFFFFFFFFF;
 		bcn_n2 = regval & 0xFFFFFF;
 		/* BCN N1 10 msec counter to nsec */
@@ -343,6 +394,8 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 	}
 	case OTX2_RFOE_IOCTL_SEC_BCN_OFFSET:
 	{
+		struct cnf10k_rfoe_drv_ctx *cnf10k_drv_ctx = NULL;
+		struct cnf10k_rfoe_ndev_priv *cnf10k_priv;
 		struct otx2_rfoe_drv_ctx *drv_ctx = NULL;
 		struct otx2_rfoe_ndev_priv *priv;
 		struct bcn_sec_offset_cfg cfg;
@@ -360,21 +413,41 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 			ret = -EFAULT;
 			goto out;
 		}
-		for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
-			drv_ctx = &rfoe_drv_ctx[idx];
-			if (drv_ctx->valid &&
-			    drv_ctx->rfoe_num == cfg.rfoe_num &&
-			    drv_ctx->lmac_id == cfg.lmac_id)
-				break;
+		if (CHIP_CNF10K(cdev->hw_version)) {
+			for (idx = 0; idx < cdev->tot_rfoe_intf; idx++) {
+				cnf10k_drv_ctx = &cnf10k_rfoe_drv_ctx[idx];
+				if (cnf10k_drv_ctx->valid &&
+				    cnf10k_drv_ctx->rfoe_num == cfg.rfoe_num &&
+				    cnf10k_drv_ctx->lmac_id == cfg.lmac_id) {
+					netdev = cnf10k_drv_ctx->netdev;
+					cnf10k_priv = netdev_priv(netdev);
+					cnf10k_priv->sec_bcn_offset = cfg.sec_bcn_offset;
+					break;
+				}
+			}
+			if (idx >= cdev->tot_rfoe_intf) {
+				dev_err(cdev->dev, "drv ctx not found\n");
+				ret = -EINVAL;
+				goto out;
+			}
+		} else {
+			for (idx = 0; idx < RFOE_MAX_INTF; idx++) {
+				drv_ctx = &rfoe_drv_ctx[idx];
+				if (drv_ctx->valid &&
+				    drv_ctx->rfoe_num == cfg.rfoe_num &&
+				    drv_ctx->lmac_id == cfg.lmac_id) {
+					netdev = drv_ctx->netdev;
+					priv = netdev_priv(netdev);
+					priv->sec_bcn_offset = cfg.sec_bcn_offset;
+					break;
+				}
+			}
+			if (idx >= RFOE_MAX_INTF) {
+				dev_err(cdev->dev, "drv ctx not found\n");
+				ret = -EINVAL;
+				goto out;
+			}
 		}
-		if (idx >= RFOE_MAX_INTF) {
-			dev_err(cdev->dev, "drv ctx not found\n");
-			ret = -EINVAL;
-			goto out;
-		}
-		netdev = drv_ctx->netdev;
-		priv = netdev_priv(netdev);
-		priv->sec_bcn_offset = cfg.sec_bcn_offset;
 		ret = 0;
 		goto out;
 	}
@@ -479,8 +552,8 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 		struct pci_dev *bphy_pdev;
 		int idx;
 
-		if (cdev->odp_intf_cfg) {
-			dev_info(cdev->dev, "odp interface cfg already done\n");
+		if (cdev->odp_intf_cfg && (cdev->flags & ODP_INTF_CFG_RFOE)) {
+			dev_info(cdev->dev, "odp rfoe interface cfg already done\n");
 			ret = -EBUSY;
 			goto out;
 		}
@@ -528,6 +601,68 @@ static long otx2_bphy_cdev_ioctl(struct file *filp, unsigned int cmd,
 			writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1S(2));
 
 		cdev->odp_intf_cfg = 1;
+		cdev->flags |= ODP_INTF_CFG_RFOE;
+
+		kfree(intf_cfg);
+
+		ret = 0;
+		goto out;
+	}
+	case OTX2_IOCTL_CPRI_INTF_CFG:
+	{
+		struct cnf10k_bphy_cpri_netdev_comm_intf_cfg  *intf_cfg;
+		struct pci_dev *bphy_pdev;
+		int idx;
+
+		if (cdev->odp_intf_cfg && (cdev->flags & ODP_INTF_CFG_CPRI)) {
+			dev_info(cdev->dev, "odp cpri interface cfg already done\n");
+			ret = -EBUSY;
+			goto out;
+		}
+
+		intf_cfg = kzalloc(sizeof(*intf_cfg), GFP_KERNEL);
+		if (!intf_cfg) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		if (copy_from_user(intf_cfg, (void __user *)arg,
+				   sizeof(*intf_cfg))) {
+			dev_err(cdev->dev, "copy from user fault\n");
+			ret = -EFAULT;
+			goto out;
+		}
+
+		if (cpri_available()) {
+			ret = cnf10k_cpri_parse_and_init_intf(cdev, intf_cfg);
+			if (ret < 0) {
+				dev_err(cdev->dev, "odp <-> netdev parse error\n");
+				goto out;
+			}
+		}
+
+		/* The MSIXEN bit is getting cleared when ODP BPHY driver
+		 * resets BPHY. So enabling it back in IOCTL.
+		 */
+		bphy_pdev = pci_get_device(OTX2_BPHY_PCI_VENDOR_ID,
+					   OTX2_BPHY_PCI_DEVICE_ID, NULL);
+		if (!bphy_pdev) {
+			dev_err(cdev->dev, "Couldn't find BPHY PCI device %x\n",
+				OTX2_BPHY_PCI_DEVICE_ID);
+			ret = -ENODEV;
+			goto out;
+		}
+		msix_enable_ctrl(bphy_pdev);
+
+		/* Enable CPRI ETH UL INT */
+		for (idx = 0; idx < CNF10K_BPHY_CPRI_MAX_MHAB; idx++)
+			writeq(0x1, cpri_reg_base + CNF10K_CPRIX_ETH_UL_INT_ENA_W1S(idx));
+
+		/* Enable GPINT Rx and Tx interrupts */
+		writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1S(2));
+
+		cdev->odp_intf_cfg = 1;
+		cdev->flags |= ODP_INTF_CFG_CPRI;
 
 		kfree(intf_cfg);
 
@@ -581,21 +716,28 @@ static int otx2_bphy_cdev_release(struct inode *inode, struct file *filp)
 
 	/* Disable GPINT Rx and Tx interrupts */
 	writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1C(1));
-	if (cdev->gpint2_irq)
-		writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1C(2));
 
 	/* clear interrupt status */
 	status = readq(bphy_reg_base + PSM_INT_GP_SUM_W1C(1)) & 0xFFFFFFFF;
 	writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(1));
-	if (cdev->gpint2_irq) {
-		status = readq(bphy_reg_base + PSM_INT_GP_SUM_W1C(2)) &
-				0xFFFFFFFF;
-		writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(2));
-	}
 
-	otx2_bphy_rfoe_cleanup();
-	if (cpri_available())
-		otx2_bphy_cpri_cleanup();
+	if (CHIP_CNF10K(cdev->hw_version)) {
+		if (cdev->gpint2_irq) {
+			/* Disable GPINT Rx and Tx interrupts */
+			writeq(0xFFFFFFFF, bphy_reg_base + PSM_INT_GP_ENA_W1C(2));
+			/* clear interrupt status */
+			status = readq(bphy_reg_base + PSM_INT_GP_SUM_W1C(2)) &
+					0xFFFFFFFF;
+			writeq(status, bphy_reg_base + PSM_INT_GP_SUM_W1C(2));
+		}
+		cnf10k_bphy_rfoe_cleanup();
+		if (cpri_available())
+			cnf10k_bphy_cpri_cleanup();
+	} else {
+		otx2_bphy_rfoe_cleanup();
+		if (cpri_available())
+			otx2_bphy_cpri_cleanup();
+	}
 
 	cdev->odp_intf_cfg = 0;
 
