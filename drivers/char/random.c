@@ -711,44 +711,11 @@ static void extract_entropy(void *buf, size_t len)
 
 #define credit_init_bits(bits) if (!crng_ready()) _credit_init_bits(bits)
 
-void add_interrupt_randomness(int irq, int irq_flags, __u64 ip)
+static void __cold _credit_init_bits(size_t bits)
 {
-	struct entropy_store	*r;
-	struct fast_pool	*fast_pool = this_cpu_ptr(&irq_randomness);
-	unsigned long		now = jiffies;
-	cycles_t		cycles = random_get_entropy();
-	__u32			c_high, j_high;
-	unsigned long		seed;
-	int			credit = 0;
-
-	if (cycles == 0)
-		cycles = get_reg(fast_pool, NULL);
-	c_high = (sizeof(cycles) > 4) ? cycles >> 32 : 0;
-	j_high = (sizeof(now) > 4) ? now >> 32 : 0;
-	fast_pool->pool[0] ^= cycles ^ j_high ^ irq;
-	fast_pool->pool[1] ^= now ^ c_high;
-	if (!ip)
-		ip = _RET_IP_;
-	fast_pool->pool[2] ^= ip;
-	fast_pool->pool[3] ^= (sizeof(ip) > 4) ? ip >> 32 :
-		get_reg(fast_pool, NULL);
-
-	fast_mix(fast_pool);
-	add_interrupt_bench(cycles);
-
-	if (unlikely(crng_init == 0)) {
-		if ((fast_pool->count >= 64) &&
-		    crng_fast_load((char *) fast_pool->pool,
-				   sizeof(fast_pool->pool)) > 0) {
-			fast_pool->count = 0;
-			fast_pool->last = now;
-		}
-		return;
-	}
-
-	if ((fast_pool->count < 64) &&
-	    !time_after(now, fast_pool->last + HZ))
-		return;
+	static struct execute_work set_ready;
+	unsigned int new, orig, add;
+	unsigned long flags;
 
 	if (!bits)
 		return;
